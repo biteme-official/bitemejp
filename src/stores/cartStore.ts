@@ -32,7 +32,7 @@ interface CartStore {
   setCartId: (cartId: string) => void;
   setCheckoutUrl: (url: string) => void;
   setLoading: (loading: boolean) => void;
-  createCheckout: (lineItems?: { variantId: string; quantity: number }[]) => Promise<string | null>;
+  createCheckout: (lineItems?: { variantId: string; quantity: number }[], email?: string) => Promise<string | null>;
   getTotalItems: () => number;
   getTotalPrice: () => number;
 }
@@ -104,7 +104,7 @@ export const useCartStore = create<CartStore>()(
       setCheckoutUrl: (checkoutUrl) => set({ checkoutUrl }),
       setLoading: (isLoading) => set({ isLoading }),
 
-      createCheckout: async (lineItems) => {
+      createCheckout: async (lineItems, email) => {
         const { items, setLoading, setCheckoutUrl } = get();
         const checkoutItems = lineItems ?? items.map(item => ({
           variantId: item.variantId,
@@ -114,7 +114,7 @@ export const useCartStore = create<CartStore>()(
 
         setLoading(true);
         try {
-          const checkoutUrl = await createStorefrontCheckout(checkoutItems);
+          const checkoutUrl = await createStorefrontCheckout(checkoutItems, email);
           setCheckoutUrl(checkoutUrl);
           return checkoutUrl;
         } catch (error) {

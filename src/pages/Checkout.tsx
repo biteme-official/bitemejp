@@ -129,7 +129,7 @@ export default function Checkout() {
         variantId: item.variantId,
         quantity: item.quantity,
       }));
-      const checkoutUrl = await createCheckout(lineItems);
+      const checkoutUrl = await createCheckout(lineItems, form.email);
       if (checkoutUrl) {
         // Append shipping info as URL params for Shopify pre-fill
         const url = new URL(checkoutUrl);

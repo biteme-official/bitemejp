@@ -645,14 +645,15 @@ export async function fetchCollectionProducts(handle: string, first: number = 20
   };
 }
 
-export async function createStorefrontCheckout(items: { variantId: string; quantity: number }[]): Promise<string> {
-   return createStorefrontCheckoutWithDiscount(items, null);
+export async function createStorefrontCheckout(items: { variantId: string; quantity: number }[], formEmail?: string): Promise<string> {
+   return createStorefrontCheckoutWithDiscount(items, null, formEmail);
  }
 
  // Create checkout with optional discount code for B2B members
  export async function createStorefrontCheckoutWithDiscount(
    items: { variantId: string; quantity: number }[],
-   discountCode: string | null
+   discountCode: string | null,
+   formEmail?: string
  ): Promise<string> {
   const lines = items.map(item => ({
     quantity: item.quantity,
@@ -667,14 +668,18 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
 
    // Attach customer info from auth store for checkout pre-fill
    // Attach buyer identity if logged in
+   const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
    let userEmail: string | undefined;
+   let customerToken: string | undefined;
    try {
      const authData = JSON.parse(localStorage.getItem('line-auth') || '{}');
      const user = authData?.state?.user;
-     userEmail = user?.shopifyEmail || user?.email;
-     if (user?.shopifyCustomerToken) {
+     const storedEmail = user?.shopifyEmail || user?.email;
+     userEmail = formEmail && isValidEmail(formEmail) ? formEmail : (storedEmail && isValidEmail(storedEmail) ? storedEmail : undefined);
+     customerToken = user?.shopifyCustomerToken;
+     if (customerToken) {
        input.buyerIdentity = {
-         customerAccessToken: user.shopifyCustomerToken,
+         customerAccessToken: customerToken,
          email: userEmail,
          countryCode: 'JP',
        };
@@ -697,6 +702,16 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
      } else {
        delete input.buyerIdentity;
      }
+     data = await storefrontApiRequest(CART_CREATE_MUTATION, { input });
+   }
+
+   // If email is still causing issues, retry without buyer identity
+   const emailError = data?.data?.cartCreate?.userErrors?.some(
+     (e: { message: string }) => e.message?.includes('Email') || e.message?.includes('email')
+   );
+   if (emailError) {
+     console.warn('[Checkout] Email invalid, retrying without buyer identity');
+     delete input.buyerIdentity;
      data = await storefrontApiRequest(CART_CREATE_MUTATION, { input });
    }
 
