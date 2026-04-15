@@ -119,6 +119,13 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
         break;
     }
 
+    // Always push completely sold-out products to the bottom
+    result.sort((a, b) => {
+      const aOutOfStock = !a.node.variants.edges.some(v => v.node.availableForSale);
+      const bOutOfStock = !b.node.variants.edges.some(v => v.node.availableForSale);
+      return Number(aOutOfStock) - Number(bOutOfStock);
+    });
+
     return result;
   }, [allProducts, sortOption, filters]);
 
