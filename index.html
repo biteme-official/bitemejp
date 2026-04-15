@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>BITEME JAPAN | 韓国発プレミアムペットブランド</title>
+    <meta name="description" content="BITEME JAPAN - 韓国発のプレミアムペットブランド。おもちゃ、散歩用品、衛生用品など、愛犬のための厳選アイテムをお届けします。" />
+    <meta name="author" content="BITEME JAPAN" />
+    <meta name="theme-color" content="#f85a24" />
+    <link rel="icon" href="/favicon.png" type="image/png" />
+    <link rel="apple-touch-icon" href="/favicon.png" />
+    <link rel="canonical" href="https://biteme.co.jp/" />
+
+    <!-- Open Graph -->
+    <meta property="og:site_name" content="BITEME JAPAN" />
+    <meta property="og:title" content="BITEME JAPAN | 韓国発プレミアムペットブランド" />
+    <meta property="og:description" content="韓国発のプレミアムペットブランド。おもちゃ、散歩用品、衛生用品など、愛犬のための厳選アイテムをお届けします。" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://biteme.co.jp/" />
+    <meta property="og:image" content="https://cdn.shopify.com/s/files/1/0985/6326/0729/files/b6a27304f4c8d7dacc9aa323a45961f8.jpg?v=1774355330" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="504" />
+    <meta property="og:locale" content="ja_JP" />
+
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="BITEME JAPAN | 韓国発プレミアムペットブランド" />
+    <meta name="twitter:description" content="韓国発のプレミアムペットブランド。おもちゃ、散歩用品、衛生用品など、愛犬のための厳選アイテムをお届けします。" />
+    <meta name="twitter:image" content="https://cdn.shopify.com/s/files/1/0985/6326/0729/files/b6a27304f4c8d7dacc9aa323a45961f8.jpg?v=1774355330" />
+
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-WLTZH90W2L"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      // Shopify 결제 후 복귀 시 referrer가 Shopify 도메인이면
+      // GA4가 새 세션/새 사용자 소스로 덮어쓰지 않도록 ignore_referrer 설정
+      var shopifyReferrer = document.referrer && (
+        document.referrer.indexOf('myshopify.com') !== -1 ||
+        document.referrer.indexOf('shopify.com') !== -1 ||
+        document.referrer.indexOf('checkout.shopify.com') !== -1
+      );
+
+      var ga4Config = {
+        'send_page_view': true,
+        'page_location': window.location.href,
+        'page_title': document.title,
+        'linker': {
+          'domains': ['biteme.co.jp', 'biteme-jp.myshopify.com'],
+          'accept_incoming': true
+        }
+      };
+
+      // 결제 복귀 시 소스 보존: Shopify referrer 무시
+      if (shopifyReferrer) {
+        ga4Config.ignore_referrer = true;
+      }
+
+      gtag('config', 'G-WLTZH90W2L', ga4Config);
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

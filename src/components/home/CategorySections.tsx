@@ -1,0 +1,160 @@
+import { useEffect, useState } from "react";
+import { ChevronRight } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import {
+  ShopifyCollection,
+  ShopifyProduct,
+  fetchCollections,
+  fetchCollectionProducts,
+  formatPrice,
+} from "@/lib/shopify";
+import { Skeleton } from "@/components/ui/skeleton";
+
+interface CategoryData {
+  collection: ShopifyCollection;
+  products: ShopifyProduct[];
+}
+
+const LoadingSkeleton = () => (
+  <section className="pb-4">
+    <div className="flex items-center justify-between px-4 mb-3">
+      <Skeleton className="h-5 w-28" />
+      <Skeleton className="h-4 w-14" />
+    </div>
+    <div className="flex gap-3 px-4 overflow-x-auto pb-2">
+      {[0, 1, 2, 3].map((i) => (
+        <div
+          key={i}
+          className="flex-shrink-0 w-36 md:w-56 bg-card rounded-xl border border-border overflow-hidden"
+        >
+          <Skeleton className="aspect-square w-full" />
+          <div className="p-2.5 space-y-1.5">
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="h-3 w-2/3" />
+            <Skeleton className="h-3 w-12" />
+          </div>
+        </div>
+      ))}
+    </div>
+  </section>
+);
+
+export function CategorySections() {
+  const navigate = useNavigate();
+  const [sections, setSections] = useState<CategoryData[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const collections = await fetchCollections(10);
+        const filtered = collections
+          .filter((c) => c.handle !== "frontpage")
+          .slice(0, 4);
+
+        const results = await Promise.all(
+          filtered.map(async (collection) => {
+            const res = await fetchCollectionProducts(collection.handle, 8);
+            return { collection, products: res.products };
+          })
+        );
+
+        setSections(results.filter((r) => r.products.length >= 4));
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="mt-4 space-y-2">
+        <LoadingSkeleton />
+        <LoadingSkeleton />
+      </div>
+    );
+  }
+
+  if (sections.length === 0) return null;
+
+  return (
+    <div className="mt-4 space-y-2">
+      {sections.map(({ collection, products }) => (
+        <section key={collection.id} className="pb-4 animate-fade-up">
+          <div className="flex items-center justify-between px-4 mb-3">
+            <h2 className="text-base md:text-lg font-bold text-foreground">
+              {collection.title}
+            </h2>
+            <button
+              onClick={() =>
+                navigate(`/?collection=${collection.handle}`)
+              }
+              className="flex items-center gap-0.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              もっと見る
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="flex gap-3 md:gap-4 px-4 overflow-x-auto pb-2 scrollbar-hide">
+            {products.map((product) => {
+              const image = product.node.images.edges[0]?.node;
+              const price = product.node.priceRange.minVariantPrice;
+              const isAvailable = product.node.variants.edges.some(
+                (v) => v.node.availableForSale
+              );
+
+              return (
+                <div
+                  key={product.node.id}
+                  onClick={() =>
+                    navigate(`/product/${product.node.handle}`)
+                  }
+                  className="flex-shrink-0 w-36 md:w-56 bg-card rounded-xl border border-border overflow-hidden shadow-sm hover:shadow-card transition-all cursor-pointer"
+                >
+                  <div className="aspect-square bg-secondary relative overflow-hidden">
+                    {image ? (
+                      <img
+                        src={image.url}
+                        alt={image.altText || product.node.title}
+                        className={`w-full h-full object-cover hover:scale-105 transition-transform duration-300 ${
+                          !isAvailable ? "opacity-50" : ""
+                        }`}
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">
+                        No Image
+                      </div>
+                    )}
+                    {!isAvailable && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="bg-foreground/80 text-background text-[10px] font-bold px-2 py-0.5 rounded">
+                          Sold Out
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-2.5 md:p-3">
+                    <h3 className="text-[11px] md:text-sm font-medium text-foreground line-clamp-2 mb-1.5 min-h-[28px] md:min-h-[40px]">
+                      {product.node.title}
+                    </h3>
+                    <p
+                      className="text-xs md:text-sm font-bold text-primary"
+                      translate="no"
+                    >
+                      {formatPrice(price.amount, price.currencyCode)}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
