@@ -764,7 +764,7 @@ export default function AdminDashboard() {
   const totalRevenue = shopify?.summary.totalRevenue ?? 0;
   const aov = shopify?.summary.averageOrderValue ?? 0;
   const convRate = sessions > 0 ? ((totalOrders / sessions) * 100).toFixed(2) : "—";
-  const isLoading = ga4Loading || shopifyLoading;
+  const isLoading = ga4Loading || shopifyLoading || (!data && !shopify && !isError && !shopifyIsError);
 
   const timeline = useMemo(() => {
     if (!data || !shopify) return [];
