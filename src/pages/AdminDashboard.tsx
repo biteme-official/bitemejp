@@ -51,10 +51,10 @@ function formatDate(raw: string): string {
 
 const FUNNEL_ORDER = ["view_item", "add_to_cart", "begin_checkout", "purchase"] as const;
 const FUNNEL_LABELS: Record<string, string> = {
-  view_item: "商品閲覧",
-  add_to_cart: "カート追加",
-  begin_checkout: "決済開始",
-  purchase: "購入完了",
+  view_item: "view_item",
+  add_to_cart: "add_to_cart",
+  begin_checkout: "begin_checkout",
+  purchase: "purchase",
 };
 
 // ─── API fetch ────────────────────────────────────────────────────────────────
@@ -93,7 +93,7 @@ function FunnelSection({ data }: { data: AnalyticsData["funnel"] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">ECファネル</CardTitle>
+        <CardTitle className="text-sm font-semibold">EC 퍼널</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         {rows.map((row, i) => {
@@ -134,7 +134,7 @@ function RevenueChart({ data, range }: { data: AnalyticsData["revenueOverTime"];
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">売上推移</CardTitle>
+        <CardTitle className="text-sm font-semibold">매출 추이</CardTitle>
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={200}>
@@ -154,7 +154,7 @@ function RevenueChart({ data, range }: { data: AnalyticsData["revenueOverTime"];
             <YAxis yAxisId="txn" orientation="right" tick={{ fontSize: 10 }} width={24} />
             <Tooltip
               formatter={(value: number, name: string) =>
-                name === "purchaseRevenue" ? [formatRevenue(value), "売上"] : [value, "件数"]
+                name === "purchaseRevenue" ? [formatRevenue(value), "매출"] : [value, "건수"]
               }
             />
             <Line yAxisId="rev" type="monotone" dataKey="purchaseRevenue" stroke={BRAND} strokeWidth={2} dot={false} name="purchaseRevenue" />
@@ -171,7 +171,7 @@ function SessionsChart({ data }: { data: AnalyticsData["revenueOverTime"] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">セッション推移</CardTitle>
+        <CardTitle className="text-sm font-semibold">세션 추이</CardTitle>
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={200}>
@@ -179,7 +179,7 @@ function SessionsChart({ data }: { data: AnalyticsData["revenueOverTime"] }) {
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="date" tick={{ fontSize: 10 }} interval={Math.ceil(formatted.length / 10) - 1} />
             <YAxis tick={{ fontSize: 10 }} width={36} />
-            <Tooltip formatter={(v: number) => [v.toLocaleString(), "セッション"]} />
+            <Tooltip formatter={(v: number) => [v.toLocaleString(), "세션"]} />
             <Bar dataKey="sessions" fill={BRAND} opacity={0.8} radius={[2, 2, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
@@ -192,17 +192,17 @@ function TopPagesTable({ data }: { data: AnalyticsData["topPages"] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">上位ページ</CardTitle>
+        <CardTitle className="text-sm font-semibold">상위 페이지</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b">
-                <th className="text-left px-4 py-2 font-medium text-muted-foreground">ページ</th>
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">페이지</th>
                 <th className="text-right px-4 py-2 font-medium text-muted-foreground">PV</th>
-                <th className="text-right px-4 py-2 font-medium text-muted-foreground">ユーザー</th>
-                <th className="text-right px-4 py-2 font-medium text-muted-foreground">滞在時間</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">유저</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">체류 시간</th>
               </tr>
             </thead>
             <tbody>
@@ -227,16 +227,16 @@ function TrafficSourcesTable({ data }: { data: AnalyticsData["trafficSources"] }
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">流入元</CardTitle>
+        <CardTitle className="text-sm font-semibold">유입 경로</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b">
-                <th className="text-left px-4 py-2 font-medium text-muted-foreground">ソース / メディア</th>
-                <th className="text-right px-4 py-2 font-medium text-muted-foreground">セッション</th>
-                <th className="text-right px-4 py-2 font-medium text-muted-foreground">割合</th>
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">소스 / 매체</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">세션</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">비율</th>
               </tr>
             </thead>
             <tbody>
@@ -263,9 +263,9 @@ function TrafficSourcesTable({ data }: { data: AnalyticsData["trafficSources"] }
 
 function DevicesChart({ data }: { data: AnalyticsData["devices"] }) {
   const DEVICE_LABELS: Record<string, string> = {
-    mobile: "モバイル",
-    desktop: "デスクトップ",
-    tablet: "タブレット",
+    mobile: "모바일",
+    desktop: "데스크탑",
+    tablet: "태블릿",
   };
   const formatted = data.map((d) => ({
     name: DEVICE_LABELS[d.deviceCategory as string] ?? d.deviceCategory,
@@ -275,7 +275,7 @@ function DevicesChart({ data }: { data: AnalyticsData["devices"] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">デバイス</CardTitle>
+        <CardTitle className="text-sm font-semibold">디바이스</CardTitle>
       </CardHeader>
       <CardContent className="flex items-center gap-4">
         <ResponsiveContainer width={120} height={120}>
@@ -331,7 +331,7 @@ function PasswordGate({ onAuth }: { onAuth: (secret: string) => void }) {
           <div>
             <input
               type="password"
-              placeholder="管理者シークレットキー"
+              placeholder="관리자 시크릿 키"
               value={value}
               onChange={(e) => { setValue(e.target.value); setError(false); }}
               className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 transition-all ${
@@ -339,14 +339,14 @@ function PasswordGate({ onAuth }: { onAuth: (secret: string) => void }) {
               }`}
               autoFocus
             />
-            {error && <p className="text-xs text-red-500 mt-1">キーを入力してください</p>}
+            {error && <p className="text-xs text-red-500 mt-1">키를 입력해주세요</p>}
           </div>
           <button
             type="submit"
             className="w-full py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90 active:opacity-80"
             style={{ backgroundColor: BRAND }}
           >
-            ログイン
+            로그인
           </button>
         </form>
       </div>
@@ -357,10 +357,10 @@ function PasswordGate({ onAuth }: { onAuth: (secret: string) => void }) {
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 const RANGE_LABELS: Record<Range, string> = {
-  today: "今日",
-  "7d": "7日間",
-  "28d": "28日間",
-  "90d": "90日間",
+  today: "오늘",
+  "7d": "7일",
+  "28d": "28일",
+  "90d": "90일",
 };
 
 export default function AdminDashboard() {
@@ -430,7 +430,7 @@ export default function AdminDashboard() {
               onClick={() => refetch()}
               className="text-xs px-3 py-1.5 rounded-lg border hover:bg-muted transition-colors"
             >
-              更新
+              새로고침
             </button>
             <button
               onClick={() => {
@@ -439,7 +439,7 @@ export default function AdminDashboard() {
               }}
               className="text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
-              ログアウト
+              로그아웃
             </button>
           </div>
         </div>
@@ -448,13 +448,13 @@ export default function AdminDashboard() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
         {isLoading && (
           <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
-            データを読み込み中...
+            데이터를 불러오는 중...
           </div>
         )}
 
         {isError && !isUnauthorized && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {error instanceof Error ? error.message : "エラーが発生しました"}
+            {error instanceof Error ? error.message : "오류가 발생했습니다"}
           </div>
         )}
 
@@ -462,21 +462,21 @@ export default function AdminDashboard() {
           <>
             {/* KPI Cards */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              <KpiCard label="セッション" value={(ov.sessions as number ?? 0).toLocaleString()} />
-              <KpiCard label="ユーザー" value={(ov.activeUsers as number ?? 0).toLocaleString()} />
-              <KpiCard label="新規ユーザー" value={(ov.newUsers as number ?? 0).toLocaleString()} />
+              <KpiCard label="세션" value={(ov.sessions as number ?? 0).toLocaleString()} />
+              <KpiCard label="유저" value={(ov.activeUsers as number ?? 0).toLocaleString()} />
+              <KpiCard label="신규 유저" value={(ov.newUsers as number ?? 0).toLocaleString()} />
               <KpiCard
-                label="直帰率"
+                label="이탈률"
                 value={`${(((ov.bounceRate as number ?? 0)) * 100).toFixed(1)}%`}
               />
               <KpiCard
-                label="平均滞在時間"
+                label="평균 체류 시간"
                 value={formatDuration(ov.averageSessionDuration as number ?? 0)}
               />
               <KpiCard
-                label="購入転換率"
+                label="구매 전환율"
                 value={convRate === "—" ? "—" : `${convRate}%`}
-                sub={`${(ov.transactions as number ?? 0)}件 / ${formatRevenue(ov.purchaseRevenue as number ?? 0)}`}
+                sub={`${(ov.transactions as number ?? 0)}건 / ${formatRevenue(ov.purchaseRevenue as number ?? 0)}`}
               />
             </div>
 
@@ -502,7 +502,7 @@ export default function AdminDashboard() {
             <TrafficSourcesTable data={data.trafficSources} />
 
             <p className="text-center text-xs text-muted-foreground pb-4">
-              GA4 Property: G-WLTZH90W2L &nbsp;·&nbsp; {RANGE_LABELS[range]}のデータ
+              GA4 Property: G-WLTZH90W2L &nbsp;·&nbsp; {RANGE_LABELS[range]} 데이터
             </p>
           </>
         )}
