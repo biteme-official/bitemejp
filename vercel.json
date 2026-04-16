@@ -47,6 +47,8 @@
     { "source": "/api/slack-report", "destination": "/api/slack-report" },
     { "source": "/api/analytics", "destination": "/api/analytics" },
     { "source": "/api/shopify-analytics", "destination": "/api/shopify-analytics" },
+    { "source": "/api/orders-export", "destination": "/api/orders-export" },
+    { "source": "/api/customer-orders", "destination": "/api/customer-orders" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }

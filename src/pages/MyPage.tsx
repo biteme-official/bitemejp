@@ -6,10 +6,10 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   LogOut, User, ShoppingBag, Heart, HelpCircle, ChevronRight,
-  Package, Truck, ExternalLink, MapPin, Calendar, CreditCard,
+  Package, Truck, ExternalLink, MapPin, CreditCard,
 } from 'lucide-react';
 import { LineLoginButton } from '@/components/auth/LineLoginButton';
-import { fetchCustomerData, fetchProductByHandle, ShopifyCustomerProfile, ShopifyOrder, formatPrice } from '@/lib/shopify';
+import { fetchCustomerOrdersViaAdmin, fetchProductByHandle, ShopifyOrder, formatPrice } from '@/lib/shopify';
 import { useFavoritesStore } from '@/stores/favoritesStore';
 
 // --- Sub-components ---
@@ -131,19 +131,19 @@ function OrderCard({ order }: { order: ShopifyOrder }) {
 export default function MyPage() {
   const navigate = useNavigate();
   const { user, isLoggedIn, logout } = useAuthStore();
-  const [customerData, setCustomerData] = useState<ShopifyCustomerProfile | null>(null);
+  const [orders, setOrders] = useState<ShopifyOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'orders' | 'favorites' | null>(null);
   const [favoriteProducts, setFavoriteProducts] = useState<Array<{ handle: string; title: string; image?: string; price: string; currencyCode: string }>>([]);
   const [favoritesLoading, setFavoritesLoading] = useState(false);
   const { getFavorites, removeFavorite } = useFavoritesStore();
 
-  // Fetch customer data from Shopify
+  // Fetch customer orders via Admin API proxy
   useEffect(() => {
     if (isLoggedIn && user?.shopifyCustomerToken) {
       setLoading(true);
-      fetchCustomerData(user.shopifyCustomerToken)
-        .then(setCustomerData)
+      fetchCustomerOrdersViaAdmin(user.shopifyCustomerToken)
+        .then(setOrders)
         .catch(console.error)
         .finally(() => setLoading(false));
     } else {
@@ -196,11 +196,7 @@ export default function MyPage() {
     );
   }
 
-  const orders = customerData?.orders || [];
   const favCount = user?.userId ? getFavorites(user.userId).length : 0;
-  const memberSince = customerData?.createdAt
-    ? new Date(customerData.createdAt).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' })
-    : null;
 
   // --- Logged in ---
   return (
@@ -222,14 +218,9 @@ export default function MyPage() {
               <h2 className="text-lg font-bold truncate">{user.displayName}</h2>
               {user.email && <p className="text-xs text-muted-foreground truncate">{user.email}</p>}
               <div className="flex items-center gap-3 mt-1.5">
-                {memberSince && (
+                {orders.length > 0 && (
                   <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                    <Calendar className="h-3 w-3" />{memberSince}〜
-                  </span>
-                )}
-                {customerData && (
-                  <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-                    <ShoppingBag className="h-3 w-3" />{customerData.numberOfOrders}回注文
+                    <ShoppingBag className="h-3 w-3" />{orders.length}回注文
                   </span>
                 )}
               </div>
@@ -237,11 +228,11 @@ export default function MyPage() {
           </div>
 
           {/* Default address */}
-          {customerData?.defaultAddress && (
+          {orders[0]?.shippingAddress && (
             <div className="mt-3 pt-3 border-t border-border flex items-start gap-2">
               <MapPin className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
               <p className="text-xs text-muted-foreground">
-                {[customerData.defaultAddress.zip, customerData.defaultAddress.province, customerData.defaultAddress.city, customerData.defaultAddress.address1]
+                {[orders[0].shippingAddress.province, orders[0].shippingAddress.city]
                   .filter(Boolean).join(' ')}
               </p>
             </div>
