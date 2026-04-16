@@ -84,6 +84,7 @@ const ORDERS_QUERY = `
               node {
                 title
                 quantity
+                product { id }
                 originalTotalSet { shopMoney { amount } }
               }
             }
@@ -114,7 +115,7 @@ interface OrderEdge {
     createdAt: string;
     totalPriceSet: { shopMoney: { amount: string } };
     lineItems: {
-      edges: { node: { title: string; quantity: number; originalTotalSet: { shopMoney: { amount: string } } } }[];
+      edges: { node: { title: string; quantity: number; product: { id: string } | null; originalTotalSet: { shopMoney: { amount: string } } } }[];
     };
   };
 }
@@ -165,7 +166,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 일별 집계
     const dailyMap = new Map<string, { orders: number; revenue: number }>();
-    const productMap = new Map<string, { quantity: number; revenue: number }>();
+    // productMap 키: Shopify product GID (정확한 매칭용)
+    const productMap = new Map<string, { title: string; quantity: number; revenue: number }>();
     let totalRevenue = 0;
     let totalItems = 0;
 
@@ -180,14 +182,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       dailyMap.set(date, day);
 
       for (const item of edge.node.lineItems.edges) {
-        const title = item.node.title;
+        const productId = item.node.product?.id ?? `title:${item.node.title}`;
         const qty = item.node.quantity;
         const itemRev = parseFloat(item.node.originalTotalSet.shopMoney.amount);
         totalItems += qty;
-        const existing = productMap.get(title) || { quantity: 0, revenue: 0 };
+        const existing = productMap.get(productId) || { title: item.node.title, quantity: 0, revenue: 0 };
         existing.quantity += qty;
         existing.revenue += itemRev;
-        productMap.set(title, existing);
+        productMap.set(productId, existing);
       }
     }
 
@@ -204,7 +206,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const topProducts = Array.from(productMap.entries())
-      .map(([title, d]) => ({ title, quantity: d.quantity, revenue: Math.round(d.revenue) }))
+      .map(([productId, d]) => ({ productId, title: d.title, quantity: d.quantity, revenue: Math.round(d.revenue) }))
       .sort((a, b) => b.revenue - a.revenue)
       .slice(0, 10);
 

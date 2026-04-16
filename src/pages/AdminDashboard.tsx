@@ -14,7 +14,7 @@ type Range = "today" | "7d" | "28d" | "90d";
 interface ShopifyData {
   summary: { totalOrders: number; totalRevenue: number; averageOrderValue: number; totalItemsSold: number };
   dailyOrders: { date: string; orders: number; revenue: number }[];
-  topProducts: { title: string; quantity: number; revenue: number }[];
+  topProducts: { productId: string; title: string; quantity: number; revenue: number }[];
   lowStock: { title: string; variant: string; quantity: number }[];
 }
 
@@ -29,7 +29,7 @@ interface AnalyticsData {
   topPages: { pagePath: string; screenPageViews: number; activeUsers: number; averageSessionDuration: number }[];
   trafficSources: { sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number }[];
   devices: { deviceCategory: string; sessions: number }[];
-  itemViews: { itemName: string; itemViews: number; addToCarts: number }[];
+  itemViews: { itemId: string; itemName: string; itemViews: number; addToCarts: number }[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -348,11 +348,12 @@ function OperationsPanel({
   topProducts: ShopifyData["topProducts"];
   itemViews: AnalyticsData["itemViews"];
 }) {
-  // GA4 itemViews를 상품명으로 빠르게 조회
+  // GA4 itemViews를 Shopify product GID 기준으로 매핑
   const viewMap = useMemo(() => {
     const m = new Map<string, { views: number; carts: number }>();
     for (const d of itemViews) {
-      m.set((d.itemName as string).toLowerCase(), {
+      // GA4 itemId = "gid://shopify/Product/1234567890" 형태
+      m.set(d.itemId as string, {
         views: d.itemViews as number,
         carts: d.addToCarts as number,
       });
@@ -360,16 +361,9 @@ function OperationsPanel({
     return m;
   }, [itemViews]);
 
-  // Shopify 상품 + GA4 조회수 병합 (상품명 소문자 퍼지 매칭)
+  // Shopify productId(GID)로 GA4 조회수 정확 매칭
   const merged = useMemo(() => topProducts.map((p) => {
-    const key = p.title.toLowerCase();
-    // 정확히 일치하거나 부분 일치하는 GA4 항목 찾기
-    let match = viewMap.get(key);
-    if (!match) {
-      for (const [k, v] of viewMap) {
-        if (k.includes(key.slice(0, 10)) || key.includes(k.slice(0, 10))) { match = v; break; }
-      }
-    }
+    const match = viewMap.get(p.productId);
     return { ...p, views: match?.views ?? 0, carts: match?.carts ?? 0 };
   }), [topProducts, viewMap]);
 
