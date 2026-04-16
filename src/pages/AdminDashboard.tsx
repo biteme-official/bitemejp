@@ -29,7 +29,7 @@ interface AnalyticsData {
   topPages: { pagePath: string; screenPageViews: number; activeUsers: number; averageSessionDuration: number }[];
   trafficSources: { sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number }[];
   devices: { deviceCategory: string; sessions: number }[];
-  itemViews: { itemId: string; itemsViewed: number; itemsAddedToCart: number }[];
+  itemViews: { itemName: string; itemsViewed: number; itemsAddedToCart: number }[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -348,12 +348,14 @@ function OperationsPanel({
   topProducts: ShopifyData["topProducts"];
   itemViews: AnalyticsData["itemViews"];
 }) {
-  // GA4 itemViews를 Shopify product GID 기준으로 매핑
+  // 상품명 정규화 (소문자 + 공백/특수문자 제거)
+  const normalize = (s: string) => s.toLowerCase().replace(/[\s\-_·・]/g, "");
+
+  // GA4 itemName 기준 뷰 맵
   const viewMap = useMemo(() => {
     const m = new Map<string, { views: number; carts: number }>();
     for (const d of itemViews) {
-      // GA4 itemId = "gid://shopify/Product/1234567890" 형태
-      m.set(d.itemId as string, {
+      m.set(normalize(d.itemName as string), {
         views: d.itemsViewed as number,
         carts: d.itemsAddedToCart as number,
       });
@@ -361,9 +363,16 @@ function OperationsPanel({
     return m;
   }, [itemViews]);
 
-  // Shopify productId(GID)로 GA4 조회수 정확 매칭
+  // Shopify 상품명 정규화 후 GA4 뷰 매칭
   const merged = useMemo(() => topProducts.map((p) => {
-    const match = viewMap.get(p.productId);
+    const key = normalize(p.title);
+    // 정확 매칭 우선, 없으면 포함 관계 확인
+    let match = viewMap.get(key);
+    if (!match) {
+      for (const [k, v] of viewMap) {
+        if (key.includes(k) || k.includes(key)) { match = v; break; }
+      }
+    }
     return { ...p, views: match?.views ?? 0, carts: match?.carts ?? 0 };
   }), [topProducts, viewMap]);
 
