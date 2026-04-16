@@ -151,28 +151,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { customerAccessToken, shopifyCustomerId } = req.body || {};
+  const { customerAccessToken, shopifyCustomerId, lineUserId } = req.body || {};
   if (!customerAccessToken || typeof customerAccessToken !== 'string') {
     return res.status(400).json({ error: 'customerAccessToken is required' });
   }
 
   try {
-    let customerId: string;
-
-    if (shopifyCustomerId && typeof shopifyCustomerId === 'string') {
-      // authStore に保存済みの GID を使用 (高速パス)
-      customerId = shopifyCustomerId;
-    } else {
-      // Storefront API でトークン検証 → GID 取得 (フォールバック)
-      const sfData = await storefrontQuery(VERIFY_CUSTOMER_QUERY, { customerAccessToken });
-      const customer = sfData?.data?.customer;
-      if (!customer?.id) {
-        return res.status(401).json({ error: 'Invalid or expired customer token' });
+    // 顧客 GID を解決する (3段階フォールバック)
+    const resolveCustomerId = async (): Promise<string | null> => {
+      // 1. authStore の GID で Admin API を直接確認 (マージ後に消えていないか検証)
+      if (shopifyCustomerId && typeof shopifyCustomerId === 'string') {
+        const check = await adminGraphQL(ADMIN_CUSTOMER_ORDERS_QUERY, { customerId: shopifyCustomerId, cursor: null });
+        if (check?.data?.customer !== null) return shopifyCustomerId;
+        console.warn('[customer-orders] stored GID not found, falling back');
       }
-      customerId = customer.id as string;
+
+      // 2. LINE userId メタフィールドで顧客を検索 (マージ後もメタフィールドが残っている場合)
+      if (lineUserId && typeof lineUserId === 'string') {
+        const metaResult = await adminGraphQL(`
+          query FindByLineId($query: String!) {
+            customers(first: 1, query: $query) {
+              edges { node { id } }
+            }
+          }
+        `, { query: `metafields.custom.line_id:${lineUserId}` });
+        const gid = metaResult?.data?.customers?.edges?.[0]?.node?.id;
+        if (gid) return gid;
+        console.warn('[customer-orders] LINE metafield lookup returned no customer');
+      }
+
+      // 3. Storefront API でトークン検証 → GID 取得
+      const sfData = await storefrontQuery(VERIFY_CUSTOMER_QUERY, { customerAccessToken });
+      return sfData?.data?.customer?.id || null;
+    };
+
+    const customerId = await resolveCustomerId();
+    if (!customerId) {
+      return res.status(401).json({ error: 'Could not resolve customer ID' });
     }
 
-    // Step 2: Admin API で顧客 GID から注文を直接取得
+    // Admin API で顧客 GID から注文を直接取得
     const allOrders: unknown[] = [];
     let cursor: string | null = null;
 
