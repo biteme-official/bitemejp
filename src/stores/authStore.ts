@@ -8,6 +8,7 @@ export interface LineUserProfile {
   email?: string;
   shopifyCustomerToken?: string;
   shopifyEmail?: string;
+  shopifyCustomerId?: string; // gid://shopify/Customer/xxx
 }
 
 interface AuthStore {

@@ -151,23 +151,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { customerAccessToken } = req.body || {};
+  const { customerAccessToken, shopifyCustomerId } = req.body || {};
   if (!customerAccessToken || typeof customerAccessToken !== 'string') {
     return res.status(400).json({ error: 'customerAccessToken is required' });
   }
 
   try {
-    // Step 1: トークン検証 & 顧客 GID 取得
-    const sfData = await storefrontQuery(VERIFY_CUSTOMER_QUERY, { customerAccessToken });
-    const customer = sfData?.data?.customer;
+    let customerId: string;
 
-    if (!customer?.id) {
-      return res.status(401).json({ error: 'Invalid or expired customer token' });
+    if (shopifyCustomerId && typeof shopifyCustomerId === 'string') {
+      // authStore に保存済みの GID を使用 (高速パス)
+      customerId = shopifyCustomerId;
+    } else {
+      // Storefront API でトークン検証 → GID 取得 (フォールバック)
+      const sfData = await storefrontQuery(VERIFY_CUSTOMER_QUERY, { customerAccessToken });
+      const customer = sfData?.data?.customer;
+      if (!customer?.id) {
+        return res.status(401).json({ error: 'Invalid or expired customer token' });
+      }
+      customerId = customer.id as string;
     }
-
-    // Storefront GID = "gid://shopify/Customer/12345"
-    // Admin API でそのまま使用可能
-    const customerId = customer.id as string;
 
     // Step 2: Admin API で顧客 GID から注文を直接取得
     const allOrders: unknown[] = [];

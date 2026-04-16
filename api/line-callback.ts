@@ -13,6 +13,7 @@ interface LineProfile {
 interface ShopifySyncResult {
   customerAccessToken: string | null;
   shopifyEmail: string;
+  shopifyCustomerId: string | null;
 }
 
 async function getStorefrontToken(): Promise<string> {
@@ -43,6 +44,32 @@ async function getStorefrontToken(): Promise<string> {
 function generatePassword(lineUserId: string): string {
   const secret = process.env.SHOPIFY_CLIENT_SECRET || 'fallback-secret';
   return createHmac('sha256', secret).update(lineUserId).digest('hex').substring(0, 32);
+}
+
+async function getAdminToken(): Promise<string> {
+  const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN;
+  const clientId = process.env.REPORT_SHOPIFY_CLIENT_ID;
+  const clientSecret = process.env.REPORT_SHOPIFY_CLIENT_SECRET;
+  if (!shop || !clientId || !clientSecret) throw new Error('Missing Admin API env vars');
+
+  const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }),
+  });
+  if (!res.ok) throw new Error(`Admin token failed: ${res.status}`);
+  const data = await res.json();
+  return data.access_token;
+}
+
+async function adminGraphQL(adminToken: string, query: string, variables: Record<string, unknown> = {}) {
+  const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN;
+  const res = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': adminToken },
+    body: JSON.stringify({ query, variables }),
+  });
+  return res.json();
 }
 
 async function storefrontQuery(token: string, query: string, variables: Record<string, unknown> = {}) {
@@ -114,7 +141,50 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
     console.warn('[Shopify Sync] Could not get customer access token');
   }
 
-  return { customerAccessToken: accessToken, shopifyEmail: email };
+  // 3. Admin API で顧客を検索して LINE userId をメタフィールドに保存
+  let shopifyCustomerId: string | null = null;
+  try {
+    const adminToken = await getAdminToken();
+
+    // email で顧客 GID を取得
+    const findResult = await adminGraphQL(adminToken, `
+      query FindCustomer($query: String!) {
+        customers(first: 1, query: $query) {
+          edges { node { id } }
+        }
+      }
+    `, { query: `email:'${email}'` });
+
+    const customerGid = findResult?.data?.customers?.edges?.[0]?.node?.id;
+    if (customerGid) {
+      shopifyCustomerId = customerGid;
+
+      // line_id メタフィールドを保存
+      await adminGraphQL(adminToken, `
+        mutation SetLineIdMetafield($input: CustomerInput!) {
+          customerUpdate(input: $input) {
+            customer { id }
+            userErrors { field message }
+          }
+        }
+      `, {
+        input: {
+          id: customerGid,
+          metafields: [{
+            namespace: 'custom',
+            key: 'line_id',
+            value: profile.userId,
+            type: 'single_line_text_field',
+          }],
+        },
+      });
+      console.log('[Shopify Sync] LINE ID metafield saved for', customerGid);
+    }
+  } catch (err) {
+    console.warn('[Shopify Sync] Metafield save failed (non-critical):', err);
+  }
+
+  return { customerAccessToken: accessToken, shopifyEmail: email, shopifyCustomerId };
 }
 
 const ALLOWED_ORIGINS = [
@@ -234,6 +304,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       email,
       shopifyCustomerToken: shopifyResult.customerAccessToken,
       shopifyEmail: shopifyResult.shopifyEmail,
+      shopifyCustomerId: shopifyResult.shopifyCustomerId,
     });
   } catch (error) {
     console.error('[LINE Callback] Error:', error);

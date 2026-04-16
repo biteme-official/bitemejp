@@ -142,7 +142,7 @@ export default function MyPage() {
   useEffect(() => {
     if (isLoggedIn && user?.shopifyCustomerToken) {
       setLoading(true);
-      fetchCustomerOrdersViaAdmin(user.shopifyCustomerToken)
+      fetchCustomerOrdersViaAdmin(user.shopifyCustomerToken, user.shopifyCustomerId)
         .then(setOrders)
         .catch(console.error)
         .finally(() => setLoading(false));

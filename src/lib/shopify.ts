@@ -923,11 +923,11 @@ export async function fetchCustomerOrders(customerAccessToken: string): Promise<
 /**
  * Admin API 経由で顧客の注文を取得（Storefront API の customer クエリ deprecation 対策）
  */
-export async function fetchCustomerOrdersViaAdmin(customerAccessToken: string): Promise<ShopifyOrder[]> {
+export async function fetchCustomerOrdersViaAdmin(customerAccessToken: string, shopifyCustomerId?: string): Promise<ShopifyOrder[]> {
   const res = await fetch('/api/customer-orders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ customerAccessToken }),
+    body: JSON.stringify({ customerAccessToken, shopifyCustomerId }),
   });
   if (!res.ok) return [];
   const data = await res.json();
