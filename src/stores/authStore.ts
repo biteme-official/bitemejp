@@ -17,6 +17,7 @@ interface AuthStore {
   // Actions
   login: (user: LineUserProfile) => void;
   logout: () => void;
+  updateCustomerToken: (token: string) => void;
 }
 
 export const useAuthStore = create<AuthStore>()(
@@ -27,6 +28,10 @@ export const useAuthStore = create<AuthStore>()(
 
       login: (user) => set({ user, isLoggedIn: true }),
       logout: () => set({ user: null, isLoggedIn: false }),
+      updateCustomerToken: (token) =>
+        set((state) => ({
+          user: state.user ? { ...state.user, shopifyCustomerToken: token } : state.user,
+        })),
     }),
     {
       name: 'line-auth',

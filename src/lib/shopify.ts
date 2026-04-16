@@ -666,25 +666,50 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
      input.discountCodes = [discountCode];
    }
 
-   // Attach customer info from auth store for checkout pre-fill
-   // Attach buyer identity if logged in
+   // Attach buyer identity — always refresh token before checkout
    const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-   let userEmail: string | undefined;
    let customerToken: string | undefined;
    try {
      const authData = JSON.parse(localStorage.getItem('line-auth') || '{}');
      const user = authData?.state?.user;
-     const storedEmail = user?.shopifyEmail || user?.email;
-     userEmail = formEmail && isValidEmail(formEmail) ? formEmail : (storedEmail && isValidEmail(storedEmail) ? storedEmail : undefined);
-     customerToken = user?.shopifyCustomerToken;
+
+     if (user?.userId && user?.shopifyEmail) {
+       // 체크아웃 직전 토큰 갱신 → 만료 문제 방지
+       try {
+         const refreshRes = await fetch('/api/refresh-customer-token', {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ lineUserId: user.userId, shopifyEmail: user.shopifyEmail }),
+         });
+         if (refreshRes.ok) {
+           const refreshData = await refreshRes.json();
+           customerToken = refreshData.customerAccessToken;
+           // store에도 반영 (비동기, 실패해도 무시)
+           try {
+             const { useAuthStore } = await import('@/stores/authStore');
+             useAuthStore.getState().updateCustomerToken(customerToken!);
+           } catch { /* ignore */ }
+         }
+       } catch { /* 갱신 실패 시 기존 토큰 사용 */ }
+     }
+
+     // 갱신 실패 시 기존 토큰 fallback
+     if (!customerToken) {
+       customerToken = user?.shopifyCustomerToken;
+     }
+
      if (customerToken) {
+       // customerAccessToken만 사용 — 이메일 지정 금지 (충돌 방지)
        input.buyerIdentity = {
          customerAccessToken: customerToken,
-         email: userEmail,
          countryCode: 'JP',
        };
-     } else if (userEmail) {
-       input.buyerIdentity = { email: userEmail, countryCode: 'JP' };
+     } else {
+       // 로그아웃 상태: formEmail만 사용
+       const fallbackEmail = formEmail && isValidEmail(formEmail) ? formEmail : undefined;
+       if (fallbackEmail) {
+         input.buyerIdentity = { email: fallbackEmail, countryCode: 'JP' };
+       }
      }
    } catch { /* continue without buyer identity */ }
 

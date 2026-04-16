@@ -49,6 +49,7 @@
     { "source": "/api/shopify-analytics", "destination": "/api/shopify-analytics" },
     { "source": "/api/orders-export", "destination": "/api/orders-export" },
     { "source": "/api/customer-orders", "destination": "/api/customer-orders" },
+    { "source": "/api/refresh-customer-token", "destination": "/api/refresh-customer-token" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
