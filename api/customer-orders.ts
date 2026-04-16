@@ -95,32 +95,34 @@ const VERIFY_CUSTOMER_QUERY = `
   }
 `;
 
-// Step 2: Admin API で email から顧客の注文を取得
+// Step 2: Admin API で顧客 GID から注文を直接取得
 const ADMIN_CUSTOMER_ORDERS_QUERY = `
-  query CustomerOrders($query: String!, $cursor: String) {
-    orders(first: 50, query: $query, after: $cursor, sortKey: PROCESSED_AT, reverse: true) {
-      pageInfo { hasNextPage endCursor }
-      edges {
-        node {
-          id
-          name
-          processedAt
-          financialStatus
-          fulfillmentStatus
-          statusUrl
-          totalPriceSet { shopMoney { amount currencyCode } }
-          shippingAddress { city province country }
-          fulfillments(first: 5) {
-            trackingCompany
-            trackingInfo(first: 1) { number url }
-          }
-          lineItems(first: 20) {
-            edges {
-              node {
-                title
-                quantity
-                variant {
-                  image { url }
+  query CustomerOrders($customerId: ID!, $cursor: String) {
+    customer(id: $customerId) {
+      orders(first: 50, after: $cursor, sortKey: PROCESSED_AT, reverse: true) {
+        pageInfo { hasNextPage endCursor }
+        edges {
+          node {
+            id
+            name
+            processedAt
+            financialStatus
+            fulfillmentStatus
+            statusUrl
+            totalPriceSet { shopMoney { amount currencyCode } }
+            shippingAddress { city province country }
+            fulfillments(first: 5) {
+              trackingCompany
+              trackingInfo(first: 1) { number url }
+            }
+            lineItems(first: 20) {
+              edges {
+                node {
+                  title
+                  quantity
+                  variant {
+                    image { url }
+                  }
                 }
               }
             }
@@ -155,27 +157,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Step 1: トークン検証 & email 取得
+    // Step 1: トークン検証 & 顧客 GID 取得
     const sfData = await storefrontQuery(VERIFY_CUSTOMER_QUERY, { customerAccessToken });
     const customer = sfData?.data?.customer;
 
-    if (!customer?.email) {
+    if (!customer?.id) {
       return res.status(401).json({ error: 'Invalid or expired customer token' });
     }
 
-    const email = customer.email as string;
+    // Storefront GID = "gid://shopify/Customer/12345"
+    // Admin API でそのまま使用可能
+    const customerId = customer.id as string;
 
-    // Step 2: Admin API で注文取得 (ページネーション対応)
-    const filterQuery = `email:'${email}'`;
+    // Step 2: Admin API で顧客 GID から注文を直接取得
     const allOrders: unknown[] = [];
     let cursor: string | null = null;
 
     do {
-      const adminData = await adminGraphQL(ADMIN_CUSTOMER_ORDERS_QUERY, { query: filterQuery, cursor });
-      const edges = adminData?.data?.orders?.edges || [];
+      const adminData = await adminGraphQL(ADMIN_CUSTOMER_ORDERS_QUERY, { customerId, cursor });
+      const edges = adminData?.data?.customer?.orders?.edges || [];
       allOrders.push(...edges.map((e: { node: unknown }) => e.node));
-      cursor = adminData?.data?.orders?.pageInfo?.hasNextPage
-        ? adminData?.data?.orders?.pageInfo?.endCursor
+      cursor = adminData?.data?.customer?.orders?.pageInfo?.hasNextPage
+        ? adminData?.data?.customer?.orders?.pageInfo?.endCursor
         : null;
     } while (cursor && allOrders.length < 200);
 
