@@ -752,24 +752,25 @@ export default function AdminDashboard() {
     retry,
   });
 
-  const isUnauthorized = isError && error instanceof Error && error.message === "UNAUTHORIZED";
-  if (!secret || isUnauthorized) {
-    if (isUnauthorized) sessionStorage.removeItem("adminSecret");
-    return <PasswordGate onAuth={handleAuth} />;
-  }
-
+  // ── 모든 훅은 early return 이전에 선언 (Rules of Hooks) ──
   const ov = data?.overview ?? {};
   const sessions = (ov.sessions as number) ?? 0;
   const totalOrders = shopify?.summary.totalOrders ?? 0;
   const totalRevenue = shopify?.summary.totalRevenue ?? 0;
   const aov = shopify?.summary.averageOrderValue ?? 0;
   const convRate = sessions > 0 ? ((totalOrders / sessions) * 100).toFixed(2) : "—";
-  const isLoading = ga4Loading || shopifyLoading || (!data && !shopify && !isError && !shopifyIsError);
+  const isLoading = ga4Loading || shopifyLoading || (!!secret && !data && !shopify && !isError && !shopifyIsError);
 
   const timeline = useMemo(() => {
     if (!data || !shopify) return [];
     return buildTimeline(data.revenueOverTime, shopify.dailyOrders);
   }, [data, shopify]);
+
+  const isUnauthorized = isError && error instanceof Error && error.message === "UNAUTHORIZED";
+  if (!secret || isUnauthorized) {
+    if (isUnauthorized) sessionStorage.removeItem("adminSecret");
+    return <PasswordGate onAuth={handleAuth} />;
+  }
 
   return (
     <div className="min-h-screen bg-muted/30">
