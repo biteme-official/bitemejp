@@ -18,6 +18,7 @@ import WishlistPage from "./pages/WishlistPage";
 import Checkout from "./pages/Checkout";
 import AdminDashboard from "./pages/AdminDashboard";
 import { LineFloatingButton } from "./components/layout/LineFloatingButton";
+import { useCartStore } from "@/stores/cartStore";
 
 const queryClient = new QueryClient();
 
@@ -29,11 +30,24 @@ function GA4PageViewTracker() {
   return null;
 }
 
+// 체크아웃 후 사이트 복귀 시 장바구니 자동 클리어
+function CheckoutReturnGuard() {
+  const clearCart = useCartStore((state) => state.clearCart);
+  useEffect(() => {
+    if (sessionStorage.getItem('checkout_pending')) {
+      sessionStorage.removeItem('checkout_pending');
+      clearCart();
+    }
+  }, [clearCart]);
+  return null;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <BrowserRouter>
         <GA4PageViewTracker />
+        <CheckoutReturnGuard />
         <Toaster />
         <Sonner closeButton />
         <Routes>

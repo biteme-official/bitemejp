@@ -143,6 +143,7 @@ export default function Checkout() {
         url.searchParams.set('checkout[shipping_address][address2]', form.address2);
         url.searchParams.set('checkout[shipping_address][phone]', form.phone);
         url.searchParams.set('checkout[shipping_address][country]', 'JP');
+        sessionStorage.setItem('checkout_pending', '1');
         window.location.href = url.toString();
       }
     } catch (err) {
