@@ -35,8 +35,9 @@ export default function LineCallback() {
           displayName: profile.displayName,
           pictureUrl: profile.pictureUrl,
           email: profile.email,
-          shopifyCustomerToken: (profile as any).shopifyCustomerToken,
-          shopifyEmail: (profile as any).shopifyEmail,
+          shopifyCustomerToken: profile.shopifyCustomerToken,
+          shopifyEmail: profile.shopifyEmail,
+          shopifyCustomerId: profile.shopifyCustomerId,
         });
 
         setSuccess({ displayName: profile.displayName });

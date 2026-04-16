@@ -34,6 +34,9 @@ export interface LineCallbackResult {
   displayName: string;
   pictureUrl?: string;
   email?: string;
+  shopifyCustomerToken?: string;
+  shopifyEmail?: string;
+  shopifyCustomerId?: string;
 }
 
 export async function handleLineCallback(code: string, state: string): Promise<LineCallbackResult> {
