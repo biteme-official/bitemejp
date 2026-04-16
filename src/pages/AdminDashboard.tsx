@@ -5,6 +5,7 @@ import {
   Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -337,42 +338,99 @@ function TopPagesTable({ data }: { data: AnalyticsData["topPages"] }) {
   );
 }
 
-// ─── 재고 부족 ────────────────────────────────────────────────────────────────
+// ─── 운영 현황 탭 (재고 부족 + 인기 아이템) ───────────────────────────────────
 
-function LowStockList({ data }: { data: ShopifyData["lowStock"] }) {
+function OperationsPanel({ lowStock, topProducts }: { lowStock: ShopifyData["lowStock"]; topProducts: ShopifyData["topProducts"] }) {
+  const maxRev = topProducts[0]?.revenue || 1;
   return (
     <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold flex items-center gap-2">
-          재고 부족
-          {data.length > 0 && (
-            <span className="text-[11px] font-normal px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">{data.length}개</span>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="p-0">
-        {data.length === 0 ? (
-          <p className="text-xs text-muted-foreground text-center py-6">부족 재고 없음</p>
-        ) : (
-          <table className="w-full text-xs">
-            <tbody>
-              {data.map((row, i) => (
-                <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-2">
-                    {row.title}
-                    {row.variant && <span className="text-muted-foreground ml-1">({row.variant})</span>}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <span className={`font-semibold ${row.quantity === 0 ? "text-red-600" : "text-orange-500"}`}>
-                      {row.quantity === 0 ? "품절" : `${row.quantity}개`}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </CardContent>
+      <Tabs defaultValue="lowstock">
+        <CardHeader className="pb-0">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold">운영 현황</CardTitle>
+            <TabsList className="h-7 text-xs">
+              <TabsTrigger value="lowstock" className="h-6 text-xs px-3 flex items-center gap-1.5">
+                재고 부족
+                {lowStock.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 text-[10px] font-medium">
+                    {lowStock.length}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="popular" className="h-6 text-xs px-3">인기 아이템</TabsTrigger>
+            </TabsList>
+          </div>
+        </CardHeader>
+
+        {/* 재고 부족 탭 */}
+        <TabsContent value="lowstock" className="mt-0">
+          <CardContent className="p-0">
+            {lowStock.length === 0 ? (
+              <p className="text-xs text-muted-foreground text-center py-8">재고 부족 상품 없음</p>
+            ) : (
+              <div className="max-h-64 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-background border-b">
+                    <tr>
+                      <th className="text-left px-4 py-2 font-medium text-muted-foreground">상품</th>
+                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">잔여 재고</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lowStock.map((row, i) => (
+                      <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                        <td className="px-4 py-2.5">
+                          {row.title}
+                          {row.variant && <span className="text-muted-foreground ml-1">({row.variant})</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-right">
+                          <span className={`font-semibold ${row.quantity === 0 ? "text-red-600" : "text-orange-500"}`}>
+                            {row.quantity === 0 ? "품절" : `${row.quantity}개`}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </TabsContent>
+
+        {/* 인기 아이템 탭 */}
+        <TabsContent value="popular" className="mt-0">
+          <CardContent className="p-0">
+            <div className="max-h-64 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-background border-b">
+                  <tr>
+                    <th className="text-left px-4 py-2 font-medium text-muted-foreground">상품명</th>
+                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">판매 수량</th>
+                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topProducts.map((row, i) => (
+                    <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground w-4 shrink-0 text-right">{i + 1}</span>
+                          <div className="h-1.5 w-12 shrink-0 rounded-full bg-muted overflow-hidden">
+                            <div className="h-full rounded-full" style={{ width: `${(row.revenue / maxRev) * 100}%`, backgroundColor: BRAND }} />
+                          </div>
+                          <span className="truncate max-w-[200px]">{row.title}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">{row.quantity.toLocaleString()}개</td>
+                      <td className="px-4 py-2.5 text-right font-medium">{formatRevenue(row.revenue)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </TabsContent>
+      </Tabs>
     </Card>
   );
 }
@@ -559,7 +617,7 @@ export default function AdminDashboard() {
             {shopify && (
               <>
                 <SectionLabel>운영 현황</SectionLabel>
-                <LowStockList data={shopify.lowStock} />
+                <OperationsPanel lowStock={shopify.lowStock} topProducts={shopify.topProducts} />
               </>
             )}
 
