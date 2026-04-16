@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
@@ -725,11 +725,9 @@ function PasswordGate({ onAuth }: { onAuth: (s: string) => void }) {
 
 const RANGE_LABELS: Record<Range, string> = { today: "오늘", "7d": "7일", "28d": "28일", "90d": "90일" };
 
-export default function AdminDashboard() {
-  const [secret, setSecret] = useState(() => sessionStorage.getItem("adminSecret") || "");
+// 인증된 상태의 대시보드 (secret이 항상 존재하는 상태에서만 렌더됨)
+function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => void }) {
   const [range, setRange] = useState<Range>("7d");
-
-  const handleAuth = useCallback((s: string) => { sessionStorage.setItem("adminSecret", s); setSecret(s); }, []);
 
   const retry = (count: number, err: unknown) => {
     if (err instanceof Error && err.message === "UNAUTHORIZED") return false;
@@ -739,7 +737,6 @@ export default function AdminDashboard() {
   const { data, isLoading: ga4Loading, isError, error, refetch } = useQuery({
     queryKey: ["analytics", range, secret],
     queryFn: () => fetchAnalytics(range, secret),
-    enabled: !!secret,
     staleTime: 5 * 60 * 1000,
     retry,
   });
@@ -747,30 +744,29 @@ export default function AdminDashboard() {
   const { data: shopify, isLoading: shopifyLoading, isError: shopifyIsError, error: shopifyErr } = useQuery({
     queryKey: ["shopify-analytics", range, secret],
     queryFn: () => fetchShopify(range, secret),
-    enabled: !!secret,
     staleTime: 5 * 60 * 1000,
     retry,
   });
 
-  // ── 모든 훅은 early return 이전에 선언 (Rules of Hooks) ──
+  const isUnauthorized = isError && error instanceof Error && error.message === "UNAUTHORIZED";
+
+  // 인증 실패 시 로그아웃 처리 (side-effect이므로 useEffect 사용)
+  useEffect(() => {
+    if (isUnauthorized) onLogout();
+  }, [isUnauthorized, onLogout]);
+
   const ov = data?.overview ?? {};
   const sessions = (ov.sessions as number) ?? 0;
   const totalOrders = shopify?.summary.totalOrders ?? 0;
   const totalRevenue = shopify?.summary.totalRevenue ?? 0;
   const aov = shopify?.summary.averageOrderValue ?? 0;
   const convRate = sessions > 0 ? ((totalOrders / sessions) * 100).toFixed(2) : "—";
-  const isLoading = ga4Loading || shopifyLoading || (!!secret && !data && !shopify && !isError && !shopifyIsError);
+  const isLoading = ga4Loading || shopifyLoading || (!data && !shopify && !isError && !shopifyIsError);
 
   const timeline = useMemo(() => {
     if (!data || !shopify) return [];
     return buildTimeline(data.revenueOverTime, shopify.dailyOrders);
   }, [data, shopify]);
-
-  const isUnauthorized = isError && error instanceof Error && error.message === "UNAUTHORIZED";
-  if (!secret || isUnauthorized) {
-    if (isUnauthorized) sessionStorage.removeItem("adminSecret");
-    return <PasswordGate onAuth={handleAuth} />;
-  }
 
   return (
     <div className="min-h-screen bg-muted/30">
@@ -795,7 +791,7 @@ export default function AdminDashboard() {
               ))}
             </div>
             <button onClick={() => refetch()} className="text-xs px-3 py-1.5 rounded-lg border hover:bg-muted transition-colors">새로고침</button>
-            <button onClick={() => { sessionStorage.removeItem("adminSecret"); setSecret(""); }} className="text-xs text-muted-foreground hover:text-foreground transition-colors">로그아웃</button>
+            <button onClick={onLogout} className="text-xs text-muted-foreground hover:text-foreground transition-colors">로그아웃</button>
           </div>
         </div>
       </div>
@@ -912,5 +908,32 @@ export default function AdminDashboard() {
         )}
       </div>
     </div>
+  );
+}
+
+// ─── 진입점: 인증 게이트만 담당 ──────────────────────────────────────────────
+
+export default function AdminDashboard() {
+  const [secret, setSecret] = useState(() => sessionStorage.getItem("adminSecret") || "");
+
+  if (!secret) {
+    return (
+      <PasswordGate
+        onAuth={(s) => {
+          sessionStorage.setItem("adminSecret", s);
+          setSecret(s);
+        }}
+      />
+    );
+  }
+
+  return (
+    <DashboardView
+      secret={secret}
+      onLogout={() => {
+        sessionStorage.removeItem("adminSecret");
+        setSecret("");
+      }}
+    />
   );
 }
