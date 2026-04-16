@@ -11,6 +11,18 @@ import { Badge } from "@/components/ui/badge";
 
 type Range = "today" | "7d" | "28d" | "90d";
 
+interface ShopifyData {
+  summary: {
+    totalOrders: number;
+    totalRevenue: number;
+    averageOrderValue: number;
+    totalItemsSold: number;
+  };
+  dailyOrders: { date: string; orders: number; revenue: number }[];
+  topProducts: { title: string; quantity: number; revenue: number }[];
+  lowStock: { title: string; variant: string; quantity: number }[];
+}
+
 interface AnalyticsData {
   overview: {
     sessions?: number;
@@ -58,6 +70,18 @@ const FUNNEL_LABELS: Record<string, string> = {
 };
 
 // ─── API fetch ────────────────────────────────────────────────────────────────
+
+async function fetchShopify(range: Range, secret: string): Promise<ShopifyData> {
+  const res = await fetch(`/api/shopify-analytics?range=${range}`, {
+    headers: { Authorization: `Bearer ${secret}` },
+  });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message || "Failed to fetch Shopify data");
+  }
+  return res.json();
+}
 
 async function fetchAnalytics(range: Range, secret: string): Promise<AnalyticsData> {
   const res = await fetch(`/api/analytics?range=${range}`, {
@@ -307,6 +331,134 @@ function DevicesChart({ data }: { data: AnalyticsData["devices"] }) {
   );
 }
 
+// ─── Shopify Components ───────────────────────────────────────────────────────
+
+function ShopifyOrdersChart({ data }: { data: ShopifyData["dailyOrders"] }) {
+  const formatted = data.map((d) => ({ ...d, date: formatDate(d.date) }));
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold">일별 주문 / 매출</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart data={formatted} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <XAxis dataKey="date" tick={{ fontSize: 10 }} interval={Math.ceil(formatted.length / 10) - 1} />
+            <YAxis yAxisId="rev" tick={{ fontSize: 10 }} tickFormatter={(v) => `¥${(v / 1000).toFixed(0)}k`} width={48} />
+            <YAxis yAxisId="ord" orientation="right" tick={{ fontSize: 10 }} width={24} />
+            <Tooltip
+              formatter={(value: number, name: string) =>
+                name === "revenue" ? [formatRevenue(value), "매출"] : [value, "주문 수"]
+              }
+            />
+            <Legend formatter={(v) => (v === "revenue" ? "매출" : "주문 수")} wrapperStyle={{ fontSize: 11 }} />
+            <Bar yAxisId="rev" dataKey="revenue" fill={BRAND} opacity={0.85} radius={[2, 2, 0, 0]} />
+            <Bar yAxisId="ord" dataKey="orders" fill="#94a3b8" opacity={0.7} radius={[2, 2, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TopProductsTable({ data }: { data: ShopifyData["topProducts"] }) {
+  const maxRevenue = data[0]?.revenue || 1;
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold">상위 상품</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">상품명</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">수량</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((row, i) => (
+                <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 rounded-full bg-muted overflow-hidden w-16 shrink-0">
+                        <div
+                          className="h-full rounded-full"
+                          style={{ width: `${(row.revenue / maxRevenue) * 100}%`, backgroundColor: BRAND }}
+                        />
+                      </div>
+                      <span className="truncate max-w-[180px]">{row.title}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2 text-right">{row.quantity.toLocaleString()}개</td>
+                  <td className="px-4 py-2 text-right font-medium">{formatRevenue(row.revenue)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function LowStockTable({ data }: { data: ShopifyData["lowStock"] }) {
+  if (data.length === 0) {
+    return (
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm font-semibold">재고 부족 알림</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground text-center py-4">재고 부족 상품 없음</p>
+        </CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold flex items-center gap-2">
+          재고 부족 알림
+          <span className="text-xs font-normal px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">
+            {data.length}개
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">상품</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">잔여 재고</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((row, i) => (
+                <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-2">
+                    {row.title}
+                    {row.variant && <span className="text-muted-foreground ml-1">({row.variant})</span>}
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <span className={`font-semibold ${row.quantity === 0 ? "text-red-600" : "text-orange-500"}`}>
+                      {row.quantity === 0 ? "품절" : `${row.quantity}개`}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Password Gate ────────────────────────────────────────────────────────────
 
 function PasswordGate({ onAuth }: { onAuth: (secret: string) => void }) {
@@ -375,6 +527,17 @@ export default function AdminDashboard() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["analytics", range, secret],
     queryFn: () => fetchAnalytics(range, secret),
+    enabled: !!secret,
+    staleTime: 5 * 60 * 1000,
+    retry: (count, err) => {
+      if (err instanceof Error && err.message === "UNAUTHORIZED") return false;
+      return count < 2;
+    },
+  });
+
+  const { data: shopifyData, isLoading: shopifyLoading, isError: shopifyError, error: shopifyErr } = useQuery({
+    queryKey: ["shopify-analytics", range, secret],
+    queryFn: () => fetchShopify(range, secret),
     enabled: !!secret,
     staleTime: 5 * 60 * 1000,
     retry: (count, err) => {
@@ -500,10 +663,54 @@ export default function AdminDashboard() {
             </div>
 
             <TrafficSourcesTable data={data.trafficSources} />
+          </>
+        )}
 
-            <p className="text-center text-xs text-muted-foreground pb-4">
-              GA4 Property: G-WLTZH90W2L &nbsp;·&nbsp; {RANGE_LABELS[range]} 데이터
-            </p>
+        {/* ── 쇼피파이 섹션 ── */}
+        <div className="flex items-center gap-3 pt-2">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-xs font-semibold text-muted-foreground tracking-widest uppercase">Shopify 주문 현황</span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+
+        {shopifyLoading && (
+          <div className="flex items-center justify-center h-40 text-sm text-muted-foreground">
+            쇼피파이 데이터를 불러오는 중...
+          </div>
+        )}
+
+        {shopifyError && !(shopifyErr instanceof Error && shopifyErr.message === "UNAUTHORIZED") && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            {shopifyErr instanceof Error ? shopifyErr.message : "쇼피파이 데이터 오류"}
+          </div>
+        )}
+
+        {shopifyData && (
+          <>
+            {/* Shopify KPI Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <KpiCard label="총 주문 수" value={`${shopifyData.summary.totalOrders.toLocaleString()}건`} />
+              <KpiCard label="총 매출" value={formatRevenue(shopifyData.summary.totalRevenue)} />
+              <KpiCard label="평균 주문금액" value={formatRevenue(shopifyData.summary.averageOrderValue)} />
+              <KpiCard label="총 판매 수량" value={`${shopifyData.summary.totalItemsSold.toLocaleString()}개`} />
+            </div>
+
+            {/* Daily orders chart */}
+            <ShopifyOrdersChart data={shopifyData.dailyOrders} />
+
+            {/* Top products + Low stock */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <TopProductsTable data={shopifyData.topProducts} />
+              <LowStockTable data={shopifyData.lowStock} />
+            </div>
+          </>
+        )}
+
+        {(data || shopifyData) && (
+          <p className="text-center text-xs text-muted-foreground pb-4">
+            GA4: G-WLTZH90W2L &nbsp;·&nbsp; Shopify: biteme-jp.myshopify.com &nbsp;·&nbsp; {RANGE_LABELS[range]} 데이터
+          </p>
+        )}
           </>
         )}
       </div>

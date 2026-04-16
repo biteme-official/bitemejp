@@ -46,6 +46,7 @@
     { "source": "/api/wishlist", "destination": "/api/wishlist" },
     { "source": "/api/slack-report", "destination": "/api/slack-report" },
     { "source": "/api/analytics", "destination": "/api/analytics" },
+    { "source": "/api/shopify-analytics", "destination": "/api/shopify-analytics" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
