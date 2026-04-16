@@ -29,7 +29,7 @@ interface AnalyticsData {
   topPages: { pagePath: string; screenPageViews: number; activeUsers: number; averageSessionDuration: number }[];
   trafficSources: { sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number }[];
   devices: { deviceCategory: string; sessions: number }[];
-  itemViews: { itemId: string; itemName: string; itemViews: number; addToCarts: number }[];
+  itemViews: { itemId: string; itemViews: number; addToCarts: number }[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -165,7 +165,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }),
       runReport(token, {
         dateRanges: [dateRange],
-        dimensions: [{ name: 'itemId' }, { name: 'itemName' }],
+        dimensions: [{ name: 'itemId' }],
         metrics: [{ name: 'itemViews' }, { name: 'addToCarts' }],
         orderBys: [{ metric: { metricName: 'itemViews' }, desc: true }],
         limit: 50,
