@@ -29,6 +29,7 @@ interface AnalyticsData {
   topPages: { pagePath: string; screenPageViews: number; activeUsers: number; averageSessionDuration: number }[];
   trafficSources: { sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number }[];
   devices: { deviceCategory: string; sessions: number }[];
+  itemViews: { itemName: string; itemViews: number; addToCarts: number }[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -340,8 +341,40 @@ function TopPagesTable({ data }: { data: AnalyticsData["topPages"] }) {
 
 // ─── 운영 현황 탭 (재고 부족 + 인기 아이템) ───────────────────────────────────
 
-function OperationsPanel({ lowStock, topProducts }: { lowStock: ShopifyData["lowStock"]; topProducts: ShopifyData["topProducts"] }) {
+function OperationsPanel({
+  lowStock, topProducts, itemViews,
+}: {
+  lowStock: ShopifyData["lowStock"];
+  topProducts: ShopifyData["topProducts"];
+  itemViews: AnalyticsData["itemViews"];
+}) {
+  // GA4 itemViews를 상품명으로 빠르게 조회
+  const viewMap = useMemo(() => {
+    const m = new Map<string, { views: number; carts: number }>();
+    for (const d of itemViews) {
+      m.set((d.itemName as string).toLowerCase(), {
+        views: d.itemViews as number,
+        carts: d.addToCarts as number,
+      });
+    }
+    return m;
+  }, [itemViews]);
+
+  // Shopify 상품 + GA4 조회수 병합 (상품명 소문자 퍼지 매칭)
+  const merged = useMemo(() => topProducts.map((p) => {
+    const key = p.title.toLowerCase();
+    // 정확히 일치하거나 부분 일치하는 GA4 항목 찾기
+    let match = viewMap.get(key);
+    if (!match) {
+      for (const [k, v] of viewMap) {
+        if (k.includes(key.slice(0, 10)) || key.includes(k.slice(0, 10))) { match = v; break; }
+      }
+    }
+    return { ...p, views: match?.views ?? 0, carts: match?.carts ?? 0 };
+  }), [topProducts, viewMap]);
+
   const maxRev = topProducts[0]?.revenue || 1;
+  const maxViews = Math.max(...merged.map((r) => r.views), 1);
   return (
     <Card>
       <Tabs defaultValue="lowstock">
@@ -405,21 +438,30 @@ function OperationsPanel({ lowStock, topProducts }: { lowStock: ShopifyData["low
                 <thead className="sticky top-0 bg-background border-b">
                   <tr>
                     <th className="text-left px-4 py-2 font-medium text-muted-foreground">상품명</th>
-                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">판매 수량</th>
+                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">조회</th>
+                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">판매</th>
                     <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {topProducts.map((row, i) => (
+                  {merged.map((row, i) => (
                     <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                       <td className="px-4 py-2.5">
                         <div className="flex items-center gap-2">
                           <span className="text-muted-foreground w-4 shrink-0 text-right">{i + 1}</span>
-                          <div className="h-1.5 w-12 shrink-0 rounded-full bg-muted overflow-hidden">
-                            <div className="h-full rounded-full" style={{ width: `${(row.revenue / maxRev) * 100}%`, backgroundColor: BRAND }} />
+                          <div className="flex flex-col gap-0.5 w-12 shrink-0">
+                            <div className="h-1 rounded-full bg-muted overflow-hidden">
+                              <div className="h-full rounded-full" style={{ width: `${(row.revenue / maxRev) * 100}%`, backgroundColor: BRAND }} />
+                            </div>
+                            <div className="h-1 rounded-full bg-muted overflow-hidden">
+                              <div className="h-full rounded-full bg-blue-400" style={{ width: `${(row.views / maxViews) * 100}%` }} />
+                            </div>
                           </div>
-                          <span className="truncate max-w-[200px]">{row.title}</span>
+                          <span className="truncate max-w-[160px]">{row.title}</span>
                         </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-right text-muted-foreground">
+                        {row.views > 0 ? row.views.toLocaleString() : "—"}
                       </td>
                       <td className="px-4 py-2.5 text-right">{row.quantity.toLocaleString()}개</td>
                       <td className="px-4 py-2.5 text-right font-medium">{formatRevenue(row.revenue)}</td>
@@ -617,7 +659,7 @@ export default function AdminDashboard() {
             {shopify && (
               <>
                 <SectionLabel>운영 현황</SectionLabel>
-                <OperationsPanel lowStock={shopify.lowStock} topProducts={shopify.topProducts} />
+                <OperationsPanel lowStock={shopify.lowStock} topProducts={shopify.topProducts} itemViews={data?.itemViews ?? []} />
               </>
             )}
 

@@ -113,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = await getAccessToken();
     const dateRange = { startDate, endDate: 'today' };
 
-    const [overviewRaw, funnelRaw, revenueRaw, pagesRaw, sourcesRaw, devicesRaw] = await Promise.all([
+    const [overviewRaw, funnelRaw, revenueRaw, pagesRaw, sourcesRaw, devicesRaw, itemViewsRaw] = await Promise.all([
       runReport(token, {
         dateRanges: [dateRange],
         metrics: [
@@ -163,6 +163,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         metrics: [{ name: 'sessions' }],
         orderBys: [{ metric: { metricName: 'sessions' }, desc: true }],
       }),
+      runReport(token, {
+        dateRanges: [dateRange],
+        dimensions: [{ name: 'itemName' }],
+        metrics: [{ name: 'itemViews' }, { name: 'addToCarts' }],
+        orderBys: [{ metric: { metricName: 'itemViews' }, desc: true }],
+        limit: 30,
+      }),
     ]);
 
     return res.status(200).json({
@@ -172,6 +179,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       topPages: parseRows(pagesRaw),
       trafficSources: parseRows(sourcesRaw),
       devices: parseRows(devicesRaw),
+      itemViews: parseRows(itemViewsRaw),
     });
   } catch (error) {
     console.error('[Analytics]', error);
