@@ -113,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = await getAccessToken();
     const dateRange = { startDate, endDate: 'today' };
 
-    const [overviewRaw, funnelRaw, revenueRaw, pagesRaw, sourcesRaw, devicesRaw, itemViewsRaw] = await Promise.all([
+    const [overviewRaw, funnelRaw, revenueRaw, pagesRaw, sourcesRaw, devicesRaw, itemViewsRaw, exitPagesRaw] = await Promise.all([
       runReport(token, {
         dateRanges: [dateRange],
         metrics: [
@@ -170,6 +170,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         orderBys: [{ metric: { metricName: 'itemsViewed' }, desc: true }],
         limit: 50,
       }),
+      // 페이지별 이탈률 (이탈 포인트 분석)
+      runReport(token, {
+        dateRanges: [dateRange],
+        dimensions: [{ name: 'pagePath' }],
+        metrics: [
+          { name: 'sessions' },
+          { name: 'bounceRate' },
+          { name: 'screenPageViews' },
+          { name: 'averageSessionDuration' },
+        ],
+        orderBys: [{ metric: { metricName: 'sessions' }, desc: true }],
+        limit: 20,
+      }),
     ]);
 
     return res.status(200).json({
@@ -180,6 +193,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       trafficSources: parseRows(sourcesRaw),
       devices: parseRows(devicesRaw),
       itemViews: parseRows(itemViewsRaw),
+      exitPages: parseRows(exitPagesRaw),
     });
   } catch (error) {
     console.error('[Analytics]', error);
