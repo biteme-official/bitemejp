@@ -166,18 +166,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.warn('[customer-orders] stored GID not found, falling back');
       }
 
-      // 2. LINE userId メタフィールドで顧客を検索 (マージ後もメタフィールドが残っている場合)
+      // 2. LINE userId タグで顧客を検索 (tag: 検索はShopify公式サポート)
       if (lineUserId && typeof lineUserId === 'string') {
-        const metaResult = await adminGraphQL(`
-          query FindByLineId($query: String!) {
+        const tagResult = await adminGraphQL(`
+          query FindByLineTag($query: String!) {
             customers(first: 1, query: $query) {
               edges { node { id } }
             }
           }
-        `, { query: `metafields.custom.line_id:${lineUserId}` });
-        const gid = metaResult?.data?.customers?.edges?.[0]?.node?.id;
-        if (gid) return gid;
-        console.warn('[customer-orders] LINE metafield lookup returned no customer');
+        `, { query: `tag:"line_id:${lineUserId}"` });
+        const gid = tagResult?.data?.customers?.edges?.[0]?.node?.id;
+        if (gid) {
+          console.log('[customer-orders] Found customer by LINE tag:', gid);
+          return gid;
+        }
+        console.warn('[customer-orders] LINE tag lookup returned no customer');
       }
 
       // 3. Storefront API でトークン検証 → GID 取得

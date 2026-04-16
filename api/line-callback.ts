@@ -159,9 +159,11 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
     if (customerGid) {
       shopifyCustomerId = customerGid;
 
-      // line_id メタフィールドを保存
+      // LINE userId をタグ + メタフィールド両方に保存
+      // タグ: Shopify customers クエリで tag: 検索が可能 (メタフィールド検索より確実)
+      const lineTag = `line_id:${profile.userId}`;
       await adminGraphQL(adminToken, `
-        mutation SetLineIdMetafield($input: CustomerInput!) {
+        mutation SaveLineId($input: CustomerInput!) {
           customerUpdate(input: $input) {
             customer { id }
             userErrors { field message }
@@ -170,6 +172,7 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
       `, {
         input: {
           id: customerGid,
+          tags: [lineTag],
           metafields: [{
             namespace: 'custom',
             key: 'line_id',
@@ -178,10 +181,10 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
           }],
         },
       });
-      console.log('[Shopify Sync] LINE ID metafield saved for', customerGid);
+      console.log('[Shopify Sync] LINE ID tag+metafield saved for', customerGid);
     }
   } catch (err) {
-    console.warn('[Shopify Sync] Metafield save failed (non-critical):', err);
+    console.warn('[Shopify Sync] Tag/metafield save failed (non-critical):', err);
   }
 
   return { customerAccessToken: accessToken, shopifyEmail: email, shopifyCustomerId };
