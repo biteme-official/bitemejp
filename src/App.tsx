@@ -16,6 +16,7 @@ import LineCallback from "./pages/LineCallback";
 import MyPage from "./pages/MyPage";
 import WishlistPage from "./pages/WishlistPage";
 import Checkout from "./pages/Checkout";
+import AdminDashboard from "./pages/AdminDashboard";
 import { LineFloatingButton } from "./components/layout/LineFloatingButton";
 
 const queryClient = new QueryClient();
@@ -46,6 +47,7 @@ const App = () => (
           <Route path="/auth/line/callback" element={<LineCallback />} />
           <Route path="/mypage" element={<MyPage />} />
           <Route path="/wishlist" element={<WishlistPage />} />
+          <Route path="/admin" element={<AdminDashboard />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
         <LineFloatingButton />

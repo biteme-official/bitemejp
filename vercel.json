@@ -45,6 +45,7 @@
     { "source": "/api/line-callback", "destination": "/api/line-callback" },
     { "source": "/api/wishlist", "destination": "/api/wishlist" },
     { "source": "/api/slack-report", "destination": "/api/slack-report" },
+    { "source": "/api/analytics", "destination": "/api/analytics" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
