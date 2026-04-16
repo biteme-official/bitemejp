@@ -29,7 +29,7 @@ interface AnalyticsData {
   topPages: { pagePath: string; screenPageViews: number; activeUsers: number; averageSessionDuration: number }[];
   trafficSources: { sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number }[];
   devices: { deviceCategory: string; sessions: number }[];
-  itemViews: { itemId: string; itemViews: number; addToCarts: number }[];
+  itemViews: { itemId: string; itemsViewed: number; itemsAddedToCart: number }[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -354,8 +354,8 @@ function OperationsPanel({
     for (const d of itemViews) {
       // GA4 itemId = "gid://shopify/Product/1234567890" 형태
       m.set(d.itemId as string, {
-        views: d.itemViews as number,
-        carts: d.addToCarts as number,
+        views: d.itemsViewed as number,
+        carts: d.itemsAddedToCart as number,
       });
     }
     return m;
