@@ -711,8 +711,6 @@ export default function AdminDashboard() {
             GA4: G-WLTZH90W2L &nbsp;·&nbsp; Shopify: biteme-jp.myshopify.com &nbsp;·&nbsp; {RANGE_LABELS[range]} 데이터
           </p>
         )}
-          </>
-        )}
       </div>
     </div>
   );
