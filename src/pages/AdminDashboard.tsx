@@ -1,23 +1,17 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell,
 } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Range = "today" | "7d" | "28d" | "90d";
 
 interface ShopifyData {
-  summary: {
-    totalOrders: number;
-    totalRevenue: number;
-    averageOrderValue: number;
-    totalItemsSold: number;
-  };
+  summary: { totalOrders: number; totalRevenue: number; averageOrderValue: number; totalItemsSold: number };
   dailyOrders: { date: string; orders: number; revenue: number }[];
   topProducts: { title: string; quantity: number; revenue: number }[];
   lowStock: { title: string; variant: string; quantity: number }[];
@@ -25,13 +19,9 @@ interface ShopifyData {
 
 interface AnalyticsData {
   overview: {
-    sessions?: number;
-    activeUsers?: number;
-    newUsers?: number;
-    bounceRate?: number;
-    averageSessionDuration?: number;
-    purchaseRevenue?: number;
-    transactions?: number;
+    sessions?: number; activeUsers?: number; newUsers?: number;
+    bounceRate?: number; averageSessionDuration?: number;
+    purchaseRevenue?: number; transactions?: number;
   };
   funnel: { eventName: string; eventCount: number }[];
   revenueOverTime: { date: string; purchaseRevenue: number; transactions: number; sessions: number }[];
@@ -43,77 +33,125 @@ interface AnalyticsData {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const BRAND = "#f85a24";
-const PALETTE = ["#f85a24", "#fb8c5a", "#fdb997", "#fdd8c5", "#ffe9e0"];
+const PALETTE = ["#f85a24", "#fb8c5a", "#fdb997", "#94a3b8", "#cbd5e1"];
 
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
+function formatDuration(sec: number) {
+  return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
+}
+function formatRevenue(v: number) {
+  return `¥${Math.round(v).toLocaleString("ja-JP")}`;
+}
+function ga4DateToISO(raw: string) {
+  return `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}`;
+}
+function isoToLabel(iso: string) {
+  return `${iso.slice(5, 7)}/${iso.slice(8, 10)}`;
 }
 
-function formatRevenue(value: number): string {
-  return `¥${Math.round(value).toLocaleString("ja-JP")}`;
-}
-
-function formatDate(raw: string): string {
-  // "20241201" → "12/01"
-  if (raw.length === 8) return `${raw.slice(4, 6)}/${raw.slice(6, 8)}`;
-  return raw;
+// GA4 sessions + Shopify orders/revenue를 날짜 기준으로 합침
+function buildTimeline(
+  ga4: AnalyticsData["revenueOverTime"],
+  shopify: ShopifyData["dailyOrders"]
+) {
+  const map = new Map<string, { date: string; sessions: number; orders: number; revenue: number }>();
+  for (const d of shopify) {
+    map.set(d.date, { date: isoToLabel(d.date), sessions: 0, orders: d.orders, revenue: d.revenue });
+  }
+  for (const d of ga4) {
+    const key = ga4DateToISO(d.date);
+    const ex = map.get(key) ?? { date: isoToLabel(key), sessions: 0, orders: 0, revenue: 0 };
+    ex.sessions = d.sessions;
+    map.set(key, ex);
+  }
+  return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
 }
 
 const FUNNEL_ORDER = ["view_item", "add_to_cart", "begin_checkout", "purchase"] as const;
-const FUNNEL_LABELS: Record<string, string> = {
-  view_item: "view_item",
-  add_to_cart: "add_to_cart",
-  begin_checkout: "begin_checkout",
-  purchase: "purchase",
-};
 
-// ─── API fetch ────────────────────────────────────────────────────────────────
-
-async function fetchShopify(range: Range, secret: string): Promise<ShopifyData> {
-  const res = await fetch(`/api/shopify-analytics?range=${range}`, {
-    headers: { Authorization: `Bearer ${secret}` },
-  });
-  if (res.status === 401) throw new Error("UNAUTHORIZED");
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.message || "Failed to fetch Shopify data");
-  }
-  return res.json();
-}
+// ─── API ──────────────────────────────────────────────────────────────────────
 
 async function fetchAnalytics(range: Range, secret: string): Promise<AnalyticsData> {
-  const res = await fetch(`/api/analytics?range=${range}`, {
-    headers: { Authorization: `Bearer ${secret}` },
-  });
+  const res = await fetch(`/api/analytics?range=${range}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.message || "Failed to fetch analytics");
-  }
+  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "GA4 오류"); }
   return res.json();
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+async function fetchShopify(range: Range, secret: string): Promise<ShopifyData> {
+  const res = await fetch(`/api/shopify-analytics?range=${range}`, { headers: { Authorization: `Bearer ${secret}` } });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "Shopify 오류"); }
+  return res.json();
+}
 
-function KpiCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+// ─── 공통 컴포넌트 ─────────────────────────────────────────────────────────────
+
+function SectionLabel({ children }: { children: string }) {
   return (
-    <Card>
-      <CardContent className="pt-5 pb-4">
+    <div className="flex items-center gap-3">
+      <div className="h-px flex-1 bg-border" />
+      <span className="text-[11px] font-semibold text-muted-foreground tracking-widest uppercase">{children}</span>
+      <div className="h-px flex-1 bg-border" />
+    </div>
+  );
+}
+
+function KpiCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
+  return (
+    <Card className={accent ? "border-orange-200 bg-orange-50/40" : ""}>
+      <CardContent className="pt-4 pb-3">
         <p className="text-xs text-muted-foreground mb-1">{label}</p>
-        <p className="text-2xl font-bold tracking-tight">{value}</p>
+        <p className={`text-2xl font-bold tracking-tight ${accent ? "text-orange-600" : ""}`}>{value}</p>
         {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
       </CardContent>
     </Card>
   );
 }
 
+// ─── 통합 트래픽·매출 차트 ────────────────────────────────────────────────────
+
+function CombinedChart({ timeline }: { timeline: ReturnType<typeof buildTimeline> }) {
+  const interval = Math.max(0, Math.ceil(timeline.length / 10) - 1);
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold">트래픽 · 주문 · 매출 추이</CardTitle>
+        <p className="text-xs text-muted-foreground">세션(막대) / 매출(주황선) / 주문수(회색선)</p>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={220}>
+          <ComposedChart data={timeline} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <XAxis dataKey="date" tick={{ fontSize: 10 }} interval={interval} />
+            <YAxis yAxisId="sess" tick={{ fontSize: 10 }} width={36} />
+            <YAxis yAxisId="rev" orientation="right" tick={{ fontSize: 10 }} tickFormatter={(v) => `¥${(v / 1000).toFixed(0)}k`} width={48} />
+            <Tooltip
+              formatter={(value: number, name: string) => {
+                if (name === "revenue") return [formatRevenue(value), "매출"];
+                if (name === "sessions") return [value.toLocaleString(), "세션"];
+                return [value, "주문 수"];
+              }}
+            />
+            <Legend
+              formatter={(v) => v === "revenue" ? "매출" : v === "sessions" ? "세션" : "주문 수"}
+              wrapperStyle={{ fontSize: 11 }}
+            />
+            <Bar yAxisId="sess" dataKey="sessions" fill={BRAND} opacity={0.25} radius={[2, 2, 0, 0]} />
+            <Line yAxisId="rev" type="monotone" dataKey="revenue" stroke={BRAND} strokeWidth={2.5} dot={false} />
+            <Line yAxisId="sess" type="monotone" dataKey="orders" stroke="#94a3b8" strokeWidth={1.5} dot={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── EC 퍼널 ──────────────────────────────────────────────────────────────────
+
 function FunnelSection({ data }: { data: AnalyticsData["funnel"] }) {
   const map = Object.fromEntries(data.map((d) => [d.eventName, d.eventCount]));
-  const rows = FUNNEL_ORDER.map((key) => ({ key, label: FUNNEL_LABELS[key], count: map[key] ?? 0 }));
+  const rows = FUNNEL_ORDER.map((key) => ({ key, count: map[key] ?? 0 }));
   const max = rows[0]?.count || 1;
-
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -126,12 +164,10 @@ function FunnelSection({ data }: { data: AnalyticsData["funnel"] }) {
           return (
             <div key={row.key}>
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-muted-foreground">{row.label}</span>
+                <span className="text-xs text-muted-foreground font-mono">{row.key}</span>
                 <div className="flex items-center gap-2">
-                  {rate && (
-                    <span className="text-xs text-muted-foreground">↑ {rate}%</span>
-                  )}
-                  <span className="text-sm font-medium">{row.count.toLocaleString()}</span>
+                  {rate && <span className="text-xs text-muted-foreground">{rate}%</span>}
+                  <span className="text-sm font-semibold">{row.count.toLocaleString()}</span>
                 </div>
               </div>
               <div className="h-2 bg-muted rounded-full overflow-hidden">
@@ -148,103 +184,47 @@ function FunnelSection({ data }: { data: AnalyticsData["funnel"] }) {
   );
 }
 
-function RevenueChart({ data, range }: { data: AnalyticsData["revenueOverTime"]; range: Range }) {
-  const formatted = data.map((d) => ({
-    ...d,
-    date: formatDate(d.date as string),
-  }));
-  const showEveryNth = range === "90d" ? 7 : 1;
+// ─── 상위 상품 ────────────────────────────────────────────────────────────────
 
+function TopProductsTable({ data }: { data: ShopifyData["topProducts"] }) {
+  const maxRev = data[0]?.revenue || 1;
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">매출 추이</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ResponsiveContainer width="100%" height={200}>
-          <LineChart data={formatted} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis
-              dataKey="date"
-              tick={{ fontSize: 10 }}
-              interval={showEveryNth - 1}
-            />
-            <YAxis
-              yAxisId="rev"
-              tick={{ fontSize: 10 }}
-              tickFormatter={(v) => `¥${(v / 1000).toFixed(0)}k`}
-              width={48}
-            />
-            <YAxis yAxisId="txn" orientation="right" tick={{ fontSize: 10 }} width={24} />
-            <Tooltip
-              formatter={(value: number, name: string) =>
-                name === "purchaseRevenue" ? [formatRevenue(value), "매출"] : [value, "건수"]
-              }
-            />
-            <Line yAxisId="rev" type="monotone" dataKey="purchaseRevenue" stroke={BRAND} strokeWidth={2} dot={false} name="purchaseRevenue" />
-            <Line yAxisId="txn" type="monotone" dataKey="transactions" stroke="#94a3b8" strokeWidth={1.5} dot={false} name="transactions" />
-          </LineChart>
-        </ResponsiveContainer>
-      </CardContent>
-    </Card>
-  );
-}
-
-function SessionsChart({ data }: { data: AnalyticsData["revenueOverTime"] }) {
-  const formatted = data.map((d) => ({ date: formatDate(d.date as string), sessions: d.sessions }));
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">세션 추이</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={formatted} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis dataKey="date" tick={{ fontSize: 10 }} interval={Math.ceil(formatted.length / 10) - 1} />
-            <YAxis tick={{ fontSize: 10 }} width={36} />
-            <Tooltip formatter={(v: number) => [v.toLocaleString(), "세션"]} />
-            <Bar dataKey="sessions" fill={BRAND} opacity={0.8} radius={[2, 2, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TopPagesTable({ data }: { data: AnalyticsData["topPages"] }) {
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">상위 페이지</CardTitle>
+        <CardTitle className="text-sm font-semibold">상위 판매 상품</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b">
-                <th className="text-left px-4 py-2 font-medium text-muted-foreground">페이지</th>
-                <th className="text-right px-4 py-2 font-medium text-muted-foreground">PV</th>
-                <th className="text-right px-4 py-2 font-medium text-muted-foreground">유저</th>
-                <th className="text-right px-4 py-2 font-medium text-muted-foreground">체류 시간</th>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left px-4 py-2 font-medium text-muted-foreground">상품명</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">수량</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((row, i) => (
+              <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                <td className="px-4 py-2">
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 w-14 shrink-0 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${(row.revenue / maxRev) * 100}%`, backgroundColor: BRAND }} />
+                    </div>
+                    <span className="truncate max-w-[200px]">{row.title}</span>
+                  </div>
+                </td>
+                <td className="px-4 py-2 text-right">{row.quantity}개</td>
+                <td className="px-4 py-2 text-right font-medium">{formatRevenue(row.revenue)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {data.map((row, i) => (
-                <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-2 font-mono max-w-[200px] truncate">{row.pagePath}</td>
-                  <td className="px-4 py-2 text-right">{(row.screenPageViews as number).toLocaleString()}</td>
-                  <td className="px-4 py-2 text-right">{(row.activeUsers as number).toLocaleString()}</td>
-                  <td className="px-4 py-2 text-right">{formatDuration(row.averageSessionDuration as number)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </CardContent>
     </Card>
   );
 }
+
+// ─── 유입 경로 ────────────────────────────────────────────────────────────────
 
 function TrafficSourcesTable({ data }: { data: AnalyticsData["trafficSources"] }) {
   const total = data.reduce((s, r) => s + (r.sessions as number), 0);
@@ -254,189 +234,127 @@ function TrafficSourcesTable({ data }: { data: AnalyticsData["trafficSources"] }
         <CardTitle className="text-sm font-semibold">유입 경로</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b">
-                <th className="text-left px-4 py-2 font-medium text-muted-foreground">소스 / 매체</th>
-                <th className="text-right px-4 py-2 font-medium text-muted-foreground">세션</th>
-                <th className="text-right px-4 py-2 font-medium text-muted-foreground">비율</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((row, i) => {
-                const sessions = row.sessions as number;
-                const pct = total > 0 ? ((sessions / total) * 100).toFixed(1) : "0.0";
-                return (
-                  <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-2">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left px-4 py-2 font-medium text-muted-foreground">소스 / 매체</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">세션</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground w-20">비율</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((row, i) => {
+              const sessions = row.sessions as number;
+              const pct = total > 0 ? ((sessions / total) * 100).toFixed(1) : "0.0";
+              return (
+                <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-2">
+                      <div className="h-1 flex-1 max-w-[80px] rounded-full bg-muted overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: BRAND, opacity: 0.6 }} />
+                      </div>
                       {row.sessionSource} / <span className="text-muted-foreground">{row.sessionMedium}</span>
-                    </td>
-                    <td className="px-4 py-2 text-right">{sessions.toLocaleString()}</td>
-                    <td className="px-4 py-2 text-right">{pct}%</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2 text-right">{sessions.toLocaleString()}</td>
+                  <td className="px-4 py-2 text-right">{pct}%</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </CardContent>
     </Card>
   );
 }
 
-function DevicesChart({ data }: { data: AnalyticsData["devices"] }) {
-  const DEVICE_LABELS: Record<string, string> = {
-    mobile: "모바일",
-    desktop: "데스크탑",
-    tablet: "태블릿",
-  };
-  const formatted = data.map((d) => ({
-    name: DEVICE_LABELS[d.deviceCategory as string] ?? d.deviceCategory,
-    value: d.sessions as number,
-  }));
+// ─── 디바이스 ─────────────────────────────────────────────────────────────────
 
+function DevicesChart({ data }: { data: AnalyticsData["devices"] }) {
+  const LABELS: Record<string, string> = { mobile: "모바일", desktop: "데스크탑", tablet: "태블릿" };
+  const formatted = data.map((d) => ({ name: LABELS[d.deviceCategory as string] ?? d.deviceCategory, value: d.sessions as number }));
+  const total = formatted.reduce((s, r) => s + r.value, 0);
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-semibold">디바이스</CardTitle>
       </CardHeader>
       <CardContent className="flex items-center gap-4">
-        <ResponsiveContainer width={120} height={120}>
+        <ResponsiveContainer width={100} height={100}>
           <PieChart>
-            <Pie data={formatted} cx="50%" cy="50%" innerRadius={32} outerRadius={52} dataKey="value" paddingAngle={2}>
-              {formatted.map((_, i) => (
-                <Cell key={i} fill={PALETTE[i % PALETTE.length]} />
-              ))}
+            <Pie data={formatted} cx="50%" cy="50%" innerRadius={28} outerRadius={46} dataKey="value" paddingAngle={2}>
+              {formatted.map((_, i) => <Cell key={i} fill={PALETTE[i % PALETTE.length]} />)}
             </Pie>
           </PieChart>
         </ResponsiveContainer>
         <div className="space-y-2 flex-1">
-          {formatted.map((d, i) => {
-            const total = formatted.reduce((s, r) => s + r.value, 0);
-            const pct = total > 0 ? ((d.value / total) * 100).toFixed(1) : "0.0";
-            return (
-              <div key={i} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1.5">
-                  <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: PALETTE[i % PALETTE.length] }} />
-                  {d.name}
-                </div>
-                <span className="font-medium">{pct}%</span>
+          {formatted.map((d, i) => (
+            <div key={i} className="flex items-center justify-between text-xs">
+              <div className="flex items-center gap-1.5">
+                <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: PALETTE[i % PALETTE.length] }} />
+                {d.name}
               </div>
-            );
-          })}
+              <span className="font-medium">{total > 0 ? ((d.value / total) * 100).toFixed(1) : 0}%</span>
+            </div>
+          ))}
         </div>
       </CardContent>
     </Card>
   );
 }
 
-// ─── Shopify Components ───────────────────────────────────────────────────────
+// ─── 상위 페이지 ──────────────────────────────────────────────────────────────
 
-function ShopifyOrdersChart({ data }: { data: ShopifyData["dailyOrders"] }) {
-  const formatted = data.map((d) => ({ ...d, date: formatDate(d.date) }));
+function TopPagesTable({ data }: { data: AnalyticsData["topPages"] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">일별 주문 / 매출</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={formatted} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis dataKey="date" tick={{ fontSize: 10 }} interval={Math.ceil(formatted.length / 10) - 1} />
-            <YAxis yAxisId="rev" tick={{ fontSize: 10 }} tickFormatter={(v) => `¥${(v / 1000).toFixed(0)}k`} width={48} />
-            <YAxis yAxisId="ord" orientation="right" tick={{ fontSize: 10 }} width={24} />
-            <Tooltip
-              formatter={(value: number, name: string) =>
-                name === "revenue" ? [formatRevenue(value), "매출"] : [value, "주문 수"]
-              }
-            />
-            <Legend formatter={(v) => (v === "revenue" ? "매출" : "주문 수")} wrapperStyle={{ fontSize: 11 }} />
-            <Bar yAxisId="rev" dataKey="revenue" fill={BRAND} opacity={0.85} radius={[2, 2, 0, 0]} />
-            <Bar yAxisId="ord" dataKey="orders" fill="#94a3b8" opacity={0.7} radius={[2, 2, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </CardContent>
-    </Card>
-  );
-}
-
-function TopProductsTable({ data }: { data: ShopifyData["topProducts"] }) {
-  const maxRevenue = data[0]?.revenue || 1;
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">상위 상품</CardTitle>
+        <CardTitle className="text-sm font-semibold">상위 페이지</CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b">
-                <th className="text-left px-4 py-2 font-medium text-muted-foreground">상품명</th>
-                <th className="text-right px-4 py-2 font-medium text-muted-foreground">수량</th>
-                <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left px-4 py-2 font-medium text-muted-foreground">페이지</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">PV</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">유저</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">체류</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((row, i) => (
+              <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                <td className="px-4 py-2 font-mono truncate max-w-[220px]">{row.pagePath}</td>
+                <td className="px-4 py-2 text-right">{(row.screenPageViews as number).toLocaleString()}</td>
+                <td className="px-4 py-2 text-right">{(row.activeUsers as number).toLocaleString()}</td>
+                <td className="px-4 py-2 text-right">{formatDuration(row.averageSessionDuration as number)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {data.map((row, i) => (
-                <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-2">
-                    <div className="flex items-center gap-2">
-                      <div className="h-1.5 rounded-full bg-muted overflow-hidden w-16 shrink-0">
-                        <div
-                          className="h-full rounded-full"
-                          style={{ width: `${(row.revenue / maxRevenue) * 100}%`, backgroundColor: BRAND }}
-                        />
-                      </div>
-                      <span className="truncate max-w-[180px]">{row.title}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-2 text-right">{row.quantity.toLocaleString()}개</td>
-                  <td className="px-4 py-2 text-right font-medium">{formatRevenue(row.revenue)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </CardContent>
     </Card>
   );
 }
 
-function LowStockTable({ data }: { data: ShopifyData["lowStock"] }) {
-  if (data.length === 0) {
-    return (
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-semibold">재고 부족 알림</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-xs text-muted-foreground text-center py-4">재고 부족 상품 없음</p>
-        </CardContent>
-      </Card>
-    );
-  }
+// ─── 재고 부족 ────────────────────────────────────────────────────────────────
+
+function LowStockList({ data }: { data: ShopifyData["lowStock"] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-semibold flex items-center gap-2">
-          재고 부족 알림
-          <span className="text-xs font-normal px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">
-            {data.length}개
-          </span>
+          재고 부족
+          {data.length > 0 && (
+            <span className="text-[11px] font-normal px-1.5 py-0.5 rounded-full bg-red-100 text-red-600">{data.length}개</span>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent className="p-0">
-        <div className="overflow-x-auto">
+        {data.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-6">부족 재고 없음</p>
+        ) : (
           <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b">
-                <th className="text-left px-4 py-2 font-medium text-muted-foreground">상품</th>
-                <th className="text-right px-4 py-2 font-medium text-muted-foreground">잔여 재고</th>
-              </tr>
-            </thead>
             <tbody>
               {data.map((row, i) => (
                 <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
@@ -453,25 +371,17 @@ function LowStockTable({ data }: { data: ShopifyData["lowStock"] }) {
               ))}
             </tbody>
           </table>
-        </div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
-// ─── Password Gate ────────────────────────────────────────────────────────────
+// ─── 비밀번호 게이트 ───────────────────────────────────────────────────────────
 
-function PasswordGate({ onAuth }: { onAuth: (secret: string) => void }) {
+function PasswordGate({ onAuth }: { onAuth: (s: string) => void }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState(false);
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!value.trim()) { setError(true); return; }
-    setError(false);
-    onAuth(value.trim());
-  };
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="w-full max-w-sm px-6">
@@ -479,25 +389,19 @@ function PasswordGate({ onAuth }: { onAuth: (secret: string) => void }) {
           <div className="text-2xl font-bold" style={{ color: BRAND }}>BITEME</div>
           <p className="text-sm text-muted-foreground mt-1">Admin Dashboard</p>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={(e) => { e.preventDefault(); if (!value.trim()) { setError(true); return; } onAuth(value.trim()); }} className="space-y-4">
           <div>
             <input
               type="password"
               placeholder="관리자 시크릿 키"
               value={value}
               onChange={(e) => { setValue(e.target.value); setError(false); }}
-              className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 transition-all ${
-                error ? "border-red-400 focus:ring-red-200" : "border-input focus:ring-ring/30"
-              }`}
+              className={`w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 transition-all ${error ? "border-red-400 focus:ring-red-200" : "border-input focus:ring-ring/30"}`}
               autoFocus
             />
             {error && <p className="text-xs text-red-500 mt-1">키를 입력해주세요</p>}
           </div>
-          <button
-            type="submit"
-            className="w-full py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90 active:opacity-80"
-            style={{ backgroundColor: BRAND }}
-          >
+          <button type="submit" className="w-full py-2 rounded-lg text-sm font-medium text-white hover:opacity-90 transition-opacity" style={{ backgroundColor: BRAND }}>
             로그인
           </button>
         </form>
@@ -506,210 +410,163 @@ function PasswordGate({ onAuth }: { onAuth: (secret: string) => void }) {
   );
 }
 
-// ─── Main Dashboard ───────────────────────────────────────────────────────────
+// ─── 메인 대시보드 ────────────────────────────────────────────────────────────
 
-const RANGE_LABELS: Record<Range, string> = {
-  today: "오늘",
-  "7d": "7일",
-  "28d": "28일",
-  "90d": "90일",
-};
+const RANGE_LABELS: Record<Range, string> = { today: "오늘", "7d": "7일", "28d": "28일", "90d": "90일" };
 
 export default function AdminDashboard() {
-  const [secret, setSecret] = useState<string>(() => sessionStorage.getItem("adminSecret") || "");
+  const [secret, setSecret] = useState(() => sessionStorage.getItem("adminSecret") || "");
   const [range, setRange] = useState<Range>("7d");
 
-  const handleAuth = useCallback((s: string) => {
-    sessionStorage.setItem("adminSecret", s);
-    setSecret(s);
-  }, []);
+  const handleAuth = useCallback((s: string) => { sessionStorage.setItem("adminSecret", s); setSecret(s); }, []);
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const retry = (count: number, err: unknown) => {
+    if (err instanceof Error && err.message === "UNAUTHORIZED") return false;
+    return count < 2;
+  };
+
+  const { data, isLoading: ga4Loading, isError, error, refetch } = useQuery({
     queryKey: ["analytics", range, secret],
     queryFn: () => fetchAnalytics(range, secret),
     enabled: !!secret,
     staleTime: 5 * 60 * 1000,
-    retry: (count, err) => {
-      if (err instanceof Error && err.message === "UNAUTHORIZED") return false;
-      return count < 2;
-    },
+    retry,
   });
 
-  const { data: shopifyData, isLoading: shopifyLoading, isError: shopifyError, error: shopifyErr } = useQuery({
+  const { data: shopify, isLoading: shopifyLoading, isError: shopifyIsError, error: shopifyErr } = useQuery({
     queryKey: ["shopify-analytics", range, secret],
     queryFn: () => fetchShopify(range, secret),
     enabled: !!secret,
     staleTime: 5 * 60 * 1000,
-    retry: (count, err) => {
-      if (err instanceof Error && err.message === "UNAUTHORIZED") return false;
-      return count < 2;
-    },
+    retry,
   });
 
   const isUnauthorized = isError && error instanceof Error && error.message === "UNAUTHORIZED";
-
   if (!secret || isUnauthorized) {
     if (isUnauthorized) sessionStorage.removeItem("adminSecret");
-    return (
-      <PasswordGate
-        onAuth={handleAuth}
-      />
-    );
+    return <PasswordGate onAuth={handleAuth} />;
   }
 
   const ov = data?.overview ?? {};
-  const convRate = ov.sessions && (ov.sessions as number) > 0
-    ? (((ov.transactions as number ?? 0) / (ov.sessions as number)) * 100).toFixed(2)
-    : "—";
+  const sessions = (ov.sessions as number) ?? 0;
+  const totalOrders = shopify?.summary.totalOrders ?? 0;
+  const totalRevenue = shopify?.summary.totalRevenue ?? 0;
+  const aov = shopify?.summary.averageOrderValue ?? 0;
+  const convRate = sessions > 0 ? ((totalOrders / sessions) * 100).toFixed(2) : "—";
+  const isLoading = ga4Loading || shopifyLoading;
+
+  const timeline = useMemo(() => {
+    if (!data || !shopify) return [];
+    return buildTimeline(data.revenueOverTime, shopify.dailyOrders);
+  }, [data, shopify]);
 
   return (
     <div className="min-h-screen bg-muted/30">
-      {/* Header */}
+      {/* 헤더 */}
       <div className="bg-background border-b sticky top-0 z-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <span className="font-bold text-sm" style={{ color: BRAND }}>BITEME</span>
-            <span className="text-sm font-medium text-muted-foreground">Analytics</span>
+            <span className="text-xs text-muted-foreground">Analytics</span>
           </div>
           <div className="flex items-center gap-2">
-            {/* Range tabs */}
             <div className="flex rounded-lg border bg-background overflow-hidden text-xs">
               {(["today", "7d", "28d", "90d"] as Range[]).map((r) => (
                 <button
                   key={r}
                   onClick={() => setRange(r)}
-                  className={`px-3 py-1.5 transition-colors ${
-                    range === r
-                      ? "text-white font-medium"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
+                  className={`px-3 py-1.5 transition-colors ${range === r ? "text-white font-medium" : "text-muted-foreground hover:text-foreground"}`}
                   style={range === r ? { backgroundColor: BRAND } : {}}
                 >
                   {RANGE_LABELS[r]}
                 </button>
               ))}
             </div>
-            <button
-              onClick={() => refetch()}
-              className="text-xs px-3 py-1.5 rounded-lg border hover:bg-muted transition-colors"
-            >
-              새로고침
-            </button>
-            <button
-              onClick={() => {
-                sessionStorage.removeItem("adminSecret");
-                setSecret("");
-              }}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-            >
-              로그아웃
-            </button>
+            <button onClick={() => refetch()} className="text-xs px-3 py-1.5 rounded-lg border hover:bg-muted transition-colors">새로고침</button>
+            <button onClick={() => { sessionStorage.removeItem("adminSecret"); setSecret(""); }} className="text-xs text-muted-foreground hover:text-foreground transition-colors">로그아웃</button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-5">
         {isLoading && (
-          <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
-            데이터를 불러오는 중...
-          </div>
+          <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">데이터를 불러오는 중...</div>
         )}
 
+        {/* 에러 */}
         {isError && !isUnauthorized && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {error instanceof Error ? error.message : "오류가 발생했습니다"}
+            GA4 오류: {error instanceof Error ? error.message : "알 수 없는 오류"}
+          </div>
+        )}
+        {shopifyIsError && !(shopifyErr instanceof Error && shopifyErr.message === "UNAUTHORIZED") && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            Shopify 오류: {shopifyErr instanceof Error ? shopifyErr.message : "알 수 없는 오류"}
           </div>
         )}
 
-        {data && (
+        {(data || shopify) && (
           <>
-            {/* KPI Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-              <KpiCard label="세션" value={(ov.sessions as number ?? 0).toLocaleString()} />
-              <KpiCard label="유저" value={(ov.activeUsers as number ?? 0).toLocaleString()} />
-              <KpiCard label="신규 유저" value={(ov.newUsers as number ?? 0).toLocaleString()} />
-              <KpiCard
-                label="이탈률"
-                value={`${(((ov.bounceRate as number ?? 0)) * 100).toFixed(1)}%`}
-              />
-              <KpiCard
-                label="평균 체류 시간"
-                value={formatDuration(ov.averageSessionDuration as number ?? 0)}
-              />
+            {/* ── 핵심 비즈니스 지표 ── */}
+            <SectionLabel>핵심 지표</SectionLabel>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <KpiCard label="총 매출" value={formatRevenue(totalRevenue)} accent />
+              <KpiCard label="주문 수" value={`${totalOrders.toLocaleString()}건`} accent />
+              <KpiCard label="평균 주문금액" value={formatRevenue(aov)} accent />
               <KpiCard
                 label="구매 전환율"
                 value={convRate === "—" ? "—" : `${convRate}%`}
-                sub={`${(ov.transactions as number ?? 0)}건 / ${formatRevenue(ov.purchaseRevenue as number ?? 0)}`}
+                sub={`세션 ${sessions.toLocaleString()} → 주문 ${totalOrders}`}
+                accent
               />
             </div>
 
-            {/* Funnel + Revenue */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <FunnelSection data={data.funnel} />
-              <div className="lg:col-span-2 space-y-4">
-                <RevenueChart data={data.revenueOverTime} range={range} />
-              </div>
-            </div>
-
-            {/* Sessions chart */}
-            <SessionsChart data={data.revenueOverTime} />
-
-            {/* Pages + Sources + Devices */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-              <div className="lg:col-span-2">
-                <TopPagesTable data={data.topPages} />
-              </div>
-              <DevicesChart data={data.devices} />
-            </div>
-
-            <TrafficSourcesTable data={data.trafficSources} />
-          </>
-        )}
-
-        {/* ── 쇼피파이 섹션 ── */}
-        <div className="flex items-center gap-3 pt-2">
-          <div className="h-px flex-1 bg-border" />
-          <span className="text-xs font-semibold text-muted-foreground tracking-widest uppercase">Shopify 주문 현황</span>
-          <div className="h-px flex-1 bg-border" />
-        </div>
-
-        {shopifyLoading && (
-          <div className="flex items-center justify-center h-40 text-sm text-muted-foreground">
-            쇼피파이 데이터를 불러오는 중...
-          </div>
-        )}
-
-        {shopifyError && !(shopifyErr instanceof Error && shopifyErr.message === "UNAUTHORIZED") && (
-          <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            {shopifyErr instanceof Error ? shopifyErr.message : "쇼피파이 데이터 오류"}
-          </div>
-        )}
-
-        {shopifyData && (
-          <>
-            {/* Shopify KPI Cards */}
+            {/* ── 트래픽 지표 ── */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <KpiCard label="총 주문 수" value={`${shopifyData.summary.totalOrders.toLocaleString()}건`} />
-              <KpiCard label="총 매출" value={formatRevenue(shopifyData.summary.totalRevenue)} />
-              <KpiCard label="평균 주문금액" value={formatRevenue(shopifyData.summary.averageOrderValue)} />
-              <KpiCard label="총 판매 수량" value={`${shopifyData.summary.totalItemsSold.toLocaleString()}개`} />
+              <KpiCard label="세션" value={sessions.toLocaleString()} />
+              <KpiCard label="유저" value={((ov.activeUsers as number) ?? 0).toLocaleString()} />
+              <KpiCard label="이탈률" value={`${(((ov.bounceRate as number) ?? 0) * 100).toFixed(1)}%`} />
+              <KpiCard label="평균 체류 시간" value={formatDuration((ov.averageSessionDuration as number) ?? 0)} />
             </div>
 
-            {/* Daily orders chart */}
-            <ShopifyOrdersChart data={shopifyData.dailyOrders} />
+            {/* ── 통합 추이 차트 ── */}
+            {timeline.length > 0 && <CombinedChart timeline={timeline} />}
 
-            {/* Top products + Low stock */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <TopProductsTable data={shopifyData.topProducts} />
-              <LowStockTable data={shopifyData.lowStock} />
-            </div>
+            {/* ── EC 퍼널 + 상위 상품 ── */}
+            {(data || shopify) && (
+              <>
+                <SectionLabel>전환 · 상품</SectionLabel>
+                <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+                  {data && <div className="lg:col-span-2"><FunnelSection data={data.funnel} /></div>}
+                  {shopify && <div className="lg:col-span-3"><TopProductsTable data={shopify.topProducts} /></div>}
+                </div>
+              </>
+            )}
+
+            {/* ── 트래픽 분석 ── */}
+            {data && (
+              <>
+                <SectionLabel>트래픽 분석</SectionLabel>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className="lg:col-span-2"><TrafficSourcesTable data={data.trafficSources} /></div>
+                  <DevicesChart data={data.devices} />
+                </div>
+                <TopPagesTable data={data.topPages} />
+              </>
+            )}
+
+            {/* ── 운영 현황 ── */}
+            {shopify && (
+              <>
+                <SectionLabel>운영 현황</SectionLabel>
+                <LowStockList data={shopify.lowStock} />
+              </>
+            )}
+
+            <p className="text-center text-xs text-muted-foreground pb-4">
+              GA4: G-WLTZH90W2L · Shopify: biteme-jp.myshopify.com · {RANGE_LABELS[range]} 데이터
+            </p>
           </>
-        )}
-
-        {(data || shopifyData) && (
-          <p className="text-center text-xs text-muted-foreground pb-4">
-            GA4: G-WLTZH90W2L &nbsp;·&nbsp; Shopify: biteme-jp.myshopify.com &nbsp;·&nbsp; {RANGE_LABELS[range]} 데이터
-          </p>
         )}
       </div>
     </div>
