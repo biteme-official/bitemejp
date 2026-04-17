@@ -201,6 +201,7 @@ const GET_PRODUCT_BY_HANDLE_QUERY = `
               currencyCode
             }
             availableForSale
+            quantityAvailable
             image {
               url
               altText

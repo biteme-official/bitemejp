@@ -7,6 +7,33 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+// ─── 상품명 자동번역 (일어 → 한국어, 어드민 전용) ───────────────────────────
+// MyMemory 무료 API 사용. 실제 사이트(biteme.co.jp)에는 영향 없음.
+const translationCache = new Map<string, string>();
+
+async function translateBatch(titles: string[]): Promise<Map<string, string>> {
+  const uncached = [...new Set(titles)].filter((t) => t && !translationCache.has(t));
+  await Promise.all(
+    uncached.map(async (title) => {
+      try {
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ja&tl=ko&dt=t&q=${encodeURIComponent(title)}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        // 응답 형식: [[["번역된텍스트","원본",...], ...], ...]
+        const translated = (json[0] as [string, string][])?.map((seg) => seg[0]).join("") ?? title;
+        translationCache.set(title, translated || title);
+      } catch {
+        translationCache.set(title, title);
+      }
+    })
+  );
+  return translationCache;
+}
+
+function translateTitle(title: string): string {
+  return translationCache.get(title) ?? title;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Range = "today" | "7d" | "28d" | "90d";
@@ -213,7 +240,7 @@ function TopProductsTable({ data }: { data: ShopifyData["topProducts"] }) {
                     <div className="h-1.5 w-14 shrink-0 rounded-full bg-muted overflow-hidden">
                       <div className="h-full rounded-full" style={{ width: `${(row.revenue / maxRev) * 100}%`, backgroundColor: BRAND }} />
                     </div>
-                    <span className="truncate max-w-[200px]">{row.title}</span>
+                    <span className="truncate max-w-[200px]">{translateTitle(row.title)}</span>
                   </div>
                 </td>
                 <td className="px-4 py-2 text-right">{row.quantity}개</td>
@@ -417,7 +444,7 @@ function OperationsPanel({
                     {lowStock.map((row, i) => (
                       <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                         <td className="px-4 py-2.5">
-                          {row.title}
+                          {translateTitle(row.title)}
                           {row.variant && <span className="text-muted-foreground ml-1">({row.variant})</span>}
                         </td>
                         <td className="px-4 py-2.5 text-right">
@@ -461,7 +488,7 @@ function OperationsPanel({
                               <div className="h-full rounded-full bg-blue-400" style={{ width: `${(row.views / maxViews) * 100}%` }} />
                             </div>
                           </div>
-                          <span className="truncate max-w-[160px]">{row.title}</span>
+                          <span className="truncate max-w-[160px]">{translateTitle(row.title)}</span>
                         </div>
                       </td>
                       <td className="px-4 py-2.5 text-right text-muted-foreground">
@@ -755,6 +782,23 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
     if (isUnauthorized) onLogout();
   }, [isUnauthorized, onLogout]);
 
+  // 상품명 번역 — 번역된 버전을 별도 state로 관리해야 리렌더가 올바르게 동작함
+  const [translatedShopify, setTranslatedShopify] = useState<ShopifyData | null>(null);
+  useEffect(() => {
+    if (!shopify) { setTranslatedShopify(null); return; }
+    const titles = [
+      ...shopify.topProducts.map((p) => p.title),
+      ...shopify.lowStock.map((p) => p.title),
+    ];
+    translateBatch(titles).then((cache) => {
+      setTranslatedShopify({
+        ...shopify,
+        topProducts: shopify.topProducts.map((p) => ({ ...p, title: cache.get(p.title) ?? p.title })),
+        lowStock: shopify.lowStock.map((p) => ({ ...p, title: cache.get(p.title) ?? p.title })),
+      });
+    });
+  }, [shopify]);
+
   const ov = data?.overview ?? {};
   const sessions = (ov.sessions as number) ?? 0;
   const totalOrders = shopify?.summary.totalOrders ?? 0;
@@ -851,7 +895,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               <SectionLabel>전환 · 상품</SectionLabel>
               <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
                 {data && <div className="lg:col-span-2"><FunnelSection data={data.funnel} /></div>}
-                {shopify && <div className="lg:col-span-3"><TopProductsTable data={shopify.topProducts} /></div>}
+                {shopify && <div className="lg:col-span-3"><TopProductsTable data={(translatedShopify ?? shopify).topProducts} /></div>}
               </div>
 
               {/* ── 트래픽 분석 ── */}
@@ -870,7 +914,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               {shopify && (
                 <>
                   <SectionLabel>운영 현황</SectionLabel>
-                  <OperationsPanel lowStock={shopify.lowStock} topProducts={shopify.topProducts} itemViews={data?.itemViews ?? []} />
+                  <OperationsPanel lowStock={(translatedShopify ?? shopify).lowStock} topProducts={(translatedShopify ?? shopify).topProducts} itemViews={data?.itemViews ?? []} />
                 </>
               )}
 

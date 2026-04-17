@@ -118,6 +118,13 @@ function ProductDetailSkeleton() {
   );
 }
 
+// availableForSale가 잘못 false일 때 quantityAvailable로 보정
+function isVariantAvailable(variant: { availableForSale: boolean; quantityAvailable?: number | null } | null | undefined): boolean {
+  if (!variant) return false;
+  if (variant.availableForSale) return true;
+  return typeof variant.quantityAvailable === 'number' && variant.quantityAvailable > 0;
+}
+
 export default function ProductDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -153,12 +160,19 @@ export default function ProductDetail() {
           trackViewItem(shopifyToGA4Item(data, variant));
         }
         if (data?.options) {
+          // 재고 있는 첫 번째 variant의 옵션을 기본값으로, 없으면 첫 번째 옵션값
+          const firstAvailable = data.variants.edges.find(v => isVariantAvailable(v.node))?.node
+            ?? data.variants.edges[0]?.node;
           const defaults: Record<string, string> = {};
-          data.options.forEach(option => {
-            if (option.values.length > 0) {
-              defaults[option.name] = option.values[0];
-            }
-          });
+          if (firstAvailable) {
+            firstAvailable.selectedOptions.forEach(opt => {
+              defaults[opt.name] = opt.value;
+            });
+          } else {
+            data.options.forEach(option => {
+              if (option.values.length > 0) defaults[option.name] = option.values[0];
+            });
+          }
           setSelectedOptions(defaults);
         }
       } catch (err) {
@@ -218,10 +232,18 @@ export default function ProductDetail() {
     // Set the changed option
     newOptions[changedOptionName] = newValue;
 
-    // Always reset options after the changed one to their first valid value
+    // Always reset options after the changed one to first AVAILABLE value (재고 있는 것 우선)
     for (let i = changedIndex + 1; i < product.options.length; i++) {
       const option = product.options[i];
       const firstValid = option.values.find(val => {
+        const test = { ...newOptions, [option.name]: val };
+        const variant = product.variants.edges.find(({ node }) =>
+          Object.entries(test).every(([name, v]) =>
+            node.selectedOptions.some(o => o.name === name && o.value === v)
+          )
+        )?.node;
+        return variant && isVariantAvailable(variant);
+      }) ?? option.values.find(val => {
         const test = { ...newOptions, [option.name]: val };
         return product.variants.edges.some(({ node }) =>
           Object.entries(test).every(([name, v]) =>
@@ -483,14 +505,19 @@ export default function ProductDetail() {
           // Show swatch UI if variants have unique images registered
           const showSwatchUI = hasVariantImages;
 
-          // Check availability for each option value
+          // 해당 옵션값에 재고 있는 variant가 하나라도 있으면 선택 가능
+          const isOptionAvailable = (optionValue: string) =>
+            product.variants.edges.some(({ node }) =>
+              isVariantAvailable(node) &&
+              node.selectedOptions.some(opt => opt.name === option.name && opt.value === optionValue)
+            );
+
+          // 현재 선택과 일치하는 variant (장바구니 담기 등에서 사용)
           const getVariantForOption = (optionValue: string) => {
             const testOptions = { ...selectedOptions, [option.name]: optionValue };
-            return product.variants.edges.find(({ node }) => {
-              return node.selectedOptions.every(
-                opt => testOptions[opt.name] === opt.value
-              );
-            })?.node;
+            return product.variants.edges.find(({ node }) =>
+              node.selectedOptions.every(opt => testOptions[opt.name] === opt.value)
+            )?.node;
           };
 
           // Get variant image for a specific option value
@@ -519,8 +546,7 @@ export default function ProductDetail() {
                 // Color swatches - square cards with variant images and labels
                 <div className="flex flex-wrap gap-3">
                   {option.values.map((value) => {
-                    const variant = getVariantForOption(value);
-                    const isAvailable = variant?.availableForSale ?? true;
+                    const isAvailable = isOptionAvailable(value);
                     const isSelected = selectedOptions[option.name] === value;
                     const variantImage = getVariantImageForOption(value);
 
@@ -579,15 +605,15 @@ export default function ProductDetail() {
               ) : (
                 // Size/other options - text buttons with availability status
                 <div className="space-y-2">
-                  {!product.variants.edges.every(v => v.node.availableForSale) && (
+                  {!product.variants.edges.every(v => isVariantAvailable(v.node)) && (
                     <p className="text-xs text-destructive font-medium">
-                      {product.variants.edges.some(v => v.node.availableForSale) ? t('product.someSizesUnavailable') : t('product.soldOut')}
+                      {product.variants.edges.some(v => isVariantAvailable(v.node)) ? t('product.someSizesUnavailable') : t('product.soldOut')}
                     </p>
                   )}
                   <div className="flex flex-wrap gap-2">
                     {option.values.map((value) => {
                       const variant = getVariantForOption(value);
-                      const isAvailable = variant?.availableForSale ?? true;
+                      const isAvailable = isOptionAvailable(value);
                       const isSelected = selectedOptions[option.name] === value;
 
                       return (
@@ -730,16 +756,16 @@ export default function ProductDetail() {
           </button>
           <Button
             onClick={handleAddToCart}
-            disabled={!selectedVariant?.availableForSale}
+            disabled={!isVariantAvailable(selectedVariant)}
             variant="outline"
             className="flex-1 h-12 font-semibold border-primary text-primary hover:bg-primary/10"
           >
             <ShoppingCart className="h-5 w-5 mr-2" />
-            {selectedVariant?.availableForSale ? t('product.addToCart') : t('product.outOfStock')}
+            {isVariantAvailable(selectedVariant) ? t('product.addToCart') : t('product.outOfStock')}
           </Button>
           <Button
             onClick={handleBuyNow}
-            disabled={!selectedVariant?.availableForSale || isBuyingNow}
+            disabled={!isVariantAvailable(selectedVariant) || isBuyingNow}
             className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 h-12 font-semibold"
           >
             {isBuyingNow ? '処理中...' : 'すぐ購入'}
