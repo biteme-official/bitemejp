@@ -4,8 +4,13 @@ import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell,
 } from "recharts";
+import { format } from "date-fns";
+import type { DateRange } from "react-day-picker";
+import { CalendarIcon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 
 // ─── 상품명 자동번역 (일어 → 한국어, 어드민 전용) ───────────────────────────
 // MyMemory 무료 API 사용. 실제 사이트(biteme.co.jp)에는 영향 없음.
@@ -36,7 +41,7 @@ function translateTitle(title: string): string {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Range = "today" | "7d" | "28d" | "90d";
+type Range = "today" | "7d" | "28d" | "90d" | "custom";
 
 interface ShopifyData {
   summary: { totalOrders: number; totalRevenue: number; averageOrderValue: number; totalItemsSold: number };
@@ -101,15 +106,19 @@ const FUNNEL_ORDER = ["view_item", "add_to_cart", "begin_checkout", "purchase"] 
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 
-async function fetchAnalytics(range: Range, secret: string): Promise<AnalyticsData> {
-  const res = await fetch(`/api/analytics?range=${range}`, { headers: { Authorization: `Bearer ${secret}` } });
+async function fetchAnalytics(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<AnalyticsData> {
+  const params = new URLSearchParams({ range });
+  if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
+  const res = await fetch(`/api/analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "GA4 오류"); }
   return res.json();
 }
 
-async function fetchShopify(range: Range, secret: string): Promise<ShopifyData> {
-  const res = await fetch(`/api/shopify-analytics?range=${range}`, { headers: { Authorization: `Bearer ${secret}` } });
+async function fetchShopify(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<ShopifyData> {
+  const params = new URLSearchParams({ range });
+  if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
+  const res = await fetch(`/api/shopify-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "Shopify 오류"); }
   return res.json();
@@ -804,11 +813,17 @@ function PasswordGate({ onAuth }: { onAuth: (s: string) => void }) {
 
 // ─── 메인 대시보드 ────────────────────────────────────────────────────────────
 
-const RANGE_LABELS: Record<Range, string> = { today: "오늘", "7d": "7일", "28d": "28일", "90d": "90일" };
+const RANGE_LABELS: Record<Range, string> = { today: "오늘", "7d": "7일", "28d": "28일", "90d": "90일", custom: "기간 지정" };
 
 // 인증된 상태의 대시보드 (secret이 항상 존재하는 상태에서만 렌더됨)
 function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => void }) {
   const [range, setRange] = useState<Range>("7d");
+  const [customDates, setCustomDates] = useState<DateRange | undefined>();
+  const [calOpen, setCalOpen] = useState(false);
+
+  const customFrom = customDates?.from ? format(customDates.from, "yyyy-MM-dd") : undefined;
+  const customTo = customDates?.to ? format(customDates.to, "yyyy-MM-dd") : undefined;
+  const canQuery = range !== "custom" || (!!customFrom && !!customTo);
 
   const retry = (count: number, err: unknown) => {
     if (err instanceof Error && err.message === "UNAUTHORIZED") return false;
@@ -816,16 +831,18 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
   };
 
   const { data, isLoading: ga4Loading, isError, error, refetch } = useQuery({
-    queryKey: ["analytics", range, secret],
-    queryFn: () => fetchAnalytics(range, secret),
+    queryKey: ["analytics", range, secret, customFrom, customTo],
+    queryFn: () => fetchAnalytics(range, secret, customFrom, customTo),
     staleTime: 5 * 60 * 1000,
+    enabled: canQuery,
     retry,
   });
 
   const { data: shopify, isLoading: shopifyLoading, isError: shopifyIsError, error: shopifyErr } = useQuery({
-    queryKey: ["shopify-analytics", range, secret],
-    queryFn: () => fetchShopify(range, secret),
+    queryKey: ["shopify-analytics", range, secret, customFrom, customTo],
+    queryFn: () => fetchShopify(range, secret, customFrom, customTo),
     staleTime: 5 * 60 * 1000,
+    enabled: canQuery,
     retry,
   });
 
@@ -876,6 +893,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
             <span className="text-xs text-muted-foreground">Analytics</span>
           </div>
           <div className="flex items-center gap-2">
+            {/* 프리셋 범위 버튼 */}
             <div className="flex rounded-lg border bg-background overflow-hidden text-xs">
               {(["today", "7d", "28d", "90d"] as Range[]).map((r) => (
                 <button
@@ -888,6 +906,38 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
                 </button>
               ))}
             </div>
+
+            {/* 커스텀 날짜 캘린더 피커 */}
+            <Popover open={calOpen} onOpenChange={setCalOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-colors ${range === "custom" ? "text-white font-medium" : "text-muted-foreground hover:text-foreground"}`}
+                  style={range === "custom" ? { backgroundColor: BRAND } : {}}
+                >
+                  <CalendarIcon className="h-3 w-3" />
+                  {range === "custom" && customFrom
+                    ? customTo
+                      ? `${customFrom} ~ ${customTo}`
+                      : customFrom
+                    : "날짜 지정"}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="end">
+                <Calendar
+                  mode="range"
+                  selected={customDates}
+                  onSelect={(val) => {
+                    setCustomDates(val);
+                    setRange("custom");
+                    if (val?.from && val?.to) setCalOpen(false);
+                  }}
+                  numberOfMonths={2}
+                  disabled={{ after: new Date() }}
+                  defaultMonth={customDates?.from ?? new Date()}
+                />
+              </PopoverContent>
+            </Popover>
+
             <button onClick={() => refetch()} className="text-xs px-3 py-1.5 rounded-lg border hover:bg-muted transition-colors">새로고침</button>
             <button onClick={onLogout} className="text-xs text-muted-foreground hover:text-foreground transition-colors">로그아웃</button>
           </div>

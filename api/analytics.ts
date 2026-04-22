@@ -95,15 +95,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  const rangeMap: Record<string, string> = {
-    today: 'today',
-    '7d': '7daysAgo',
-    '28d': '28daysAgo',
-    '90d': '90daysAgo',
-  };
   const range = (req.query.range as string) || '7d';
-  const startDate = rangeMap[range];
-  if (!startDate) return res.status(400).json({ error: 'Invalid range' });
+  const fromParam = req.query.from as string | undefined;
+  const toParam = req.query.to as string | undefined;
+
+  let dateRange: { startDate: string; endDate: string };
+  if (range === 'custom' && fromParam && toParam) {
+    dateRange = { startDate: fromParam, endDate: toParam };
+  } else {
+    const rangeMap: Record<string, string> = {
+      today: 'today',
+      '7d': '7daysAgo',
+      '28d': '28daysAgo',
+      '90d': '90daysAgo',
+    };
+    const startDate = rangeMap[range];
+    if (!startDate) return res.status(400).json({ error: 'Invalid range' });
+    dateRange = { startDate, endDate: 'today' };
+  }
 
   if (!GA4_PROPERTY_ID || !GOOGLE_SERVICE_ACCOUNT_JSON) {
     return res.status(500).json({ error: 'GA4 not configured. Set GA4_PROPERTY_ID and GOOGLE_SERVICE_ACCOUNT_JSON env vars.' });
@@ -111,7 +120,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const token = await getAccessToken();
-    const dateRange = { startDate, endDate: 'today' };
 
     const [overviewRaw, funnelRaw, revenueRaw, pagesRaw, sourcesRaw, devicesRaw, itemViewsRaw, exitPagesRaw] = await Promise.all([
       runReport(token, {

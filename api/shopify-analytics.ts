@@ -152,12 +152,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const range = (req.query.range as string) || '7d';
-  const validRanges = ['today', '7d', '28d', '90d'];
-  if (!validRanges.includes(range)) return res.status(400).json({ error: 'Invalid range' });
+  const fromParam = req.query.from as string | undefined;
+  const toParam = req.query.to as string | undefined;
+  const isCustom = range === 'custom' && !!fromParam && !!toParam;
+
+  if (!isCustom) {
+    const validRanges = ['today', '7d', '28d', '90d'];
+    if (!validRanges.includes(range)) return res.status(400).json({ error: 'Invalid range' });
+  }
 
   try {
     const token = await getAccessToken();
-    const rangeStart = getRangeStart(range);
+    // JST 날짜 문자열(YYYY-MM-DD) → JST 자정의 UTC ISO
+    const jstMidnightUTC = (dateStr: string) =>
+      new Date(new Date(`${dateStr}T00:00:00+09:00`).getTime()).toISOString();
+    const rangeStart = isCustom ? jstMidnightUTC(fromParam!) : getRangeStart(range);
 
     const [orders, lowStockData] = await Promise.all([
       fetchAllOrders(token, rangeStart),
@@ -195,14 +204,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 날짜 채우기 (데이터 없는 날도 0으로)
     const nowJST = new Date(Date.now() + 9 * 60 * 60 * 1000);
-    const days: Record<string, number> = { today: 0, '7d': 6, '28d': 27, '90d': 89 };
-    const offset = days[range] ?? 6;
+    const todayStr = nowJST.toISOString().slice(0, 10);
     const dailyOrders = [];
-    for (let i = offset; i >= 0; i--) {
-      const d = new Date(Date.UTC(nowJST.getUTCFullYear(), nowJST.getUTCMonth(), nowJST.getUTCDate() - i));
-      const dateStr = d.toISOString().slice(0, 10);
-      const entry = dailyMap.get(dateStr) || { orders: 0, revenue: 0 };
-      dailyOrders.push({ date: dateStr, orders: entry.orders, revenue: Math.round(entry.revenue) });
+
+    if (isCustom) {
+      const cur = new Date(fromParam!);
+      const end = new Date(toParam! <= todayStr ? toParam! : todayStr);
+      while (cur <= end) {
+        const dateStr = cur.toISOString().slice(0, 10);
+        const entry = dailyMap.get(dateStr) || { orders: 0, revenue: 0 };
+        dailyOrders.push({ date: dateStr, orders: entry.orders, revenue: Math.round(entry.revenue) });
+        cur.setDate(cur.getDate() + 1);
+      }
+    } else {
+      const days: Record<string, number> = { today: 0, '7d': 6, '28d': 27, '90d': 89 };
+      const offset = days[range] ?? 6;
+      for (let i = offset; i >= 0; i--) {
+        const d = new Date(Date.UTC(nowJST.getUTCFullYear(), nowJST.getUTCMonth(), nowJST.getUTCDate() - i));
+        const dateStr = d.toISOString().slice(0, 10);
+        const entry = dailyMap.get(dateStr) || { orders: 0, revenue: 0 };
+        dailyOrders.push({ date: dateStr, orders: entry.orders, revenue: Math.round(entry.revenue) });
+      }
     }
 
     const topProducts = Array.from(productMap.entries())
