@@ -59,7 +59,7 @@ interface AnalyticsData {
   funnel: { eventName: string; eventCount: number }[];
   revenueOverTime: { date: string; purchaseRevenue: number; transactions: number; sessions: number; activeUsers: number }[];
   topPages: { pagePath: string; screenPageViews: number; activeUsers: number; averageSessionDuration: number }[];
-  trafficSources: { sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number }[];
+  trafficSources: { sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number; transactions: number; purchaseRevenue: number }[];
   devices: { deviceCategory: string; sessions: number }[];
   itemViews: { itemName: string; itemsViewed: number; itemsAddedToCart: number }[];
   exitPages: { pagePath: string; sessions: number; bounceRate: number; screenPageViews: number; averageSessionDuration: number }[];
@@ -592,7 +592,7 @@ function VisualFunnel({
     ...s,
     count: s.key === "sessions" ? sessions : (eventMap[s.key] ?? 0),
   }));
-  const maxCount = steps[0]?.count || 1;
+  const maxCount = Math.max(...steps.map((s) => s.count), 1);
 
   return (
     <Card>
@@ -662,6 +662,68 @@ function classifyPage(path: string): string {
   if (path === "/wishlist") return "위시리스트";
   if (path === "/contact") return "문의";
   return "기타";
+}
+
+// ─── 소스/매체별 전환율 ───────────────────────────────────────────────────────
+
+function SourceConversionTable({ data }: { data: AnalyticsData["trafficSources"] }) {
+  const rows = [...data]
+    .map((r) => ({
+      ...r,
+      sessions: r.sessions as number,
+      transactions: r.transactions as number,
+      purchaseRevenue: r.purchaseRevenue as number,
+      convRate: (r.sessions as number) > 0 ? ((r.transactions as number) / (r.sessions as number)) * 100 : 0,
+    }))
+    .filter((r) => r.sessions > 0)
+    .sort((a, b) => b.convRate - a.convRate);
+
+  const maxRev = Math.max(...rows.map((r) => r.purchaseRevenue), 1);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold">소스 / 매체별 전환율</CardTitle>
+        <p className="text-xs text-muted-foreground">전환율 높은 순 — 전환율 = 구매 완료 / 세션</p>
+      </CardHeader>
+      <CardContent className="p-0">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left px-4 py-2 font-medium text-muted-foreground">소스 / 매체</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">세션</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">구매</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">전환율</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                <td className="px-4 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <div className="h-1 w-16 shrink-0 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${(row.purchaseRevenue / maxRev) * 100}%`, backgroundColor: BRAND, opacity: 0.7 }} />
+                    </div>
+                    <span>{row.sessionSource}</span>
+                    <span className="text-muted-foreground">/ {row.sessionMedium}</span>
+                  </div>
+                </td>
+                <td className="px-4 py-2.5 text-right">{row.sessions.toLocaleString()}</td>
+                <td className="px-4 py-2.5 text-right">{row.transactions > 0 ? row.transactions : "—"}</td>
+                <td className="px-4 py-2.5 text-right">
+                  <span className={row.convRate >= 1 ? "text-green-600 font-semibold" : row.convRate > 0 ? "text-orange-500" : "text-muted-foreground"}>
+                    {row.convRate > 0 ? `${row.convRate.toFixed(2)}%` : "—"}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-right font-medium">{row.purchaseRevenue > 0 ? formatRevenue(row.purchaseRevenue) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  );
 }
 
 function ExitPagesTable({ data }: { data: AnalyticsData["exitPages"] }) {
@@ -1038,6 +1100,9 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
                 <>
                   <SectionLabel>구매 전환 퍼널</SectionLabel>
                   <VisualFunnel funnel={data.funnel} sessions={sessions} />
+
+                  <SectionLabel>소스 / 매체별 전환</SectionLabel>
+                  <SourceConversionTable data={data.trafficSources} />
 
                   <SectionLabel>이탈 포인트 분석</SectionLabel>
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

@@ -161,9 +161,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       runReport(token, {
         dateRanges: [dateRange],
         dimensions: [{ name: 'sessionSource' }, { name: 'sessionMedium' }],
-        metrics: [{ name: 'sessions' }, { name: 'activeUsers' }],
+        metrics: [{ name: 'sessions' }, { name: 'activeUsers' }, { name: 'transactions' }, { name: 'purchaseRevenue' }],
         orderBys: [{ metric: { metricName: 'sessions' }, desc: true }],
-        limit: 10,
+        limit: 15,
       }),
       runReport(token, {
         dateRanges: [dateRange],
