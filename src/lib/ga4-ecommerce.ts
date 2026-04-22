@@ -3,7 +3,7 @@
 
 declare global {
   interface Window {
-    gtag?: (...args: unknown[]) => void;
+    gtag?: ((...args: unknown[]) => void) & ((command: 'get', targetId: string, fieldName: string, callback: (value: string) => void) => void);
   }
 }
 

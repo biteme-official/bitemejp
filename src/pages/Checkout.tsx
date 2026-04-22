@@ -144,7 +144,18 @@ export default function Checkout() {
         url.searchParams.set('checkout[shipping_address][phone]', form.phone);
         url.searchParams.set('checkout[shipping_address][country]', 'JP');
         sessionStorage.setItem('checkout_pending', '1');
-        window.location.href = url.toString();
+        // GA4 cross-domain linker: _gl 파라미터를 붙여야 Shopify checkout에서 세션 소스가 보존됨
+        // window.location.href 직접 이동 시 gtag가 자동으로 _gl을 추가하지 않으므로 수동으로 처리
+        const finalUrl = url.toString();
+        if (typeof window.gtag === 'function') {
+          window.gtag('get', 'G-WLTZH90W2L', 'linker', (linker: string) => {
+            const dest = new URL(finalUrl);
+            if (linker) dest.searchParams.set('_gl', linker);
+            window.location.href = dest.toString();
+          });
+        } else {
+          window.location.href = finalUrl;
+        }
       }
     } catch (err) {
       console.error('Checkout error:', err);
