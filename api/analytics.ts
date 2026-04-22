@@ -140,7 +140,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       runReport(token, {
         dateRanges: [dateRange],
         dimensions: [{ name: 'date' }],
-        metrics: [{ name: 'purchaseRevenue' }, { name: 'transactions' }, { name: 'sessions' }],
+        metrics: [{ name: 'purchaseRevenue' }, { name: 'transactions' }, { name: 'sessions' }, { name: 'activeUsers' }],
         orderBys: [{ dimension: { dimensionName: 'date' } }],
       }),
       runReport(token, {

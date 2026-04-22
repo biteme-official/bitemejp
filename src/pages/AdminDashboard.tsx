@@ -52,7 +52,7 @@ interface AnalyticsData {
     purchaseRevenue?: number; transactions?: number;
   };
   funnel: { eventName: string; eventCount: number }[];
-  revenueOverTime: { date: string; purchaseRevenue: number; transactions: number; sessions: number }[];
+  revenueOverTime: { date: string; purchaseRevenue: number; transactions: number; sessions: number; activeUsers: number }[];
   topPages: { pagePath: string; screenPageViews: number; activeUsers: number; averageSessionDuration: number }[];
   trafficSources: { sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number }[];
   devices: { deviceCategory: string; sessions: number }[];
@@ -78,19 +78,20 @@ function isoToLabel(iso: string) {
   return `${iso.slice(5, 7)}/${iso.slice(8, 10)}`;
 }
 
-// GA4 sessions + Shopify orders/revenue를 날짜 기준으로 합침
+// GA4 sessions/activeUsers + Shopify orders/revenue를 날짜 기준으로 합침
 function buildTimeline(
   ga4: AnalyticsData["revenueOverTime"],
   shopify: ShopifyData["dailyOrders"]
 ) {
-  const map = new Map<string, { date: string; sessions: number; orders: number; revenue: number }>();
+  const map = new Map<string, { date: string; isoDate: string; sessions: number; activeUsers: number; orders: number; revenue: number }>();
   for (const d of shopify) {
-    map.set(d.date, { date: isoToLabel(d.date), sessions: 0, orders: d.orders, revenue: d.revenue });
+    map.set(d.date, { date: isoToLabel(d.date), isoDate: d.date, sessions: 0, activeUsers: 0, orders: d.orders, revenue: d.revenue });
   }
   for (const d of ga4) {
     const key = ga4DateToISO(d.date);
-    const ex = map.get(key) ?? { date: isoToLabel(key), sessions: 0, orders: 0, revenue: 0 };
+    const ex = map.get(key) ?? { date: isoToLabel(key), isoDate: key, sessions: 0, activeUsers: 0, orders: 0, revenue: 0 };
     ex.sessions = d.sessions;
+    ex.activeUsers = d.activeUsers ?? 0;
     map.set(key, ex);
   }
   return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
@@ -171,6 +172,59 @@ function CombinedChart({ timeline }: { timeline: ReturnType<typeof buildTimeline
             <Line yAxisId="sess" type="monotone" dataKey="orders" stroke="#94a3b8" strokeWidth={1.5} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── 일자별 데이터 표 ─────────────────────────────────────────────────────────
+
+function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline> }) {
+  const sorted = [...timeline].sort((a, b) => b.isoDate.localeCompare(a.isoDate));
+  const totals = sorted.reduce(
+    (acc, r) => ({ users: acc.users + r.activeUsers, sessions: acc.sessions + r.sessions, orders: acc.orders + r.orders, revenue: acc.revenue + r.revenue }),
+    { users: 0, sessions: 0, orders: 0, revenue: 0 }
+  );
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold">일자별 상세 데이터</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto max-h-72 overflow-y-auto">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-background border-b z-10">
+              <tr>
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">날짜</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">총 사용자</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">세션</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">주문 수</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((row, i) => (
+                <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-2 font-mono">{row.isoDate}</td>
+                  <td className="px-4 py-2 text-right">{row.activeUsers > 0 ? row.activeUsers.toLocaleString() : "—"}</td>
+                  <td className="px-4 py-2 text-right">{row.sessions > 0 ? row.sessions.toLocaleString() : "—"}</td>
+                  <td className="px-4 py-2 text-right">{row.orders > 0 ? `${row.orders}건` : "—"}</td>
+                  <td className="px-4 py-2 text-right font-medium">{row.revenue > 0 ? formatRevenue(row.revenue) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="sticky bottom-0 bg-background border-t">
+              <tr>
+                <td className="px-4 py-2 font-semibold text-xs">합계</td>
+                <td className="px-4 py-2 text-right font-semibold">{totals.users.toLocaleString()}</td>
+                <td className="px-4 py-2 text-right font-semibold">{totals.sessions.toLocaleString()}</td>
+                <td className="px-4 py-2 text-right font-semibold">{totals.orders}건</td>
+                <td className="px-4 py-2 text-right font-semibold">{formatRevenue(totals.revenue)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
       </CardContent>
     </Card>
   );
@@ -888,8 +942,13 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
                 <KpiCard label="평균 체류 시간" value={formatDuration((ov.averageSessionDuration as number) ?? 0)} />
               </div>
 
-              {/* ── 통합 추이 차트 ── */}
-              {timeline.length > 0 && <CombinedChart timeline={timeline} />}
+              {/* ── 통합 추이 차트 + 일자별 표 ── */}
+              {timeline.length > 0 && (
+                <>
+                  <CombinedChart timeline={timeline} />
+                  <TimelineTable timeline={timeline} />
+                </>
+              )}
 
               {/* ── EC 퍼널 + 상위 상품 ── */}
               <SectionLabel>전환 · 상품</SectionLabel>
