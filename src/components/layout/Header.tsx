@@ -313,12 +313,8 @@ export function Header({ onSearch, onCollectionSelect }: HeaderProps) {
 
           <button
             onClick={() => {
-              if (window.location.pathname === '/') {
-                onCollectionSelect?.(null);
-                window.location.reload();
-              } else {
-                navigate("/");
-              }
+              onCollectionSelect?.(null);
+              navigate("/");
             }}
             className="hover:opacity-80 transition-opacity"
           >

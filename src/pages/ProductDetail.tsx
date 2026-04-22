@@ -376,7 +376,7 @@ export default function ProductDetail() {
                   price: price.amount,
                   currencyCode: price.currencyCode,
                 });
-                toast.success(wishlisted ? '찜 목록에서 제거했습니다.' : '찜 목록에 추가했습니다.', {
+                toast.success(wishlisted ? t('product.removedFromWishlist') : t('product.addedToWishlist'), {
                   position: 'top-center',
                 });
               }}
@@ -392,7 +392,7 @@ export default function ProductDetail() {
             <button
               onClick={() => {
                 navigator.clipboard.writeText(window.location.href);
-                toast.success('Link copied!', { position: 'top-center' });
+                toast.success(t('product.linkCopied'), { position: 'top-center' });
               }}
               className="p-2 text-foreground"
             >

@@ -9,8 +9,8 @@ import {
   Package, Truck, ExternalLink, MapPin, CreditCard,
 } from 'lucide-react';
 import { LineLoginButton } from '@/components/auth/LineLoginButton';
-import { fetchCustomerOrdersViaAdmin, fetchProductByHandle, ShopifyOrder, formatPrice } from '@/lib/shopify';
-import { useFavoritesStore } from '@/stores/favoritesStore';
+import { fetchCustomerOrdersViaAdmin, ShopifyOrder, formatPrice } from '@/lib/shopify';
+import { useWishlistStore } from '@/stores/wishlistStore';
 
 // --- Sub-components ---
 
@@ -134,9 +134,7 @@ export default function MyPage() {
   const [orders, setOrders] = useState<ShopifyOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'orders' | 'favorites' | null>(null);
-  const [favoriteProducts, setFavoriteProducts] = useState<Array<{ handle: string; title: string; image?: string; price: string; currencyCode: string }>>([]);
-  const [favoritesLoading, setFavoritesLoading] = useState(false);
-  const { getFavorites, removeFavorite } = useFavoritesStore();
+  const { items: wishlistItems, removeItem: removeWishlistItem } = useWishlistStore();
 
   // Fetch customer orders via Admin API proxy
   useEffect(() => {
@@ -151,26 +149,6 @@ export default function MyPage() {
     }
   }, [isLoggedIn, user?.shopifyCustomerToken]);
 
-  // Load favorite products
-  useEffect(() => {
-    if (!user?.userId || activeTab !== 'favorites') return;
-    const handles = getFavorites(user.userId);
-    if (handles.length === 0) { setFavoriteProducts([]); return; }
-
-    setFavoritesLoading(true);
-    Promise.all(handles.map((h) => fetchProductByHandle(h).catch(() => null)))
-      .then((products) => {
-        setFavoriteProducts(
-          products.filter(Boolean).map((p: any) => ({
-            handle: p.handle, title: p.title,
-            image: p.images.edges[0]?.node.url,
-            price: p.priceRange.minVariantPrice.amount,
-            currencyCode: p.priceRange.minVariantPrice.currencyCode,
-          }))
-        );
-      })
-      .finally(() => setFavoritesLoading(false));
-  }, [user?.userId, activeTab, getFavorites]);
 
   const handleLogout = () => { logout(); navigate('/'); };
 
@@ -196,7 +174,7 @@ export default function MyPage() {
     );
   }
 
-  const favCount = user?.userId ? getFavorites(user.userId).length : 0;
+  const favCount = wishlistItems.length;
 
   // --- Logged in ---
   return (
@@ -280,26 +258,21 @@ export default function MyPage() {
         {activeTab === 'favorites' && (
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-muted-foreground px-1">お気に入り</h3>
-            {favoritesLoading ? (
-              <div className="space-y-3">
-                <Skeleton className="h-20 w-full rounded-xl" />
-                <Skeleton className="h-20 w-full rounded-xl" />
-              </div>
-            ) : favoriteProducts.length === 0 ? (
+            {wishlistItems.length === 0 ? (
               <div className="bg-card rounded-xl border border-border p-8 text-center">
                 <Heart className="h-8 w-8 text-muted-foreground mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">お気に入りはまだありません</p>
                 <p className="text-xs text-muted-foreground mt-1">商品のハートをタップして追加</p>
               </div>
             ) : (
-              favoriteProducts.map((product) => (
+              wishlistItems.map((product) => (
                 <div
-                  key={product.handle}
+                  key={product.productId}
                   className="bg-card rounded-xl border border-border p-3 flex items-center gap-3 cursor-pointer hover:bg-secondary/30 transition-colors"
                   onClick={() => navigate(`/product/${product.handle}`)}
                 >
-                  {product.image ? (
-                    <img src={product.image} alt={product.title} className="w-16 h-16 rounded-lg object-cover" />
+                  {product.imageUrl ? (
+                    <img src={product.imageUrl} alt={product.title} className="w-16 h-16 rounded-lg object-cover" />
                   ) : (
                     <div className="w-16 h-16 rounded-lg bg-secondary flex items-center justify-center">
                       <Package className="h-6 w-6 text-muted-foreground" />
@@ -314,10 +287,7 @@ export default function MyPage() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (user?.userId) {
-                        removeFavorite(user.userId, product.handle);
-                        setFavoriteProducts((prev) => prev.filter((p) => p.handle !== product.handle));
-                      }
+                      removeWishlistItem(product.productId);
                     }}
                     className="p-2 hover:bg-secondary rounded-full"
                   >

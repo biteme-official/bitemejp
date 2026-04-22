@@ -188,7 +188,7 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
                     className="border-primary data-[state=checked]:bg-primary"
                   />
                   <label htmlFor="select-all" className="text-sm font-medium cursor-pointer">
-                    Select All
+                    すべて選択
                   </label>
                 </div>
                 <Button

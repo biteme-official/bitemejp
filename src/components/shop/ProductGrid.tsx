@@ -4,8 +4,7 @@ import { ShopifyProduct, fetchProducts, fetchCollectionProducts, formatPrice } f
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ShoppingCart, Loader2, Heart } from 'lucide-react';
-import { useAuthStore } from '@/stores/authStore';
-import { useFavoritesStore } from '@/stores/favoritesStore';
+import { useWishlistStore } from '@/stores/wishlistStore';
 import { saveScrollPosition } from '@/hooks/useScrollRestoration';
 import { ProductFilters, SortOption, FilterState } from './ProductFilters';
 import { ProductOptionDialog } from './ProductOptionDialog';
@@ -40,8 +39,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasNextPage, setHasNextPage] = useState(false);
-  const userId = useAuthStore((s) => s.user?.userId);
-  const { addFavorite, removeFavorite, isFavorite } = useFavoritesStore();
+  const { isWishlisted, toggleItem: toggleWishlist } = useWishlistStore();
   const [endCursor, setEndCursor] = useState<string | null>(null);
   const [totalProductCount, setTotalProductCount] = useState<number | null>(null);
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -375,24 +373,26 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
                       </div>
                     )}
                     {/* Favorite Button */}
-                    {userId && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const handle = product.node.handle;
-                          if (isFavorite(userId, handle)) {
-                            removeFavorite(userId, handle);
-                          } else {
-                            addFavorite(userId, handle);
-                          }
-                        }}
-                        className="absolute top-2 right-2 w-8 h-8 rounded-full bg-background/70 backdrop-blur-sm flex items-center justify-center hover:bg-background/90 transition-colors z-10"
-                      >
-                        <Heart
-                          className={`h-4 w-4 ${isFavorite(userId, product.node.handle) ? 'fill-red-500 text-red-500' : 'text-muted-foreground'}`}
-                        />
-                      </button>
-                    )}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const node = product.node;
+                        const price = node.priceRange?.minVariantPrice;
+                        toggleWishlist({
+                          productId: node.id,
+                          handle: node.handle,
+                          title: node.title,
+                          imageUrl: node.images?.edges?.[0]?.node?.url,
+                          price: price?.amount ?? '0',
+                          currencyCode: price?.currencyCode ?? 'JPY',
+                        });
+                      }}
+                      className="absolute top-2 right-2 w-8 h-8 rounded-full bg-background/70 backdrop-blur-sm flex items-center justify-center hover:bg-background/90 transition-colors z-10"
+                    >
+                      <Heart
+                        className={`h-4 w-4 ${isWishlisted(product.node.id) ? 'fill-red-500 text-red-500' : 'text-muted-foreground'}`}
+                      />
+                    </button>
                     {/* Sold Out Overlay */}
                     {isCompletelyOutOfStock && (
                       <div className="absolute inset-0 flex items-center justify-center bg-background/60">
