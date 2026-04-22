@@ -6,6 +6,7 @@ import { CheckCircle, Home } from "lucide-react";
 import { useCartStore } from "@/stores/cartStore";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Confetti } from "@/components/checkout/Confetti";
+import { trackPurchase } from "@/lib/ga4-ecommerce";
 
 export default function CheckoutReturn() {
   const navigate = useNavigate();
@@ -14,6 +15,17 @@ export default function CheckoutReturn() {
 
   useEffect(() => {
     clearCart();
+
+    // Shopify checkout → biteme.co.jp 복귀 시 purchase 이벤트 발생
+    // cross-domain attribution 문제를 우회하여 biteme.co.jp 세션에서 직접 집계
+    const raw = sessionStorage.getItem('checkout_ga4');
+    if (raw) {
+      try {
+        const { transactionId, items, currency, value, shipping } = JSON.parse(raw);
+        trackPurchase(transactionId, items, currency, value, shipping);
+      } catch { /* ignore */ }
+      sessionStorage.removeItem('checkout_ga4');
+    }
   }, [clearCart]);
 
   return (

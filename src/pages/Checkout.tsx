@@ -143,19 +143,29 @@ export default function Checkout() {
         url.searchParams.set('checkout[shipping_address][address2]', form.address2);
         url.searchParams.set('checkout[shipping_address][phone]', form.phone);
         url.searchParams.set('checkout[shipping_address][country]', 'JP');
+
+        // Shopify checkout URL에서 token 추출 (transaction_id로 사용)
+        // 형식: /checkouts/cn/<TOKEN>/...
+        const tokenMatch = checkoutUrl.match(/\/checkouts\/(?:cn\/)?([A-Za-z0-9]+)/);
+        const checkoutToken = tokenMatch?.[1] ?? `co_${Date.now()}`;
+
+        // CheckoutReturn에서 purchase 이벤트 발생을 위해 장바구니 정보 저장
         sessionStorage.setItem('checkout_pending', '1');
-        // GA4 cross-domain linker: _gl 파라미터를 붙여야 Shopify checkout에서 세션 소스가 보존됨
-        // window.location.href 직접 이동 시 gtag가 자동으로 _gl을 추가하지 않으므로 수동으로 처리
-        const finalUrl = url.toString();
-        if (typeof window.gtag === 'function') {
-          window.gtag('get', 'G-WLTZH90W2L', 'linker', (linker: string) => {
-            const dest = new URL(finalUrl);
-            if (linker) dest.searchParams.set('_gl', linker);
-            window.location.href = dest.toString();
-          });
-        } else {
-          window.location.href = finalUrl;
-        }
+        sessionStorage.setItem('checkout_ga4', JSON.stringify({
+          transactionId: checkoutToken,
+          items: items.map(item => ({
+            item_id: item.variantId,
+            item_name: item.product.node.title,
+            price: parseFloat(item.price.amount),
+            currency: item.price.currencyCode,
+            quantity: item.quantity,
+          })),
+          currency: items[0]?.price.currencyCode ?? 'JPY',
+          value: subtotal + shipping,
+          shipping,
+        }));
+
+        window.location.href = url.toString();
       }
     } catch (err) {
       console.error('Checkout error:', err);
