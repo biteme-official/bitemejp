@@ -189,7 +189,7 @@ function CombinedChart({ timeline }: { timeline: ReturnType<typeof buildTimeline
 // ─── 일자별 데이터 표 ─────────────────────────────────────────────────────────
 
 function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline> }) {
-  const sorted = [...timeline].sort((a, b) => b.isoDate.localeCompare(a.isoDate));
+  const sorted = [...timeline].sort((a, b) => a.isoDate.localeCompare(b.isoDate));
   const totals = sorted.reduce(
     (acc, r) => ({ users: acc.users + r.activeUsers, sessions: acc.sessions + r.sessions, orders: acc.orders + r.orders, revenue: acc.revenue + r.revenue }),
     { users: 0, sessions: 0, orders: 0, revenue: 0 }
