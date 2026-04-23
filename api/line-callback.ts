@@ -87,13 +87,13 @@ async function storefrontQuery(token: string, query: string, variables: Record<s
 
 async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncResult> {
   const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN;
-  if (!shop) return { customerAccessToken: null, shopifyEmail: '' };
+  if (!shop) return { customerAccessToken: null, shopifyEmail: '', shopifyCustomerId: null };
 
   let token: string;
   try {
     token = await getStorefrontToken();
   } catch {
-    return { customerAccessToken: null, shopifyEmail: '' };
+    return { customerAccessToken: null, shopifyEmail: '', shopifyCustomerId: null };
   }
 
   const nameParts = profile.displayName.trim().split(' ');
