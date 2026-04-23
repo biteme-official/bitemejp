@@ -536,6 +536,10 @@ export async function fetchBanners(first: number = 10): Promise<ShopifyBanner[]>
     }
 
     return { id: node.id, handle: node.handle, image, linkUrl, fields };
+  }).sort((a, b) => {
+    const aOrder = parseInt(a.fields['sort_order'] ?? '9999', 10);
+    const bOrder = parseInt(b.fields['sort_order'] ?? '9999', 10);
+    return aOrder - bOrder;
   });
 }
 
