@@ -2,20 +2,7 @@ import { useEffect, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Footer } from "@/components/layout/Footer";
-import { storefrontApiRequest } from "@/lib/shopify";
 import biteMeLogo from "@/assets/bite-me-logo.png";
-
-const LEGAL_NOTICE_QUERY = `
-  query {
-    shop {
-      name
-      legalNotice {
-        title
-        body
-      }
-    }
-  }
-`;
 
 export default function TokushoHo() {
   const navigate = useNavigate();
@@ -23,11 +10,9 @@ export default function TokushoHo() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    storefrontApiRequest(LEGAL_NOTICE_QUERY)
-      .then((data) => {
-        const notice = data?.shop?.legalNotice;
-        setBody(notice?.body ?? null);
-      })
+    fetch('/api/policies')
+      .then((res) => res.json())
+      .then((data) => setBody(data?.policy?.body ?? null))
       .catch(() => setBody(null))
       .finally(() => setLoading(false));
   }, []);
