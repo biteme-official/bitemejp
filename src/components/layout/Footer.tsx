@@ -28,6 +28,9 @@ export function Footer() {
             <Link to="/terms" className="hover:text-primary transition-colors">
               利用規約
             </Link>
+            <Link to="/tokusho" className="hover:text-primary transition-colors">
+              特定商取引法に基づく表記
+            </Link>
             <Link to="/contact" className="hover:text-primary transition-colors">
               お問い合わせ
             </Link>

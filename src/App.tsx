@@ -17,6 +17,7 @@ import MyPage from "./pages/MyPage";
 import WishlistPage from "./pages/WishlistPage";
 import Checkout from "./pages/Checkout";
 import AdminDashboard from "./pages/AdminDashboard";
+import TokushoHo from "./pages/TokushoHo";
 import { LineFloatingButton } from "./components/layout/LineFloatingButton";
 import { useCartStore } from "@/stores/cartStore";
 
@@ -62,6 +63,7 @@ const App = () => (
           <Route path="/mypage" element={<MyPage />} />
           <Route path="/wishlist" element={<WishlistPage />} />
           <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/tokusho" element={<TokushoHo />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
         <LineFloatingButton />
