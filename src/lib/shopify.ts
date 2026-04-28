@@ -929,7 +929,7 @@ export async function fetchCustomerOrders(customerAccessToken: string): Promise<
  * Admin API 経由で顧客の注文を取得（Storefront API の customer クエリ deprecation 対策）
  */
 export async function fetchCustomerOrdersViaAdmin(
-  customerAccessToken: string,
+  customerAccessToken: string | null | undefined,
   shopifyCustomerId?: string,
   lineUserId?: string,
 ): Promise<ShopifyOrder[]> {

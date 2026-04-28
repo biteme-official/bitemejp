@@ -170,21 +170,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.warn('[customer-orders] stored GID not found, falling back');
       }
 
-      // 2. LINE userId タグで顧客を検索 (tag: 検索はShopify公式サポート)
+      // 2. LINE userId → 決定論的メールアドレスで顧客を検索 (tag: の : がShopify構文と衝突するため email検索に変更)
       if (lineUserId && typeof lineUserId === 'string') {
+        const lineEmail = `line_${lineUserId}@line-user.biteme.co.jp`;
+        const emailResult = await adminGraphQL(`
+          query FindByEmail($query: String!) {
+            customers(first: 1, query: $query) {
+              edges { node { id } }
+            }
+          }
+        `, { query: `email:"${lineEmail}"` });
+        const gidByEmail = emailResult?.data?.customers?.edges?.[0]?.node?.id;
+        if (gidByEmail) {
+          console.log('[customer-orders] Found customer by LINE email:', gidByEmail);
+          return gidByEmail;
+        }
+        // メールで見つからなければタグでも試みる
         const tagResult = await adminGraphQL(`
           query FindByLineTag($query: String!) {
             customers(first: 1, query: $query) {
               edges { node { id } }
             }
           }
-        `, { query: `tag:"line_id:${lineUserId}"` });
-        const gid = tagResult?.data?.customers?.edges?.[0]?.node?.id;
-        if (gid) {
-          console.log('[customer-orders] Found customer by LINE tag:', gid);
-          return gid;
+        `, { query: `tag:line_id:${lineUserId}` });
+        const gidByTag = tagResult?.data?.customers?.edges?.[0]?.node?.id;
+        if (gidByTag) {
+          console.log('[customer-orders] Found customer by LINE tag:', gidByTag);
+          return gidByTag;
         }
-        console.warn('[customer-orders] LINE tag lookup returned no customer');
+        console.warn('[customer-orders] LINE email/tag lookup returned no customer');
       }
 
       // 3. Storefront API でトークン検証 → GID 取得 (token がある場合のみ)
