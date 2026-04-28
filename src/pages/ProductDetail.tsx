@@ -150,10 +150,11 @@ export default function ProductDetail() {
   const totalCartItems = useCartStore(state => state.getTotalItems());
   const { isWishlisted, toggleItem: toggleWishlist } = useWishlistStore();
 
-  // Scroll to top on mount
+  // Scroll to top + reset tab on product change
   useEffect(() => {
-    window.scrollTo(0, 0);
-  }, []);
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    setActiveTab('detail');
+  }, [id]);
 
   useEffect(() => {
     const loadProduct = async () => {
