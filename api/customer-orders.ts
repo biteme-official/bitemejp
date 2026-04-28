@@ -106,14 +106,13 @@ const ADMIN_CUSTOMER_ORDERS_QUERY = `
             id
             name
             processedAt
-            financialStatus
-            fulfillmentStatus
-            statusUrl
+            displayFinancialStatus
+            displayFulfillmentStatus
+            statusPageUrl
             totalPriceSet { shopMoney { amount currencyCode } }
             shippingAddress { city province country }
             fulfillments(first: 5) {
-              trackingCompany
-              trackingInfo(first: 1) { number url }
+              trackingInfo(first: 1) { company number url }
             }
             lineItems(first: 20) {
               edges {
@@ -143,14 +142,13 @@ const ORDERS_BY_EMAIL_QUERY = `
           id
           name
           processedAt
-          financialStatus
-          fulfillmentStatus
-          statusUrl
+          displayFinancialStatus
+          displayFulfillmentStatus
+          statusPageUrl
           totalPriceSet { shopMoney { amount currencyCode } }
           shippingAddress { city province country }
           fulfillments(first: 5) {
-            trackingCompany
-            trackingInfo(first: 1) { number url }
+            trackingInfo(first: 1) { company number url }
           }
           lineItems(first: 20) {
             edges {
@@ -241,9 +239,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return sfData?.data?.customer?.id || null;
     };
 
-    console.log('[customer-orders] identifiers received:', { hasToken: !!customerAccessToken, shopifyCustomerId, lineUserId });
     const customerId = await resolveCustomerId();
-    console.log('[customer-orders] resolved customerId:', customerId);
     if (!customerId) {
       return res.status(401).json({ error: 'Could not resolve customer ID' });
     }
@@ -251,14 +247,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Admin API で顧客 GID から注文を取得
     const allOrders: unknown[] = [];
     let cursor: string | null = null;
-    const _debug: Record<string, unknown> = { customerId };
-
     do {
       const adminData = await adminGraphQL(ADMIN_CUSTOMER_ORDERS_QUERY, { customerId, cursor });
-      _debug.gidErrors = adminData?.errors;
-      _debug.customerNull = adminData?.data?.customer === null;
       const edges = adminData?.data?.customer?.orders?.edges || [];
-      _debug.gidOrderCount = edges.length;
       allOrders.push(...edges.map((e: { node: unknown }) => e.node));
       cursor = adminData?.data?.customer?.orders?.pageInfo?.hasNextPage
         ? adminData?.data?.customer?.orders?.pageInfo?.endCursor
@@ -270,9 +261,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const lineEmail = `line_${lineUserId}@line-user.biteme.co.jp`;
       try {
         const emailData = await adminGraphQL(ORDERS_BY_EMAIL_QUERY, { query: `email:${lineEmail}`, cursor: null });
-        _debug.emailErrors = emailData?.errors;
         const emailEdges = emailData?.data?.orders?.edges || [];
-        _debug.emailOrderCount = emailEdges.length;
         const existingIds = new Set(allOrders.map((o: unknown) => (o as { id: string }).id));
         for (const e of emailEdges) {
           if (!existingIds.has(e.node.id)) {
@@ -295,28 +284,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       id: string;
       name: string;
       processedAt: string;
-      financialStatus: string;
-      fulfillmentStatus: string;
-      statusUrl: string | null;
+      displayFinancialStatus: string | null;
+      displayFulfillmentStatus: string | null;
+      statusPageUrl: string | null;
       totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
       shippingAddress: { city?: string; province?: string; country?: string } | null;
-      fulfillments: Array<{ trackingCompany: string | null; trackingInfo: Array<{ number: string; url: string }> }>;
+      fulfillments: Array<{ trackingInfo: Array<{ company: string | null; number: string; url: string }> }>;
       lineItems: { edges: Array<{ node: { title: string; quantity: number; variant?: { image?: { url: string } } | null } }> };
     }>).map((node) => ({
       id: node.id,
       name: node.name,
       orderNumber: parseInt(node.name.replace('#', ''), 10),
       processedAt: node.processedAt,
-      financialStatus: node.financialStatus,
-      fulfillmentStatus: node.fulfillmentStatus || 'UNFULFILLED',
-      statusUrl: node.statusUrl,
+      financialStatus: (node.displayFinancialStatus || '').toUpperCase().replace(/ /g, '_'),
+      fulfillmentStatus: (node.displayFulfillmentStatus || 'Unfulfilled').toUpperCase().replace(/ /g, '_'),
+      statusUrl: node.statusPageUrl,
       totalPrice: {
         amount: node.totalPriceSet.shopMoney.amount,
         currencyCode: node.totalPriceSet.shopMoney.currencyCode,
       },
       shippingAddress: node.shippingAddress,
       fulfillments: (node.fulfillments || []).map((f) => ({
-        trackingCompany: f.trackingCompany,
+        trackingCompany: f.trackingInfo?.[0]?.company || null,
         trackingNumber: f.trackingInfo?.[0]?.number || null,
         trackingUrl: f.trackingInfo?.[0]?.url || null,
       })),
@@ -327,7 +316,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })),
     }));
 
-    return res.status(200).json({ orders, _debug });
+    return res.status(200).json({ orders });
   } catch (error) {
     console.error('[Customer Orders]', error);
     return res.status(500).json({
