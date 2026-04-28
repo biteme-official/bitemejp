@@ -99,6 +99,7 @@ const VERIFY_CUSTOMER_QUERY = `
 const ADMIN_CUSTOMER_ORDERS_QUERY = `
   query CustomerOrders($customerId: ID!, $cursor: String) {
     customer(id: $customerId) {
+      email
       orders(first: 50, after: $cursor, sortKey: PROCESSED_AT, reverse: true) {
         pageInfo { hasNextPage endCursor }
         edges {
@@ -247,8 +248,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Admin API で顧客 GID から注文を取得
     const allOrders: unknown[] = [];
     let cursor: string | null = null;
+    let shopifyCustomerEmail: string | null = null;
     do {
       const adminData = await adminGraphQL(ADMIN_CUSTOMER_ORDERS_QUERY, { customerId, cursor });
+      if (!shopifyCustomerEmail) {
+        shopifyCustomerEmail = adminData?.data?.customer?.email || null;
+      }
       const edges = adminData?.data?.customer?.orders?.edges || [];
       allOrders.push(...edges.map((e: { node: unknown }) => e.node));
       cursor = adminData?.data?.customer?.orders?.pageInfo?.hasNextPage
@@ -278,8 +283,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (lineUserId && typeof lineUserId === 'string') {
       await mergeOrdersByEmail(`line_${lineUserId}@line-user.biteme.co.jp`, existingIds);
     }
-    // 2) LINEの実際のメール (例: hayoung@biteme.co.kr) — 実メールでゲスト注文した場合
-    if (userEmail && typeof userEmail === 'string' && userEmail.includes('@')) {
+    // 2) Shopify顧客の実メール — GID照会で取得したメールでゲスト注文を検索
+    if (shopifyCustomerEmail && shopifyCustomerEmail.includes('@')) {
+      await mergeOrdersByEmail(shopifyCustomerEmail, existingIds);
+    }
+    // 3) フロントから渡された実メール (上記と異なる場合のみ)
+    if (userEmail && typeof userEmail === 'string' && userEmail.includes('@') && userEmail !== shopifyCustomerEmail) {
       await mergeOrdersByEmail(userEmail, existingIds);
     }
 
