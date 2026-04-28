@@ -251,13 +251,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Admin API で顧客 GID から注文を取得
     const allOrders: unknown[] = [];
     let cursor: string | null = null;
+    const _debug: Record<string, unknown> = { customerId };
 
     do {
       const adminData = await adminGraphQL(ADMIN_CUSTOMER_ORDERS_QUERY, { customerId, cursor });
-      console.log('[customer-orders] adminData errors:', JSON.stringify(adminData?.errors));
-      console.log('[customer-orders] customer null?', adminData?.data?.customer === null);
+      _debug.gidErrors = adminData?.errors;
+      _debug.customerNull = adminData?.data?.customer === null;
       const edges = adminData?.data?.customer?.orders?.edges || [];
-      console.log('[customer-orders] GID orders fetched:', edges.length);
+      _debug.gidOrderCount = edges.length;
       allOrders.push(...edges.map((e: { node: unknown }) => e.node));
       cursor = adminData?.data?.customer?.orders?.pageInfo?.hasNextPage
         ? adminData?.data?.customer?.orders?.pageInfo?.endCursor
@@ -269,9 +270,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const lineEmail = `line_${lineUserId}@line-user.biteme.co.jp`;
       try {
         const emailData = await adminGraphQL(ORDERS_BY_EMAIL_QUERY, { query: `email:${lineEmail}`, cursor: null });
-        console.log('[customer-orders] email search errors:', JSON.stringify(emailData?.errors));
+        _debug.emailErrors = emailData?.errors;
         const emailEdges = emailData?.data?.orders?.edges || [];
-        console.log('[customer-orders] email orders found:', emailEdges.length);
+        _debug.emailOrderCount = emailEdges.length;
         const existingIds = new Set(allOrders.map((o: unknown) => (o as { id: string }).id));
         for (const e of emailEdges) {
           if (!existingIds.has(e.node.id)) {
@@ -280,7 +281,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
       } catch (err) {
-        console.warn('[customer-orders] Email order merge failed (non-critical):', err);
+        _debug.emailError = String(err);
       }
     }
 
@@ -326,7 +327,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })),
     }));
 
-    return res.status(200).json({ orders });
+    return res.status(200).json({ orders, _debug });
   } catch (error) {
     console.error('[Customer Orders]', error);
     return res.status(500).json({
