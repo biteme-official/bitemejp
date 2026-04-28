@@ -403,9 +403,13 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
                     )}
                   </div>
                   <div className="p-4">
-                    <h3 className="font-medium text-sm line-clamp-2 mb-2 group-hover:text-primary transition-colors">
+                    <h3 className="font-medium text-sm line-clamp-2 mb-1 group-hover:text-primary transition-colors">
                       {product.node.title}
                     </h3>
+                    <div
+                      className="jdgm-widget jdgm-preview-badge mb-2"
+                      data-id={product.node.handle}
+                    />
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
                         <span className={`font-bold text-sm ${isCompletelyOutOfStock ? 'text-muted-foreground' : 'text-primary'}`} translate="no">

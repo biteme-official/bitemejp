@@ -84,9 +84,13 @@ export function PopularProducts() {
                 </span>
               </div>
               <div className="p-3">
-                <h3 className="text-xs font-medium text-foreground line-clamp-2 mb-2 min-h-[32px]">
+                <h3 className="text-xs font-medium text-foreground line-clamp-2 mb-1 min-h-[32px]">
                   {product.node.title}
                 </h3>
+                <div
+                  className="jdgm-widget jdgm-preview-badge mb-1"
+                  data-id={product.node.handle}
+                />
                 <p className="text-sm font-bold text-primary" translate="no">
                   {formatPrice(price.amount, price.currencyCode)}
                 </p>
