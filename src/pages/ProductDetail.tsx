@@ -13,6 +13,7 @@ import { fetchProductByHandle, formatPrice, ShopifyProduct } from "@/lib/shopify
 import { trackViewItem, trackAddToCart, shopifyToGA4Item } from "@/lib/ga4-ecommerce";
 import { useCartStore } from "@/stores/cartStore";
 import { useWishlistStore } from "@/stores/wishlistStore";
+import { ReviewWidget } from "@/components/product/ReviewWidget";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CartDrawer } from "@/components/cart/CartDrawer";
@@ -200,20 +201,6 @@ export default function ProductDetail() {
   }, [product]);
 
   // Judge.me: SPA 遷移後にウィジェットを再初期化
-  useEffect(() => {
-    if (!product?.id) return;
-    let attempts = 0;
-    const tryInit = () => {
-      const cacheServer = (window as unknown as { jdgmCacheServer?: { reloadAll: () => void } }).jdgmCacheServer;
-      if (cacheServer?.reloadAll) {
-        cacheServer.reloadAll();
-      } else if (attempts++ < 10) {
-        setTimeout(tryInit, 300);
-      }
-    };
-    const timer = setTimeout(tryInit, 100);
-    return () => clearTimeout(timer);
-  }, [product?.id]);
 
   const scrollThumbnails = (direction: 'left' | 'right') => {
     if (thumbnailRef.current) {
@@ -734,19 +721,12 @@ export default function ProductDetail() {
         )}
       </div>
 
-      {/* Judge.me Review Widget */}
-      <div className="max-w-2xl mx-auto px-4 pb-8 space-y-6">
-        <div
-          className="jdgm-widget jdgm-review-widget"
-          data-id={product?.id?.split('/').pop()}
-          data-handle={product?.handle}
-        />
-        <div
-          className="jdgm-widget jdgm-write-review-widget"
-          data-id={product?.id?.split('/').pop()}
-          data-handle={product?.handle}
-        />
-      </div>
+      {/* Review Widget */}
+      {product?.id && (
+        <div className="max-w-2xl mx-auto px-4 pb-8">
+          <ReviewWidget productNumericId={product.id.split('/').pop()!} />
+        </div>
+      )}
 
       {/* Footer */}
       <Footer />
