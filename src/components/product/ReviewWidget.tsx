@@ -116,7 +116,11 @@ function WriteReviewForm({ productId, onSuccess }: { productId: string; onSucces
   );
 }
 
-export function ReviewWidget({ productNumericId }: { productNumericId: string }) {
+export function ReviewWidget({ productNumericId, canReview = false, isLoggedIn = false }: {
+  productNumericId: string;
+  canReview?: boolean;
+  isLoggedIn?: boolean;
+}) {
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -162,9 +166,15 @@ export function ReviewWidget({ productNumericId }: { productNumericId: string })
           )}
         </div>
         {!showForm && !submitted && (
-          <Button variant="outline" size="sm" onClick={() => setShowForm(true)}>
-            レビューを書く
-          </Button>
+          canReview ? (
+            <Button variant="outline" size="sm" onClick={() => setShowForm(true)}>
+              レビューを書く
+            </Button>
+          ) : (
+            <p className="text-xs text-muted-foreground text-right">
+              {isLoggedIn ? '購入者のみレビューできます' : 'ログイン後にレビューできます'}
+            </p>
+          )
         )}
       </div>
 

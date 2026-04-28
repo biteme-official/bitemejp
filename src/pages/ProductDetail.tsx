@@ -14,6 +14,8 @@ import { trackViewItem, trackAddToCart, shopifyToGA4Item } from "@/lib/ga4-ecomm
 import { useCartStore } from "@/stores/cartStore";
 import { useWishlistStore } from "@/stores/wishlistStore";
 import { ReviewWidget } from "@/components/product/ReviewWidget";
+import { useAuthStore } from "@/stores/authStore";
+import { fetchCustomerOrdersViaAdmin } from "@/lib/shopify";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CartDrawer } from "@/components/cart/CartDrawer";
@@ -133,6 +135,8 @@ export default function ProductDetail() {
   const [product, setProduct] = useState<ShopifyProduct['node'] | null>(null);
   const [recommendations, setRecommendations] = useState<ProductRecommendation[]>([]);
   const [activeTab, setActiveTab] = useState<'detail' | 'review'>('detail');
+  const [canReview, setCanReview] = useState(false);
+  const { user, isLoggedIn } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState(0);
@@ -208,6 +212,22 @@ export default function ProductDetail() {
       .then(setRecommendations)
       .catch(() => {});
   }, [product?.id]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !product?.title) { setCanReview(false); return; }
+    const savedEmail = (() => {
+      try { return JSON.parse(localStorage.getItem('checkout-shipping') || '{}').email || undefined; }
+      catch { return undefined; }
+    })();
+    fetchCustomerOrdersViaAdmin(user!.shopifyCustomerToken, user!.shopifyCustomerId, user!.userId, user!.email || savedEmail)
+      .then((orders) => {
+        const purchased = orders.some(order =>
+          order.lineItems.some(item => item.title === product.title)
+        );
+        setCanReview(purchased);
+      })
+      .catch(() => setCanReview(false));
+  }, [isLoggedIn, product?.title]);
 
   const scrollThumbnails = (direction: 'left' | 'right') => {
     if (thumbnailRef.current) {
@@ -742,7 +762,11 @@ export default function ProductDetail() {
             </div>
           )}
           {activeTab === 'review' && product?.id && (
-            <ReviewWidget productNumericId={product.id.split('/').pop()!} />
+            <ReviewWidget
+              productNumericId={product.id.split('/').pop()!}
+              canReview={canReview}
+              isLoggedIn={isLoggedIn}
+            />
           )}
         </div>
       </div>
