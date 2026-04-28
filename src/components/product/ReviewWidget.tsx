@@ -13,6 +13,19 @@ interface Review {
   pictures: Array<{ urls: { original: string } }>;
 }
 
+function maskName(name: string): string {
+  if (!name) return '***';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    const first = parts[0];
+    const last = parts[parts.length - 1];
+    return `${first} ${last.charAt(0)}${'*'.repeat(Math.max(1, last.length - 1))}`;
+  }
+  if (name.length <= 1) return name + '*';
+  const visible = Math.ceil(name.length / 2);
+  return name.substring(0, visible) + '*'.repeat(name.length - visible);
+}
+
 function StarRating({ rating, interactive = false, onChange }: {
   rating: number;
   interactive?: boolean;
@@ -203,7 +216,7 @@ export function ReviewWidget({ productNumericId, canReview = false, isLoggedIn =
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <StarRating rating={r.rating} />
-                  <span className="text-sm font-medium">{r.reviewer.name}</span>
+                  <span className="text-sm font-medium">{maskName(r.reviewer.name)}</span>
                 </div>
                 <span className="text-xs text-muted-foreground">
                   {new Date(r.created_at).toLocaleDateString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric' })}
