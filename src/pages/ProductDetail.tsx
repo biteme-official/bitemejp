@@ -731,11 +731,11 @@ export default function ProductDetail() {
       {recommendations.length > 0 && (
         <div className="max-w-2xl mx-auto px-4 pb-6">
           <h2 className="text-base font-semibold mb-3">おすすめ商品</h2>
-          <div className="grid grid-cols-2 gap-3">
-            {recommendations.slice(0, 4).map((rec) => (
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+            {recommendations.slice(0, 6).map((rec) => (
               <div
                 key={rec.id}
-                className="bg-card rounded-xl border border-border overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                className="flex-none w-36 bg-card rounded-xl border border-border overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
                 onClick={() => navigate(`/product/${rec.handle}`)}
               >
                 {rec.imageUrl ? (
