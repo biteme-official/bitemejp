@@ -241,7 +241,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return sfData?.data?.customer?.id || null;
     };
 
+    console.log('[customer-orders] identifiers received:', { hasToken: !!customerAccessToken, shopifyCustomerId, lineUserId });
     const customerId = await resolveCustomerId();
+    console.log('[customer-orders] resolved customerId:', customerId);
     if (!customerId) {
       return res.status(401).json({ error: 'Could not resolve customer ID' });
     }
@@ -252,7 +254,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     do {
       const adminData = await adminGraphQL(ADMIN_CUSTOMER_ORDERS_QUERY, { customerId, cursor });
+      console.log('[customer-orders] adminData errors:', JSON.stringify(adminData?.errors));
+      console.log('[customer-orders] customer null?', adminData?.data?.customer === null);
       const edges = adminData?.data?.customer?.orders?.edges || [];
+      console.log('[customer-orders] GID orders fetched:', edges.length);
       allOrders.push(...edges.map((e: { node: unknown }) => e.node));
       cursor = adminData?.data?.customer?.orders?.pageInfo?.hasNextPage
         ? adminData?.data?.customer?.orders?.pageInfo?.endCursor
@@ -263,17 +268,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (lineUserId && typeof lineUserId === 'string') {
       const lineEmail = `line_${lineUserId}@line-user.biteme.co.jp`;
       try {
-        const emailData = await adminGraphQL(ORDERS_BY_EMAIL_QUERY, { query: `email:"${lineEmail}"`, cursor: null });
+        const emailData = await adminGraphQL(ORDERS_BY_EMAIL_QUERY, { query: `email:${lineEmail}`, cursor: null });
+        console.log('[customer-orders] email search errors:', JSON.stringify(emailData?.errors));
         const emailEdges = emailData?.data?.orders?.edges || [];
+        console.log('[customer-orders] email orders found:', emailEdges.length);
         const existingIds = new Set(allOrders.map((o: unknown) => (o as { id: string }).id));
         for (const e of emailEdges) {
           if (!existingIds.has(e.node.id)) {
             allOrders.push(e.node);
             existingIds.add(e.node.id);
           }
-        }
-        if (emailEdges.length > 0) {
-          console.log(`[customer-orders] Merged ${emailEdges.length} email-based guest orders`);
         }
       } catch (err) {
         console.warn('[customer-orders] Email order merge failed (non-critical):', err);
