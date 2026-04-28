@@ -204,9 +204,9 @@ export default function ProductDetail() {
     if (!product?.id) return;
     let attempts = 0;
     const tryInit = () => {
-      const jdgm = (window as unknown as { jdgm?: { customWidgets?: { load: (el: Document) => void } } }).jdgm;
-      if (jdgm?.customWidgets?.load) {
-        jdgm.customWidgets.load(document);
+      const cacheServer = (window as unknown as { jdgmCacheServer?: { reloadAll: () => void } }).jdgmCacheServer;
+      if (cacheServer?.reloadAll) {
+        cacheServer.reloadAll();
       } else if (attempts++ < 10) {
         setTimeout(tryInit, 300);
       }
