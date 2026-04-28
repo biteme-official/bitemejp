@@ -41,7 +41,7 @@ export function trackViewItemList(
 // view_item - when a user views a product detail page
 export function trackViewItem(item: GA4Item) {
   gtag('event', 'view_item', {
-    currency: item.currency || 'USD',
+    currency: item.currency || 'JPY',
     value: item.price || 0,
     items: [item],
   });
@@ -50,7 +50,7 @@ export function trackViewItem(item: GA4Item) {
 // add_to_cart
 export function trackAddToCart(item: GA4Item) {
   gtag('event', 'add_to_cart', {
-    currency: item.currency || 'USD',
+    currency: item.currency || 'JPY',
     value: (item.price || 0) * (item.quantity || 1),
     items: [item],
   });
@@ -59,7 +59,7 @@ export function trackAddToCart(item: GA4Item) {
 // remove_from_cart
 export function trackRemoveFromCart(item: GA4Item) {
   gtag('event', 'remove_from_cart', {
-    currency: item.currency || 'USD',
+    currency: item.currency || 'JPY',
     value: (item.price || 0) * (item.quantity || 1),
     items: [item],
   });
@@ -107,6 +107,27 @@ export function trackPurchase(
     value,
     shipping,
     items,
+  });
+}
+
+// Get GA4 cross-domain linker param (_gl) via gtag API
+// Used to preserve session/source attribution when navigating to external domains
+export function getGA4LinkerParam(): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.gtag) {
+      resolve(null);
+      return;
+    }
+    const timer = setTimeout(() => resolve(null), 500);
+    try {
+      window.gtag('get', 'G-WLTZH90W2L', 'linker', (linkerParam: unknown) => {
+        clearTimeout(timer);
+        resolve(typeof linkerParam === 'string' && linkerParam ? linkerParam : null);
+      });
+    } catch {
+      clearTimeout(timer);
+      resolve(null);
+    }
   });
 }
 

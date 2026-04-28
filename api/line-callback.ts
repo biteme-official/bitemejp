@@ -98,7 +98,7 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
 
   const nameParts = profile.displayName.trim().split(' ');
   const firstName = nameParts[0] || profile.displayName;
-  const lastName = nameParts.slice(1).join(' ') || firstName;
+  const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
   const email = profile.email || `line_${profile.userId}@line-user.biteme.co.jp`;
   const password = generatePassword(profile.userId);
 
@@ -137,8 +137,11 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
 
   const accessToken = tokenResult.data?.customerAccessTokenCreate?.customerAccessToken?.accessToken || null;
 
+  // 기존 고객의 경우 비밀번호 불일치로 토큰 발급 실패 가능
+  // Admin API는 password 필드를 지원하지 않으므로 재설정 불가
+  // shopifyCustomerId를 통해 Admin API로 주문 조회는 별도 /api/customer-orders에서 처리
   if (!accessToken) {
-    console.warn('[Shopify Sync] Could not get customer access token');
+    console.log('[Shopify Sync] No Storefront token (existing customer with different password). Orders will be fetched via Admin API.');
   }
 
   // 3. Admin API で顧客を検索して LINE userId をメタフィールドに保存
@@ -155,13 +158,21 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
       }
     `, { query: `email:'${email}'` });
 
-    const customerGid = findResult?.data?.customers?.edges?.[0]?.node?.id;
-    if (customerGid) {
-      shopifyCustomerId = customerGid;
+    const customerNode = findResult?.data?.customers?.edges?.[0]?.node;
+    if (customerNode) {
+      shopifyCustomerId = customerNode.id;
 
-      // LINE userId をタグ + メタフィールド両方に保存
-      // タグ: Shopify customers クエリで tag: 検索が可能 (メタフィールド検索より確実)
+      // 기존 태그를 가져와서 line_id 태그 병합 (기존 태그 삭제 방지)
+      const tagsResult = await adminGraphQL(adminToken, `
+        query GetCustomerTags($id: ID!) {
+          customer(id: $id) { tags }
+        }
+      `, { id: customerNode.id });
+
+      const existingTags: string[] = tagsResult?.data?.customer?.tags ?? [];
       const lineTag = `line_id:${profile.userId}`;
+      const mergedTags = Array.from(new Set([...existingTags.filter((t: string) => !t.startsWith('line_id:')), lineTag]));
+
       await adminGraphQL(adminToken, `
         mutation SaveLineId($input: CustomerInput!) {
           customerUpdate(input: $input) {
@@ -171,8 +182,8 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
         }
       `, {
         input: {
-          id: customerGid,
-          tags: [lineTag],
+          id: customerNode.id,
+          tags: mergedTags,
           metafields: [{
             namespace: 'custom',
             key: 'line_id',
@@ -181,7 +192,7 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
           }],
         },
       });
-      console.log('[Shopify Sync] LINE ID tag+metafield saved for', customerGid);
+      console.log('[Shopify Sync] LINE ID tag+metafield saved for', customerNode.id);
     }
   } catch (err) {
     console.warn('[Shopify Sync] Tag/metafield save failed (non-critical):', err);

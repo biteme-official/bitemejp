@@ -43,10 +43,25 @@
         document.referrer.indexOf('checkout.shopify.com') !== -1
       );
 
+      // UTM / gclid를 sessionStorage에 저장 — LINE 인앱 브라우저·Safari ITP 대응
+      // 쿠키가 차단되거나 세션이 끊겨도 소스 정보 복원 가능
+      (function() {
+        var params = new URLSearchParams(window.location.search);
+        var utmKeys = ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','gclid'];
+        var hasUtm = utmKeys.some(function(k){ return params.get(k); });
+        if (hasUtm) {
+          var saved = {};
+          utmKeys.forEach(function(k){ var v = params.get(k); if (v) saved[k] = v; });
+          try { sessionStorage.setItem('_bm_utm', JSON.stringify(saved)); } catch(e){}
+        }
+      })();
+
       var ga4Config = {
-        'send_page_view': true,
+        'send_page_view': false,  // 수동 trackPageView로 일원화 (이중 발송 방지)
         'page_location': window.location.href,
         'page_title': document.title,
+        'allow_google_signals': true,
+        'allow_ad_personalization_signals': true,
         'linker': {
           'domains': ['biteme.co.jp', 'biteme-jp.myshopify.com'],
           'accept_incoming': true

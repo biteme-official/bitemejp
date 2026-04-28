@@ -152,8 +152,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { customerAccessToken, shopifyCustomerId, lineUserId } = req.body || {};
-  if (!customerAccessToken || typeof customerAccessToken !== 'string') {
-    return res.status(400).json({ error: 'customerAccessToken is required' });
+  // shopifyCustomerId か lineUserId があれば Admin API で直接解決できるので token は任意
+  const hasIdentifier = (shopifyCustomerId && typeof shopifyCustomerId === 'string')
+    || (lineUserId && typeof lineUserId === 'string')
+    || (customerAccessToken && typeof customerAccessToken === 'string');
+  if (!hasIdentifier) {
+    return res.status(400).json({ error: 'customerAccessToken, shopifyCustomerId, or lineUserId is required' });
   }
 
   try {
@@ -183,7 +187,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.warn('[customer-orders] LINE tag lookup returned no customer');
       }
 
-      // 3. Storefront API でトークン検証 → GID 取得
+      // 3. Storefront API でトークン検証 → GID 取得 (token がある場合のみ)
+      if (!customerAccessToken) return null;
       const sfData = await storefrontQuery(VERIFY_CUSTOMER_QUERY, { customerAccessToken });
       return sfData?.data?.customer?.id || null;
     };

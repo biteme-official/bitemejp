@@ -138,16 +138,17 @@ export default function MyPage() {
 
   // Fetch customer orders via Admin API proxy
   useEffect(() => {
-    if (isLoggedIn && user?.shopifyCustomerToken) {
+    const canFetch = isLoggedIn && (user?.shopifyCustomerToken || user?.shopifyCustomerId || user?.userId);
+    if (canFetch) {
       setLoading(true);
-      fetchCustomerOrdersViaAdmin(user.shopifyCustomerToken, user.shopifyCustomerId, user.userId)
+      fetchCustomerOrdersViaAdmin(user!.shopifyCustomerToken, user!.shopifyCustomerId, user!.userId)
         .then(setOrders)
         .catch(console.error)
         .finally(() => setLoading(false));
     } else {
       setLoading(false);
     }
-  }, [isLoggedIn, user?.shopifyCustomerToken]);
+  }, [isLoggedIn, user?.shopifyCustomerToken, user?.shopifyCustomerId]);
 
 
   const handleLogout = () => { logout(); navigate('/'); };

@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { useCartStore } from '@/stores/cartStore';
 import { useAuthStore } from '@/stores/authStore';
 import { formatPrice, fetchShippingRates, fetchCustomerData, ShippingRate } from '@/lib/shopify';
+import { getGA4LinkerParam } from '@/lib/ga4-ecommerce';
 import { toast } from 'sonner';
 
 interface ShippingForm {
@@ -143,6 +144,11 @@ export default function Checkout() {
         url.searchParams.set('checkout[shipping_address][address2]', form.address2);
         url.searchParams.set('checkout[shipping_address][phone]', form.phone);
         url.searchParams.set('checkout[shipping_address][country]', 'JP');
+
+        // GA4 cross-domain linker param을 return_to에 삽입해 Shopify 복귀 시 세션/소스 보존
+        const glParam = await getGA4LinkerParam();
+        const returnBase = `${window.location.origin}/checkout-return`;
+        url.searchParams.set('return_to', glParam ? `${returnBase}?_gl=${encodeURIComponent(glParam)}` : returnBase);
 
         // Shopify checkout URL에서 token 추출 (transaction_id로 사용)
         // 형식: /checkouts/cn/<TOKEN>/...
