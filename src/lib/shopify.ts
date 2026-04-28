@@ -921,6 +921,47 @@ export async function fetchCustomerData(customerAccessToken: string): Promise<Sh
   };
 }
 
+const PRODUCT_RECOMMENDATIONS_QUERY = `
+  query ProductRecommendations($productId: ID!) {
+    productRecommendations(productId: $productId) {
+      id
+      title
+      handle
+      priceRange {
+        minVariantPrice { amount currencyCode }
+      }
+      images(first: 1) {
+        edges { node { url altText } }
+      }
+    }
+  }
+`;
+
+export interface ProductRecommendation {
+  id: string;
+  title: string;
+  handle: string;
+  price: { amount: string; currencyCode: string };
+  imageUrl: string | null;
+  imageAlt: string | null;
+}
+
+export async function fetchProductRecommendations(productId: string): Promise<ProductRecommendation[]> {
+  const data = await storefrontApiRequest(PRODUCT_RECOMMENDATIONS_QUERY, { productId });
+  return (data?.data?.productRecommendations || []).map((p: {
+    id: string; title: string; handle: string;
+    priceRange: { minVariantPrice: { amount: string; currencyCode: string } };
+    images: { edges: Array<{ node: { url: string; altText: string | null } }> };
+  }) => ({
+    id: p.id,
+    title: p.title,
+    handle: p.handle,
+    price: p.priceRange.minVariantPrice,
+    imageUrl: p.images.edges[0]?.node.url || null,
+    imageAlt: p.images.edges[0]?.node.altText || p.title,
+  }));
+}
+
 // Backward compat
 export async function fetchCustomerOrders(customerAccessToken: string): Promise<ShopifyOrder[]> {
   const profile = await fetchCustomerData(customerAccessToken);

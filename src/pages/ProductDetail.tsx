@@ -9,7 +9,7 @@ import biteMeLogo from "@/assets/bite-me-logo.png";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { fetchProductByHandle, formatPrice, ShopifyProduct } from "@/lib/shopify";
+import { fetchProductByHandle, formatPrice, ShopifyProduct, fetchProductRecommendations, ProductRecommendation } from "@/lib/shopify";
 import { trackViewItem, trackAddToCart, shopifyToGA4Item } from "@/lib/ga4-ecommerce";
 import { useCartStore } from "@/stores/cartStore";
 import { useWishlistStore } from "@/stores/wishlistStore";
@@ -131,6 +131,7 @@ export default function ProductDetail() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [product, setProduct] = useState<ShopifyProduct['node'] | null>(null);
+  const [recommendations, setRecommendations] = useState<ProductRecommendation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState(0);
@@ -200,7 +201,12 @@ export default function ProductDetail() {
     return () => window.removeEventListener('resize', checkScrollability);
   }, [product]);
 
-  // Judge.me: SPA 遷移後にウィジェットを再初期化
+  useEffect(() => {
+    if (!product?.id) return;
+    fetchProductRecommendations(product.id)
+      .then(setRecommendations)
+      .catch(() => {});
+  }, [product?.id]);
 
   const scrollThumbnails = (direction: 'left' | 'right') => {
     if (thumbnailRef.current) {
@@ -720,6 +726,34 @@ export default function ProductDetail() {
           </div>
         )}
       </div>
+
+      {/* You may also like */}
+      {recommendations.length > 0 && (
+        <div className="max-w-2xl mx-auto px-4 pb-6">
+          <h2 className="text-base font-semibold mb-3">おすすめ商品</h2>
+          <div className="grid grid-cols-2 gap-3">
+            {recommendations.slice(0, 4).map((rec) => (
+              <div
+                key={rec.id}
+                className="bg-card rounded-xl border border-border overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                onClick={() => navigate(`/product/${rec.handle}`)}
+              >
+                {rec.imageUrl ? (
+                  <img src={rec.imageUrl} alt={rec.imageAlt || rec.title} className="w-full aspect-square object-cover" />
+                ) : (
+                  <div className="w-full aspect-square bg-secondary" />
+                )}
+                <div className="p-2">
+                  <p className="text-xs font-medium line-clamp-2">{rec.title}</p>
+                  <p className="text-xs font-bold text-primary mt-1" translate="no">
+                    {formatPrice(rec.price.amount, rec.price.currencyCode)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Review Widget */}
       {product?.id && (
