@@ -729,9 +729,13 @@ export default function ProductDetail() {
       </div>
 
       {/* Judge.me Review Widget */}
-      <div className="max-w-2xl mx-auto px-4 pb-8">
+      <div className="max-w-2xl mx-auto px-4 pb-8 space-y-6">
         <div
           className="jdgm-widget jdgm-review-widget"
+          data-id={product?.id?.split('/').pop()}
+        />
+        <div
+          className="jdgm-widget jdgm-write-review-widget"
           data-id={product?.id?.split('/').pop()}
         />
       </div>
