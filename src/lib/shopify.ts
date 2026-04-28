@@ -934,11 +934,12 @@ export async function fetchCustomerOrdersViaAdmin(
   customerAccessToken: string | null | undefined,
   shopifyCustomerId?: string,
   lineUserId?: string,
+  userEmail?: string,
 ): Promise<ShopifyOrder[]> {
   const res = await fetch('/api/customer-orders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ customerAccessToken, shopifyCustomerId, lineUserId }),
+    body: JSON.stringify({ customerAccessToken, shopifyCustomerId, lineUserId, userEmail }),
   });
   if (!res.ok) return [];
   const data = await res.json();

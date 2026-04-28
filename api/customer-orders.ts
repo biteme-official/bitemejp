@@ -183,7 +183,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { customerAccessToken, shopifyCustomerId, lineUserId } = req.body || {};
+  const { customerAccessToken, shopifyCustomerId, lineUserId, userEmail } = req.body || {};
   // shopifyCustomerId か lineUserId があれば Admin API で直接解決できるので token は任意
   const hasIdentifier = (shopifyCustomerId && typeof shopifyCustomerId === 'string')
     || (lineUserId && typeof lineUserId === 'string')
@@ -256,13 +256,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : null;
     } while (cursor && allOrders.length < 200);
 
-    // LINE メールによるゲスト注文も検索してマージ (customerAccessToken なしでの checkout 分)
-    if (lineUserId && typeof lineUserId === 'string') {
-      const lineEmail = `line_${lineUserId}@line-user.biteme.co.jp`;
+    // ゲスト注文をメールで検索してマージ (customerAccessToken なしでの checkout 分)
+    const mergeOrdersByEmail = async (email: string, existingIds: Set<string>) => {
       try {
-        const emailData = await adminGraphQL(ORDERS_BY_EMAIL_QUERY, { query: `email:${lineEmail}`, cursor: null });
+        const emailData = await adminGraphQL(ORDERS_BY_EMAIL_QUERY, { query: `email:"${email}"`, cursor: null });
         const emailEdges = emailData?.data?.orders?.edges || [];
-        const existingIds = new Set(allOrders.map((o: unknown) => (o as { id: string }).id));
         for (const e of emailEdges) {
           if (!existingIds.has(e.node.id)) {
             allOrders.push(e.node);
@@ -270,8 +268,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
       } catch (err) {
-        console.warn('[customer-orders] email order merge failed:', err);
+        console.warn(`[customer-orders] email order merge failed (${email}):`, err);
       }
+    };
+
+    const existingIds = new Set(allOrders.map((o: unknown) => (o as { id: string }).id));
+
+    // 1) LINE 合成メール (line_U...@line-user.biteme.co.jp)
+    if (lineUserId && typeof lineUserId === 'string') {
+      await mergeOrdersByEmail(`line_${lineUserId}@line-user.biteme.co.jp`, existingIds);
+    }
+    // 2) LINEの実際のメール (例: hayoung@biteme.co.kr) — 実メールでゲスト注文した場合
+    if (userEmail && typeof userEmail === 'string' && userEmail.includes('@')) {
+      await mergeOrdersByEmail(userEmail, existingIds);
     }
 
     // 日付順に再ソート

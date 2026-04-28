@@ -141,7 +141,7 @@ export default function MyPage() {
     const canFetch = isLoggedIn && (user?.shopifyCustomerToken || user?.shopifyCustomerId || user?.userId);
     if (canFetch) {
       setLoading(true);
-      fetchCustomerOrdersViaAdmin(user!.shopifyCustomerToken, user!.shopifyCustomerId, user!.userId)
+      fetchCustomerOrdersViaAdmin(user!.shopifyCustomerToken, user!.shopifyCustomerId, user!.userId, user!.email)
         .then(setOrders)
         .catch(console.error)
         .finally(() => setLoading(false));
