@@ -202,10 +202,16 @@ export default function ProductDetail() {
   // Judge.me: SPA 遷移後にウィジェットを再初期化
   useEffect(() => {
     if (!product?.id) return;
-    const timer = setTimeout(() => {
+    let attempts = 0;
+    const tryInit = () => {
       const jdgm = (window as unknown as { jdgm?: { customWidgets?: { load: (el: Document) => void } } }).jdgm;
-      jdgm?.customWidgets?.load(document);
-    }, 300);
+      if (jdgm?.customWidgets?.load) {
+        jdgm.customWidgets.load(document);
+      } else if (attempts++ < 10) {
+        setTimeout(tryInit, 300);
+      }
+    };
+    const timer = setTimeout(tryInit, 100);
     return () => clearTimeout(timer);
   }, [product?.id]);
 
