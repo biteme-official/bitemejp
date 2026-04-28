@@ -201,10 +201,13 @@ export default function ProductDetail() {
 
   // Judge.me: SPA 遷移後にウィジェットを再初期化
   useEffect(() => {
-    if (!product?.handle) return;
-    const jdgm = (window as unknown as { jdgm?: { customWidgets?: { load: (el: Document) => void } } }).jdgm;
-    jdgm?.customWidgets?.load(document);
-  }, [product?.handle]);
+    if (!product?.id) return;
+    const timer = setTimeout(() => {
+      const jdgm = (window as unknown as { jdgm?: { customWidgets?: { load: (el: Document) => void } } }).jdgm;
+      jdgm?.customWidgets?.load(document);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [product?.id]);
 
   const scrollThumbnails = (direction: 'left' | 'right') => {
     if (thumbnailRef.current) {
@@ -729,7 +732,7 @@ export default function ProductDetail() {
       <div className="max-w-2xl mx-auto px-4 pb-8">
         <div
           className="jdgm-widget jdgm-review-widget"
-          data-id={product?.handle}
+          data-id={product?.id?.split('/').pop()}
         />
       </div>
 
