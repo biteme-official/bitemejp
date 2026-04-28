@@ -90,6 +90,7 @@ export function PopularProducts() {
                 <div
                   className="jdgm-widget jdgm-preview-badge mb-1"
                   data-id={product.node.id?.split('/').pop()}
+                  data-handle={product.node.handle}
                 />
                 <p className="text-sm font-bold text-primary" translate="no">
                   {formatPrice(price.amount, price.currencyCode)}

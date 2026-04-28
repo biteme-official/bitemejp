@@ -733,10 +733,12 @@ export default function ProductDetail() {
         <div
           className="jdgm-widget jdgm-review-widget"
           data-id={product?.id?.split('/').pop()}
+          data-handle={product?.handle}
         />
         <div
           className="jdgm-widget jdgm-write-review-widget"
           data-id={product?.id?.split('/').pop()}
+          data-handle={product?.handle}
         />
       </div>
 

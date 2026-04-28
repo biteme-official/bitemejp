@@ -409,6 +409,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
                     <div
                       className="jdgm-widget jdgm-preview-badge mb-2"
                       data-id={product.node.id?.split('/').pop()}
+                      data-handle={product.node.handle}
                     />
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
