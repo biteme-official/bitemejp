@@ -224,7 +224,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               edges { node { id } }
             }
           }
-        `, { query: `tag:line_id:${lineUserId}` });
+        `, { query: `tag:"line_id:${lineUserId}"` });
         const gidByTag = tagResult?.data?.customers?.edges?.[0]?.node?.id;
         if (gidByTag) {
           console.log('[customer-orders] Found customer by LINE tag:', gidByTag);

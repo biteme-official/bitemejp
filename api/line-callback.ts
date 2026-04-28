@@ -156,7 +156,7 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
           edges { node { id } }
         }
       }
-    `, { query: `email:'${email}'` });
+    `, { query: `email:"${email}"` });
 
     const customerNode = findResult?.data?.customers?.edges?.[0]?.node;
     if (customerNode) {
