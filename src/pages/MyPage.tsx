@@ -141,7 +141,12 @@ export default function MyPage() {
     const canFetch = isLoggedIn && (user?.shopifyCustomerToken || user?.shopifyCustomerId || user?.userId);
     if (canFetch) {
       setLoading(true);
-      fetchCustomerOrdersViaAdmin(user!.shopifyCustomerToken, user!.shopifyCustomerId, user!.userId, user!.email)
+      const savedCheckoutEmail = (() => {
+        try { return JSON.parse(localStorage.getItem('checkout-shipping') || '{}').email || undefined; }
+        catch { return undefined; }
+      })();
+      const userEmail = user!.email || savedCheckoutEmail;
+      fetchCustomerOrdersViaAdmin(user!.shopifyCustomerToken, user!.shopifyCustomerId, user!.userId, userEmail)
         .then(setOrders)
         .catch(console.error)
         .finally(() => setLoading(false));
