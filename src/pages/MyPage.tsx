@@ -148,7 +148,7 @@ export default function MyPage() {
     } else {
       setLoading(false);
     }
-  }, [isLoggedIn, user?.shopifyCustomerToken, user?.shopifyCustomerId, user?.userId]);
+  }, [isLoggedIn]);
 
 
   const handleLogout = () => { logout(); navigate('/'); };

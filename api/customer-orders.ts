@@ -270,7 +270,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
       } catch (err) {
-        _debug.emailError = String(err);
+        console.warn('[customer-orders] email order merge failed:', err);
       }
     }
 
