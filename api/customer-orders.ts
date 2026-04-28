@@ -133,6 +133,40 @@ const ADMIN_CUSTOMER_ORDERS_QUERY = `
   }
 `;
 
+// LINE メールでゲスト注文を検索 (customerAccessToken なしの注文を拾う)
+const ORDERS_BY_EMAIL_QUERY = `
+  query OrdersByEmail($query: String!, $cursor: String) {
+    orders(first: 50, after: $cursor, sortKey: PROCESSED_AT, reverse: true, query: $query) {
+      pageInfo { hasNextPage endCursor }
+      edges {
+        node {
+          id
+          name
+          processedAt
+          financialStatus
+          fulfillmentStatus
+          statusUrl
+          totalPriceSet { shopMoney { amount currencyCode } }
+          shippingAddress { city province country }
+          fulfillments(first: 5) {
+            trackingCompany
+            trackingInfo(first: 1) { number url }
+          }
+          lineItems(first: 20) {
+            edges {
+              node {
+                title
+                quantity
+                variant { image { url } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
 const ALLOWED_ORIGINS = [
   'https://biteme.co.jp',
   'https://www.biteme.co.jp',
@@ -212,7 +246,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ error: 'Could not resolve customer ID' });
     }
 
-    // Admin API で顧客 GID から注文を直接取得
+    // Admin API で顧客 GID から注文を取得
     const allOrders: unknown[] = [];
     let cursor: string | null = null;
 
@@ -224,6 +258,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? adminData?.data?.customer?.orders?.pageInfo?.endCursor
         : null;
     } while (cursor && allOrders.length < 200);
+
+    // LINE メールによるゲスト注文も検索してマージ (customerAccessToken なしでの checkout 分)
+    if (lineUserId && typeof lineUserId === 'string') {
+      const lineEmail = `line_${lineUserId}@line-user.biteme.co.jp`;
+      try {
+        const emailData = await adminGraphQL(ORDERS_BY_EMAIL_QUERY, { query: `email:"${lineEmail}"`, cursor: null });
+        const emailEdges = emailData?.data?.orders?.edges || [];
+        const existingIds = new Set(allOrders.map((o: unknown) => (o as { id: string }).id));
+        for (const e of emailEdges) {
+          if (!existingIds.has(e.node.id)) {
+            allOrders.push(e.node);
+            existingIds.add(e.node.id);
+          }
+        }
+        if (emailEdges.length > 0) {
+          console.log(`[customer-orders] Merged ${emailEdges.length} email-based guest orders`);
+        }
+      } catch (err) {
+        console.warn('[customer-orders] Email order merge failed (non-critical):', err);
+      }
+    }
+
+    // 日付順に再ソート
+    (allOrders as Array<{ processedAt: string }>).sort(
+      (a, b) => new Date(b.processedAt).getTime() - new Date(a.processedAt).getTime()
+    );
 
     // フロントの ShopifyOrder 型に合わせて整形
     const orders = (allOrders as Array<{
