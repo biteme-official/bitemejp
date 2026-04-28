@@ -726,10 +726,12 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
        e.field?.includes('customerAccessToken') || e.message?.includes('無効')
    );
    if (tokenError || !data?.data?.cartCreate?.cart) {
-     console.warn('[Checkout] Customer token invalid, retrying without token');
-     if (userEmail) {
-       input.buyerIdentity = { email: userEmail, countryCode: 'JP' };
+     console.warn('[Checkout] Customer token invalid or cart null, retrying');
+     if (tokenError && formEmail && isValidEmail(formEmail)) {
+       // token失効 → メールのみで再試行
+       input.buyerIdentity = { email: formEmail, countryCode: 'JP' };
      } else {
+       // cartがnull (既存顧客メールで弾かれた等) → buyerIdentity完全削除
        delete input.buyerIdentity;
      }
      data = await storefrontApiRequest(CART_CREATE_MUTATION, { input });

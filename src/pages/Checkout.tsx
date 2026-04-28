@@ -44,7 +44,7 @@ export default function Checkout() {
     try {
       const saved = JSON.parse(localStorage.getItem('checkout-shipping') || '{}');
       return {
-        email: user?.email || user?.shopifyEmail || saved.email || '',
+        email: user?.email || saved.email || '',
         lastName: saved.lastName || '',
         firstName: saved.firstName || '',
         zip: saved.zip || '',
@@ -55,7 +55,7 @@ export default function Checkout() {
         phone: saved.phone || '',
       };
     } catch {
-      return { email: user?.email || user?.shopifyEmail || '', lastName: '', firstName: '', zip: '', prefecture: '', city: '', address1: '', address2: '', phone: '' };
+      return { email: user?.email || '', lastName: '', firstName: '', zip: '', prefecture: '', city: '', address1: '', address2: '', phone: '' };
     }
   });
 
