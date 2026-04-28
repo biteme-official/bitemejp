@@ -132,6 +132,7 @@ export default function ProductDetail() {
   const { t } = useTranslation();
   const [product, setProduct] = useState<ShopifyProduct['node'] | null>(null);
   const [recommendations, setRecommendations] = useState<ProductRecommendation[]>([]);
+  const [activeTab, setActiveTab] = useState<'detail' | 'review'>('detail');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState(0);
@@ -699,32 +700,51 @@ export default function ProductDetail() {
           </div>
         </div>
 
-        {/* Description */}
-        {(product.descriptionHtml || product.description) && (
-          <div className="mb-6">
-            {product.descriptionHtml ? (
-              <div
-                className="prose prose-sm max-w-none text-muted-foreground overflow-x-hidden
-                  prose-headings:text-foreground prose-headings:font-bold prose-headings:mt-4 prose-headings:mb-2
-                  prose-h1:text-xl prose-h2:text-lg prose-h3:text-base
-                  prose-p:leading-relaxed prose-p:mb-3
-                  prose-strong:text-foreground prose-strong:font-semibold
-                  prose-ul:list-disc prose-ul:pl-5 prose-ul:space-y-1
-                  prose-ol:list-decimal prose-ol:pl-5 prose-ol:space-y-1
-                  prose-li:text-muted-foreground
-                  prose-a:text-primary prose-a:underline hover:prose-a:text-primary/80
-                  prose-img:max-w-full prose-img:h-auto prose-img:rounded-lg
-                  [&_img]:max-w-full [&_img]:h-auto [&_img]:block
-                  [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:block
-                  [&_pre]:max-w-full [&_pre]:overflow-x-auto
-                  [&_iframe]:max-w-full [&_*]:max-w-full"
-                dangerouslySetInnerHTML={{ __html: sanitizeHtml(product.descriptionHtml) }}
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground leading-relaxed">{product.description}</p>
-            )}
+        {/* Description / Review Tabs */}
+        <div className="mb-2">
+          <div className="flex border-b border-border mb-4">
+            <button
+              onClick={() => setActiveTab('detail')}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${activeTab === 'detail' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`}
+            >
+              商品詳細
+            </button>
+            <button
+              onClick={() => setActiveTab('review')}
+              className={`flex-1 py-2.5 text-sm font-medium transition-colors ${activeTab === 'review' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`}
+            >
+              レビュー
+            </button>
           </div>
-        )}
+          {activeTab === 'detail' && (product.descriptionHtml || product.description) && (
+            <div>
+              {product.descriptionHtml ? (
+                <div
+                  className="prose prose-sm max-w-none text-muted-foreground overflow-x-hidden
+                    prose-headings:text-foreground prose-headings:font-bold prose-headings:mt-4 prose-headings:mb-2
+                    prose-h1:text-xl prose-h2:text-lg prose-h3:text-base
+                    prose-p:leading-relaxed prose-p:mb-3
+                    prose-strong:text-foreground prose-strong:font-semibold
+                    prose-ul:list-disc prose-ul:pl-5 prose-ul:space-y-1
+                    prose-ol:list-decimal prose-ol:pl-5 prose-ol:space-y-1
+                    prose-li:text-muted-foreground
+                    prose-a:text-primary prose-a:underline hover:prose-a:text-primary/80
+                    prose-img:max-w-full prose-img:h-auto prose-img:rounded-lg
+                    [&_img]:max-w-full [&_img]:h-auto [&_img]:block
+                    [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:block
+                    [&_pre]:max-w-full [&_pre]:overflow-x-auto
+                    [&_iframe]:max-w-full [&_*]:max-w-full"
+                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(product.descriptionHtml) }}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground leading-relaxed">{product.description}</p>
+              )}
+            </div>
+          )}
+          {activeTab === 'review' && product?.id && (
+            <ReviewWidget productNumericId={product.id.split('/').pop()!} />
+          )}
+        </div>
       </div>
 
       {/* You may also like */}
@@ -752,13 +772,6 @@ export default function ProductDetail() {
               </div>
             ))}
           </div>
-        </div>
-      )}
-
-      {/* Review Widget */}
-      {product?.id && (
-        <div className="max-w-2xl mx-auto px-4 pb-8">
-          <ReviewWidget productNumericId={product.id.split('/').pop()!} />
         </div>
       )}
 
