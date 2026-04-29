@@ -32,13 +32,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       product_external_id: String(product_id),
       per_page: String(per_page),
       page: String(page),
+      published: 'true',
     });
 
     const jRes = await fetch(`${BASE_URL}/reviews?${params}`);
     if (!jRes.ok) return res.status(jRes.status).json({ error: 'Failed to fetch reviews' });
     const data = await jRes.json();
+
+    // Judge.me가 필터를 무시하는 경우를 대비해 서버 사이드 필터링
+    const allReviews: { product_external_id?: number | string; published?: boolean }[] = data.reviews || [];
+    const filtered = allReviews.filter((r) =>
+      r.published !== false &&
+      (r.product_external_id == null || String(r.product_external_id) === String(product_id))
+    );
+
     return res.status(200).json({
-      reviews: data.reviews || [],
+      reviews: filtered,
       current_page: data.current_page,
       per_page: data.per_page,
     });
