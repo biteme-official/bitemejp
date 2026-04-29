@@ -224,6 +224,19 @@ export function ReviewWidget({ productNumericId, canReview = false, isLoggedIn =
               </div>
               {r.title && <p className="text-sm font-semibold">{r.title}</p>}
               {r.body && <p className="text-sm text-muted-foreground whitespace-pre-line">{r.body}</p>}
+              {r.pictures && r.pictures.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {r.pictures.map((pic, i) => (
+                    <a key={i} href={pic.urls.original} target="_blank" rel="noopener noreferrer">
+                      <img
+                        src={pic.urls.compact ?? pic.urls.original}
+                        alt={`レビュー画像 ${i + 1}`}
+                        className="h-20 w-20 object-cover rounded-lg border border-border"
+                      />
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
