@@ -651,8 +651,9 @@ export async function fetchCollectionProducts(handle: string, first: number = 20
 }
 
 export async function createStorefrontCheckout(items: { variantId: string; quantity: number }[], formEmail?: string): Promise<string> {
-   return createStorefrontCheckoutWithDiscount(items, null, formEmail);
- }
+  const affiliateDiscount = localStorage.getItem('affiliate_discount');
+  return createStorefrontCheckoutWithDiscount(items, affiliateDiscount, formEmail);
+}
 
  // Create checkout with optional discount code for B2B members
  export async function createStorefrontCheckoutWithDiscount(
@@ -764,10 +765,10 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
   const url = new URL(cart.checkoutUrl);
   url.searchParams.set('channel', 'online_store');
 
-   // Add discount code to URL as backup (in case cart discount doesn't persist)
-   if (discountCode) {
-     url.searchParams.set('discount', discountCode);
-   }
+  if (discountCode) {
+    url.searchParams.set('discount', discountCode);
+    localStorage.removeItem('affiliate_discount');
+  }
 
   // Add return URL for post-checkout redirect
   const returnUrl = `${window.location.origin}/checkout-return`;
