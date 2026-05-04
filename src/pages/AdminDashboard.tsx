@@ -191,11 +191,18 @@ function CombinedChart({ timeline }: { timeline: ReturnType<typeof buildTimeline
 
 type AggRow = { label: string; sortKey: string; activeUsers: number; itemViews: number; sessions: number; orders: number; revenue: number };
 
+function localISO(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function getMondayISO(dateStr: string) {
   const d = new Date(dateStr + "T00:00:00");
   const diff = d.getDay() === 0 ? -6 : 1 - d.getDay();
   d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0, 10);
+  return localISO(d);
 }
 
 function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline> }) {
@@ -223,7 +230,7 @@ function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline
     if (tab === "weekly") return groupBy(getMondayISO, (_iso, key) => {
       const sun = new Date(key + "T00:00:00");
       sun.setDate(sun.getDate() + 6);
-      return `${isoToLabel(key)}~${isoToLabel(sun.toISOString().slice(0, 10))}`;
+      return `${isoToLabel(key)}~${isoToLabel(localISO(sun))}`;
     });
     return groupBy((iso) => iso.slice(0, 7), (_iso, key) => `${key.slice(0, 4)}/${key.slice(5, 7)}`);
   })();
