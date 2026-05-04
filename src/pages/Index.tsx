@@ -4,6 +4,7 @@ import { Footer } from "@/components/layout/Footer";
 import { HeroBanner } from "@/components/home/HeroBanner";
 import { PopularProducts } from "@/components/home/PopularProducts";
 import { CategorySections } from "@/components/home/CategorySections";
+import { InstagramReels } from "@/components/home/InstagramReels";
 import { ProductGrid } from "@/components/shop/ProductGrid";
 import { CategoryNav } from "@/components/shop/CategoryNav";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
@@ -46,6 +47,7 @@ const Index = () => {
       <main className="max-w-7xl mx-auto pb-20">
         <ProductGrid searchQuery={searchQuery} collectionHandle={selectedCollection} />
       </main>
+      <InstagramReels />
       <Footer />
     </div>
   );
