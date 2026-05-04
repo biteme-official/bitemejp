@@ -33,7 +33,14 @@ export function InstagramReels() {
         <div className="flex items-center gap-2 mb-4">
           <Instagram className="h-5 w-5 text-pink-500" />
           <h2 className="text-lg font-bold">インスタグラム</h2>
-          <span className="text-sm text-muted-foreground">@bitemejapan</span>
+          <a
+            href="https://www.instagram.com/biteme_jp/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-muted-foreground hover:text-pink-500 transition-colors"
+          >
+            @biteme_jp
+          </a>
         </div>
 
         {loading ? (
@@ -50,7 +57,7 @@ export function InstagramReels() {
             {reels.map((reel) => (
               <a
                 key={reel.id}
-                href={reel.permalink}
+                href="https://www.instagram.com/biteme_jp/"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex-none w-36 aspect-[9/16] relative rounded-xl overflow-hidden bg-muted snap-start group"

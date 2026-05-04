@@ -9,7 +9,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!igId) return res.status(500).json({ error: 'Instagram account ID not configured' });
 
     const mediaRes = await fetch(
-      `https://graph.facebook.com/v21.0/${igId}/media?fields=id,media_type,media_url,thumbnail_url,permalink,caption,timestamp&limit=20&access_token=${token}`
+      `https://graph.facebook.com/v21.0/${igId}/media?fields=id,media_type,media_url,thumbnail_url,permalink,caption,timestamp&limit=50&access_token=${token}`
     );
     const media = await mediaRes.json();
 
