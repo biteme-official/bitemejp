@@ -32,7 +32,7 @@ export function InstagramReels() {
       <div className="max-w-7xl mx-auto">
         <div className="flex items-center gap-2 mb-4">
           <Instagram className="h-5 w-5 text-pink-500" />
-          <h2 className="text-lg font-bold">インスタグラムでチェックしてね🐶</h2>
+          <h2 className="text-lg font-bold">インスタで見てね🐶</h2>
           <a
             href="https://www.instagram.com/biteme_jp/"
             target="_blank"
