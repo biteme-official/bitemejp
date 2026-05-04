@@ -57,7 +57,7 @@ interface AnalyticsData {
     purchaseRevenue?: number; transactions?: number;
   };
   funnel: { eventName: string; eventCount: number }[];
-  revenueOverTime: { date: string; purchaseRevenue: number; transactions: number; sessions: number; activeUsers: number }[];
+  revenueOverTime: { date: string; purchaseRevenue: number; transactions: number; sessions: number; activeUsers: number; itemsViewed: number }[];
   topPages: { pagePath: string; screenPageViews: number; activeUsers: number; averageSessionDuration: number }[];
   trafficSources: { sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number; transactions: number; purchaseRevenue: number }[];
   devices: { deviceCategory: string; sessions: number }[];
@@ -88,15 +88,16 @@ function buildTimeline(
   ga4: AnalyticsData["revenueOverTime"],
   shopify: ShopifyData["dailyOrders"]
 ) {
-  const map = new Map<string, { date: string; isoDate: string; sessions: number; activeUsers: number; orders: number; revenue: number }>();
+  const map = new Map<string, { date: string; isoDate: string; sessions: number; activeUsers: number; itemViews: number; orders: number; revenue: number }>();
   for (const d of shopify) {
-    map.set(d.date, { date: isoToLabel(d.date), isoDate: d.date, sessions: 0, activeUsers: 0, orders: d.orders, revenue: d.revenue });
+    map.set(d.date, { date: isoToLabel(d.date), isoDate: d.date, sessions: 0, activeUsers: 0, itemViews: 0, orders: d.orders, revenue: d.revenue });
   }
   for (const d of ga4) {
     const key = ga4DateToISO(d.date);
-    const ex = map.get(key) ?? { date: isoToLabel(key), isoDate: key, sessions: 0, activeUsers: 0, orders: 0, revenue: 0 };
+    const ex = map.get(key) ?? { date: isoToLabel(key), isoDate: key, sessions: 0, activeUsers: 0, itemViews: 0, orders: 0, revenue: 0 };
     ex.sessions = d.sessions;
     ex.activeUsers = d.activeUsers ?? 0;
+    ex.itemViews = d.itemsViewed ?? 0;
     map.set(key, ex);
   }
   return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
@@ -191,8 +192,8 @@ function CombinedChart({ timeline }: { timeline: ReturnType<typeof buildTimeline
 function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline> }) {
   const sorted = [...timeline].sort((a, b) => a.isoDate.localeCompare(b.isoDate));
   const totals = sorted.reduce(
-    (acc, r) => ({ users: acc.users + r.activeUsers, sessions: acc.sessions + r.sessions, orders: acc.orders + r.orders, revenue: acc.revenue + r.revenue }),
-    { users: 0, sessions: 0, orders: 0, revenue: 0 }
+    (acc, r) => ({ users: acc.users + r.activeUsers, sessions: acc.sessions + r.sessions, itemViews: acc.itemViews + r.itemViews, orders: acc.orders + r.orders, revenue: acc.revenue + r.revenue }),
+    { users: 0, sessions: 0, itemViews: 0, orders: 0, revenue: 0 }
   );
 
   return (
@@ -207,6 +208,7 @@ function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline
               <tr>
                 <th className="text-left px-4 py-2 font-medium text-muted-foreground">날짜</th>
                 <th className="text-right px-4 py-2 font-medium text-muted-foreground">총 사용자</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">상품조회수</th>
                 <th className="text-right px-4 py-2 font-medium text-muted-foreground">세션</th>
                 <th className="text-right px-4 py-2 font-medium text-muted-foreground">주문 수</th>
                 <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
@@ -217,6 +219,7 @@ function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline
                 <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                   <td className="px-4 py-2 font-mono">{row.isoDate}</td>
                   <td className="px-4 py-2 text-right">{row.activeUsers > 0 ? row.activeUsers.toLocaleString() : "—"}</td>
+                  <td className="px-4 py-2 text-right">{row.itemViews > 0 ? row.itemViews.toLocaleString() : "—"}</td>
                   <td className="px-4 py-2 text-right">{row.sessions > 0 ? row.sessions.toLocaleString() : "—"}</td>
                   <td className="px-4 py-2 text-right">{row.orders > 0 ? `${row.orders}건` : "—"}</td>
                   <td className="px-4 py-2 text-right font-medium">{row.revenue > 0 ? formatRevenue(row.revenue) : "—"}</td>
@@ -227,6 +230,7 @@ function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline
               <tr>
                 <td className="px-4 py-2 font-semibold text-xs">합계</td>
                 <td className="px-4 py-2 text-right font-semibold">{totals.users.toLocaleString()}</td>
+                <td className="px-4 py-2 text-right font-semibold">{totals.itemViews.toLocaleString()}</td>
                 <td className="px-4 py-2 text-right font-semibold">{totals.sessions.toLocaleString()}</td>
                 <td className="px-4 py-2 text-right font-semibold">{totals.orders}건</td>
                 <td className="px-4 py-2 text-right font-semibold">{formatRevenue(totals.revenue)}</td>
