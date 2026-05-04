@@ -42,12 +42,12 @@ const Index = () => {
           <HeroBanner />
           <PopularProducts />
           <CategorySections />
+          <InstagramReels />
         </div>
       )}
       <main className="max-w-7xl mx-auto pb-20">
         <ProductGrid searchQuery={searchQuery} collectionHandle={selectedCollection} />
       </main>
-      <InstagramReels />
       <Footer />
     </div>
   );
