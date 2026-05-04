@@ -189,9 +189,46 @@ function CombinedChart({ timeline }: { timeline: ReturnType<typeof buildTimeline
 
 // ─── 일자별 데이터 표 ─────────────────────────────────────────────────────────
 
+type AggRow = { label: string; sortKey: string; activeUsers: number; itemViews: number; sessions: number; orders: number; revenue: number };
+
+function getMondayISO(dateStr: string) {
+  const d = new Date(dateStr + "T00:00:00");
+  const diff = d.getDay() === 0 ? -6 : 1 - d.getDay();
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+
 function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline> }) {
+  const [tab, setTab] = useState<"daily" | "weekly" | "monthly">("daily");
   const sorted = [...timeline].sort((a, b) => a.isoDate.localeCompare(b.isoDate));
-  const totals = sorted.reduce(
+
+  function groupBy(keyFn: (iso: string) => string, labelFn: (iso: string, key: string) => string): AggRow[] {
+    const map = new Map<string, AggRow>();
+    for (const row of sorted) {
+      const key = keyFn(row.isoDate);
+      const ex = map.get(key) ?? { label: "", sortKey: key, activeUsers: 0, itemViews: 0, sessions: 0, orders: 0, revenue: 0 };
+      ex.label = labelFn(row.isoDate, key);
+      ex.activeUsers += row.activeUsers;
+      ex.itemViews += row.itemViews;
+      ex.sessions += row.sessions;
+      ex.orders += row.orders;
+      ex.revenue += row.revenue;
+      map.set(key, ex);
+    }
+    return Array.from(map.values()).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+  }
+
+  const rows: AggRow[] = (() => {
+    if (tab === "daily") return sorted.map((r) => ({ label: r.isoDate, sortKey: r.isoDate, activeUsers: r.activeUsers, itemViews: r.itemViews, sessions: r.sessions, orders: r.orders, revenue: r.revenue }));
+    if (tab === "weekly") return groupBy(getMondayISO, (_iso, key) => {
+      const sun = new Date(key + "T00:00:00");
+      sun.setDate(sun.getDate() + 6);
+      return `${isoToLabel(key)}~${isoToLabel(sun.toISOString().slice(0, 10))}`;
+    });
+    return groupBy((iso) => iso.slice(0, 7), (_iso, key) => `${key.slice(0, 4)}/${key.slice(5, 7)}`);
+  })();
+
+  const totals = rows.reduce(
     (acc, r) => ({ users: acc.users + r.activeUsers, sessions: acc.sessions + r.sessions, itemViews: acc.itemViews + r.itemViews, orders: acc.orders + r.orders, revenue: acc.revenue + r.revenue }),
     { users: 0, sessions: 0, itemViews: 0, orders: 0, revenue: 0 }
   );
@@ -199,7 +236,20 @@ function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">일자별 상세 데이터</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold">상세 데이터</CardTitle>
+          <div className="flex rounded-md border overflow-hidden text-xs">
+            {(["daily", "weekly", "monthly"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`px-3 py-1 transition-colors ${tab === t ? "bg-orange-500 text-white font-medium" : "text-muted-foreground hover:bg-muted"}`}
+              >
+                {t === "daily" ? "일간" : t === "weekly" ? "주간" : "월간"}
+              </button>
+            ))}
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-x-auto max-h-72 overflow-y-auto">
@@ -215,9 +265,9 @@ function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline
               </tr>
             </thead>
             <tbody>
-              {sorted.map((row, i) => (
+              {rows.map((row, i) => (
                 <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                  <td className="px-4 py-2 font-mono">{row.isoDate}</td>
+                  <td className="px-4 py-2 font-mono">{row.label}</td>
                   <td className="px-4 py-2 text-right">{row.activeUsers > 0 ? row.activeUsers.toLocaleString() : "—"}</td>
                   <td className="px-4 py-2 text-right">{row.itemViews > 0 ? row.itemViews.toLocaleString() : "—"}</td>
                   <td className="px-4 py-2 text-right">{row.sessions > 0 ? row.sessions.toLocaleString() : "—"}</td>
