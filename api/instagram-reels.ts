@@ -10,8 +10,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
     const pages = await pagesRes.json();
 
-    const igId = pages.data?.[0]?.instagram_business_account?.id;
-    if (!igId) return res.status(404).json({ error: 'No Instagram business account found' });
+    const igId = pages.data?.find(
+      (p: { instagram_business_account?: { id: string } }) => p.instagram_business_account?.id
+    )?.instagram_business_account?.id;
+
+    if (!igId) {
+      return res.status(404).json({
+        error: 'No Instagram business account found',
+        pages: pages.data?.map((p: { name?: string; instagram_business_account?: { id: string } }) => ({
+          name: p.name,
+          hasIg: !!p.instagram_business_account,
+        })),
+      });
+    }
 
     const mediaRes = await fetch(
       `https://graph.facebook.com/v21.0/${igId}/media?fields=id,media_type,media_url,thumbnail_url,permalink,caption,timestamp&limit=20&access_token=${token}`
