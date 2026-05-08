@@ -1,0 +1,53 @@
+name: Daily Review Sync
+
+on:
+  schedule:
+    # 매일 KST 새벽 2시 (UTC 17:00 전일)
+    - cron: '0 17 * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: '대상 날짜 (YYYY-MM-DD, 기본: 어제)'
+        required: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+
+      - name: Run daily review sync
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          DATE_ARG="${{ github.event.inputs.date }}"
+          if [ -n "$DATE_ARG" ]; then
+            npx tsx scripts/sync-daily-reviews.ts "$DATE_ARG"
+          else
+            npx tsx scripts/sync-daily-reviews.ts
+          fi
+
+      - name: Commit new reviews
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/reviews/
+          # 변경사항 없으면 커밋 안 함
+          git diff --cached --quiet && echo "신규 리뷰 없음" && exit 0
+          COUNT=$(git diff --cached --stat | tail -1)
+          git commit -m "chore: 전일자 신규 리뷰 자동 백업 ($COUNT)"
+          git push
