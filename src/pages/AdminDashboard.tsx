@@ -61,6 +61,7 @@ interface AnalyticsData {
   topPages: { pagePath: string; screenPageViews: number; activeUsers: number; averageSessionDuration: number }[];
   trafficSources: { sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number; transactions: number; purchaseRevenue: number }[];
   trafficSourcesOverTime: { date: string; sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number }[];
+  notSetLandingPages: { date: string; landingPage: string; sessions: number; activeUsers: number }[];
   devices: { deviceCategory: string; sessions: number }[];
   itemViews: { itemName: string; itemsViewed: number; itemsAddedToCart: number }[];
   exitPages: { pagePath: string; sessions: number; bounceRate: number; screenPageViews: number; averageSessionDuration: number }[];
@@ -395,8 +396,12 @@ function sourceLabel(source: string, medium: string) {
   return SOURCE_LABEL_MAP[`${source} / ${medium}`] ?? `${source} / ${medium}`;
 }
 
-function DailySourceChart({ data }: { data: AnalyticsData["trafficSourcesOverTime"] }) {
+function DailySourceChart({ data, notSetLandingPages }: {
+  data: AnalyticsData["trafficSourcesOverTime"];
+  notSetLandingPages: AnalyticsData["notSetLandingPages"];
+}) {
   const [selectedIso, setSelectedIso] = useState<string | null>(null);
+  const [showLanding, setShowLanding] = useState(false);
 
   const top = useMemo(() => {
     const totals = new Map<string, number>();
@@ -424,6 +429,22 @@ function DailySourceChart({ data }: { data: AnalyticsData["trafficSourcesOverTim
     return map;
   }, [data]);
 
+  // 날짜 → (not set) 세션의 랜딩 페이지 목록
+  const landingByIso = useMemo(() => {
+    const map = new Map<string, { landingPage: string; sessions: number; activeUsers: number }[]>();
+    for (const row of notSetLandingPages) {
+      const iso = ga4DateToISO(row.date);
+      if (!map.has(iso)) map.set(iso, []);
+      map.get(iso)!.push({
+        landingPage: row.landingPage as string,
+        sessions: Number(row.sessions),
+        activeUsers: Number(row.activeUsers),
+      });
+    }
+    for (const rows of map.values()) rows.sort((a, b) => b.sessions - a.sessions);
+    return map;
+  }, [notSetLandingPages]);
+
   const chartData = useMemo(() => {
     const dateMap = new Map<string, Record<string, number | string>>();
     for (const row of data) {
@@ -442,6 +463,9 @@ function DailySourceChart({ data }: { data: AnalyticsData["trafficSourcesOverTim
 
   const detailRows = selectedIso ? (rawByIso.get(selectedIso) ?? []) : [];
   const detailTotal = detailRows.reduce((s, r) => s + r.sessions, 0);
+  const landingRows = selectedIso ? (landingByIso.get(selectedIso) ?? []) : [];
+  const landingTotal = landingRows.reduce((s, r) => s + r.sessions, 0);
+  const hasNotSet = detailRows.some(r => r.source === "(not set)");
 
   return (
     <Card>
@@ -499,7 +523,7 @@ function DailySourceChart({ data }: { data: AnalyticsData["trafficSourcesOverTim
             <div className="flex items-center justify-between px-4 py-2 bg-muted/40 border-b">
               <span className="text-xs font-semibold">{selectedIso} 전체 유입 소스</span>
               <button
-                onClick={() => setSelectedIso(null)}
+                onClick={() => { setSelectedIso(null); setShowLanding(false); }}
                 className="text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 닫기 ✕
@@ -516,29 +540,41 @@ function DailySourceChart({ data }: { data: AnalyticsData["trafficSourcesOverTim
                   </tr>
                 </thead>
                 <tbody>
-                  {detailRows.map((row, i) => (
-                    <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-2">
-                        <div className="flex items-center gap-2">
-                          <div className="h-1 flex-1 max-w-[80px] bg-muted rounded-full overflow-hidden">
-                            <div
-                              className="h-full rounded-full"
-                              style={{ width: `${detailTotal > 0 ? (row.sessions / detailTotal) * 100 : 0}%`, backgroundColor: BRAND }}
-                            />
+                  {detailRows.map((row, i) => {
+                    const isNotSet = row.source === "(not set)";
+                    return (
+                      <tr
+                        key={i}
+                        className={`border-b last:border-0 transition-colors ${isNotSet && landingRows.length > 0 ? "cursor-pointer hover:bg-amber-50" : "hover:bg-muted/30"}`}
+                        onClick={isNotSet && landingRows.length > 0 ? () => setShowLanding(p => !p) : undefined}
+                      >
+                        <td className="px-4 py-2">
+                          <div className="flex items-center gap-2">
+                            <div className="h-1 flex-1 max-w-[80px] bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full"
+                                style={{ width: `${detailTotal > 0 ? (row.sessions / detailTotal) * 100 : 0}%`, backgroundColor: BRAND }}
+                              />
+                            </div>
+                            <span>{sourceLabel(row.source, row.medium)}</span>
+                            {sourceLabel(row.source, row.medium) !== `${row.source} / ${row.medium}` && (
+                              <span className="text-muted-foreground/60">{row.source} / {row.medium}</span>
+                            )}
+                            {isNotSet && landingRows.length > 0 && (
+                              <span className="ml-auto text-[10px] text-amber-600 font-medium">
+                                랜딩 페이지 {showLanding ? "▲" : "▼"}
+                              </span>
+                            )}
                           </div>
-                          <span>{sourceLabel(row.source, row.medium)}</span>
-                          {sourceLabel(row.source, row.medium) !== `${row.source} / ${row.medium}` && (
-                            <span className="text-muted-foreground/60">{row.source} / {row.medium}</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-2 text-right font-medium">{row.sessions.toLocaleString()}</td>
-                      <td className="px-4 py-2 text-right text-muted-foreground">
-                        {detailTotal > 0 ? ((row.sessions / detailTotal) * 100).toFixed(1) : 0}%
-                      </td>
-                      <td className="px-4 py-2 text-right">{row.activeUsers.toLocaleString()}</td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-2 text-right font-medium">{row.sessions.toLocaleString()}</td>
+                        <td className="px-4 py-2 text-right text-muted-foreground">
+                          {detailTotal > 0 ? ((row.sessions / detailTotal) * 100).toFixed(1) : 0}%
+                        </td>
+                        <td className="px-4 py-2 text-right">{row.activeUsers.toLocaleString()}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
                 <tfoot className="sticky bottom-0 bg-background border-t">
                   <tr>
@@ -552,6 +588,50 @@ function DailySourceChart({ data }: { data: AnalyticsData["trafficSourcesOverTim
                 </tfoot>
               </table>
             </div>
+
+            {/* (not set) 랜딩 페이지 드릴다운 */}
+            {hasNotSet && showLanding && landingRows.length > 0 && (
+              <div className="border-t">
+                <div className="px-4 py-2 bg-amber-50 border-b">
+                  <span className="text-xs font-semibold text-amber-700">(not set) 세션 — 랜딩 페이지 분포</span>
+                  <p className="text-[10px] text-amber-600 mt-0.5">소스는 특정 불가, 어느 페이지로 처음 진입했는지로 유추 가능</p>
+                </div>
+                <div className="max-h-48 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-background border-b">
+                      <tr>
+                        <th className="text-left px-4 py-2 font-medium text-muted-foreground">랜딩 페이지</th>
+                        <th className="text-right px-4 py-2 font-medium text-muted-foreground">세션</th>
+                        <th className="text-right px-4 py-2 font-medium text-muted-foreground">비율</th>
+                        <th className="text-right px-4 py-2 font-medium text-muted-foreground">사용자</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {landingRows.map((row, i) => (
+                        <tr key={i} className="border-b last:border-0 hover:bg-amber-50/50 transition-colors">
+                          <td className="px-4 py-2">
+                            <div className="flex items-center gap-2">
+                              <div className="h-1 flex-1 max-w-[80px] bg-muted rounded-full overflow-hidden">
+                                <div
+                                  className="h-full rounded-full bg-amber-400"
+                                  style={{ width: `${landingTotal > 0 ? (row.sessions / landingTotal) * 100 : 0}%` }}
+                                />
+                              </div>
+                              <span className="font-mono truncate max-w-[260px]" title={row.landingPage}>{row.landingPage}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2 text-right font-medium">{row.sessions.toLocaleString()}</td>
+                          <td className="px-4 py-2 text-right text-muted-foreground">
+                            {landingTotal > 0 ? ((row.sessions / landingTotal) * 100).toFixed(1) : 0}%
+                          </td>
+                          <td className="px-4 py-2 text-right">{row.activeUsers.toLocaleString()}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </CardContent>
@@ -1315,7 +1395,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               {data && (
                 <>
                   <SectionLabel>트래픽 분석</SectionLabel>
-                  <DailySourceChart data={data.trafficSourcesOverTime} />
+                  <DailySourceChart data={data.trafficSourcesOverTime} notSetLandingPages={data.notSetLandingPages} />
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     <div className="lg:col-span-2"><TrafficSourcesTable data={data.trafficSources} /></div>
                     <DevicesChart data={data.devices} />

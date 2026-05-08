@@ -121,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const token = await getAccessToken();
 
-    const [overviewRaw, funnelRaw, revenueRaw, pagesRaw, sourcesRaw, devicesRaw, itemViewsRaw, exitPagesRaw, sourcesByDateRaw] = await Promise.all([
+    const [overviewRaw, funnelRaw, revenueRaw, pagesRaw, sourcesRaw, devicesRaw, itemViewsRaw, exitPagesRaw, sourcesByDateRaw, notSetLandingRaw] = await Promise.all([
       runReport(token, {
         dateRanges: [dateRange],
         metrics: [
@@ -199,6 +199,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         orderBys: [{ dimension: { dimensionName: 'date' } }],
         limit: 2000,
       }),
+      // (not set) 세션의 랜딩 페이지 분포
+      runReport(token, {
+        dateRanges: [dateRange],
+        dimensions: [{ name: 'date' }, { name: 'landingPage' }],
+        metrics: [{ name: 'sessions' }, { name: 'activeUsers' }],
+        dimensionFilter: {
+          andGroup: {
+            expressions: [
+              { filter: { fieldName: 'sessionSource', stringFilter: { matchType: 'EXACT', value: '(not set)' } } },
+              { filter: { fieldName: 'sessionMedium', stringFilter: { matchType: 'EXACT', value: '(not set)' } } },
+            ],
+          },
+        },
+        orderBys: [{ dimension: { dimensionName: 'date' } }],
+        limit: 500,
+      }),
     ]);
 
     return res.status(200).json({
@@ -211,6 +227,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       itemViews: parseRows(itemViewsRaw),
       exitPages: parseRows(exitPagesRaw),
       trafficSourcesOverTime: parseRows(sourcesByDateRaw),
+      notSetLandingPages: parseRows(notSetLandingRaw),
     });
   } catch (error) {
     console.error('[Analytics]', error);
