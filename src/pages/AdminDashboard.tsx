@@ -157,28 +157,28 @@ function CombinedChart({ timeline }: { timeline: ReturnType<typeof buildTimeline
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-semibold">트래픽 · 주문 · 매출 추이</CardTitle>
-        <p className="text-xs text-muted-foreground">세션(막대) / 매출(주황선) / 주문수(회색선)</p>
+        <p className="text-xs text-muted-foreground">매출(막대) / 총 사용자(주황선) / 주문수(회색선)</p>
       </CardHeader>
       <CardContent>
         <ResponsiveContainer width="100%" height={220}>
           <ComposedChart data={timeline} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="date" tick={{ fontSize: 10 }} interval={interval} />
-            <YAxis yAxisId="sess" tick={{ fontSize: 10 }} width={36} />
-            <YAxis yAxisId="rev" orientation="right" tick={{ fontSize: 10 }} tickFormatter={(v) => `¥${(v / 1000).toFixed(0)}k`} width={48} />
+            <YAxis yAxisId="rev" tick={{ fontSize: 10 }} tickFormatter={(v) => `¥${(v / 1000).toFixed(0)}k`} width={48} />
+            <YAxis yAxisId="sess" orientation="right" tick={{ fontSize: 10 }} width={36} />
             <Tooltip
               formatter={(value: number, name: string) => {
                 if (name === "revenue") return [formatRevenue(value), "매출"];
-                if (name === "sessions") return [value.toLocaleString(), "세션"];
+                if (name === "activeUsers") return [value.toLocaleString(), "총 사용자"];
                 return [value, "주문 수"];
               }}
             />
             <Legend
-              formatter={(v) => v === "revenue" ? "매출" : v === "sessions" ? "세션" : "주문 수"}
+              formatter={(v) => v === "revenue" ? "매출" : v === "activeUsers" ? "총 사용자" : "주문 수"}
               wrapperStyle={{ fontSize: 11 }}
             />
-            <Bar yAxisId="sess" dataKey="sessions" fill={BRAND} opacity={0.25} radius={[2, 2, 0, 0]} />
-            <Line yAxisId="rev" type="monotone" dataKey="revenue" stroke={BRAND} strokeWidth={2.5} dot={false} />
+            <Bar yAxisId="rev" dataKey="revenue" fill={BRAND} opacity={0.25} radius={[2, 2, 0, 0]} />
+            <Line yAxisId="sess" type="monotone" dataKey="activeUsers" stroke={BRAND} strokeWidth={2.5} dot={false} />
             <Line yAxisId="sess" type="monotone" dataKey="orders" stroke="#94a3b8" strokeWidth={1.5} dot={false} />
           </ComposedChart>
         </ResponsiveContainer>
