@@ -11,19 +11,6 @@ interface Review {
   images: string[];
 }
 
-function maskName(name: string): string {
-  if (!name) return '***';
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) {
-    const first = parts[0];
-    const last = parts[parts.length - 1];
-    return `${first} ${last.charAt(0)}${'*'.repeat(Math.max(1, last.length - 1))}`;
-  }
-  if (name.length <= 1) return name + '*';
-  const visible = Math.ceil(name.length / 2);
-  return name.substring(0, visible) + '*'.repeat(name.length - visible);
-}
-
 function StarRating({ rating }: { rating: number }) {
   return (
     <div className="flex gap-0.5">
@@ -97,10 +84,7 @@ export function ReviewWidget({ productNumericId, onCount }: { productNumericId: 
             {paged.map((r) => (
               <div key={r.id} className="bg-card rounded-xl border border-border p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <StarRating rating={r.rating} />
-                    <span className="text-sm font-medium">{maskName(r.name)}</span>
-                  </div>
+                  <StarRating rating={r.rating} />
                   <span className="text-xs text-muted-foreground">{formatDate(r.date)}</span>
                 </div>
                 {(r.content_ja || r.content) && (
