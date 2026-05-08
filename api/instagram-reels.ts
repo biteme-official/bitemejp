@@ -11,9 +11,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const fields = 'id,media_type,media_url,thumbnail_url,permalink,caption,timestamp';
     const baseUrl = `https://graph.facebook.com/v21.0/${igId}`;
 
-    const [mediaRes, tagsRes] = await Promise.all([
+    const collabUrls = (process.env.INSTAGRAM_COLLAB_PERMALINKS || '')
+      .split(',')
+      .map((u) => u.trim())
+      .filter(Boolean);
+
+    const oembedPromise = collabUrls.length > 0
+      ? Promise.all(
+          collabUrls.map((url) =>
+            fetch(
+              `https://graph.facebook.com/v21.0/instagram_oembed?url=${encodeURIComponent(url)}&fields=thumbnail_url&access_token=${token}`
+            )
+              .then((r) => r.json() as Promise<{ thumbnail_url?: string }>)
+              .catch(() => ({} as { thumbnail_url?: string }))
+          )
+        )
+      : Promise.resolve([] as { thumbnail_url?: string }[]);
+
+    const [mediaRes, tagsRes, oembedList] = await Promise.all([
       fetch(`${baseUrl}/media?fields=${fields}&limit=50&access_token=${token}`),
       fetch(`${baseUrl}/tags?fields=${fields}&limit=50&access_token=${token}`),
+      oembedPromise,
     ]);
 
     const [media, tags] = await Promise.all([mediaRes.json(), tagsRes.json()]);
@@ -23,11 +41,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const combined = [...(media.data || []), ...(tags.data || [])];
     const seen = new Set<string>();
-    const reels = combined.filter((item: { id: string; media_type: string }) => {
+    const reels: unknown[] = combined.filter((item: { id: string; media_type: string }) => {
       if (!isReel(item) || seen.has(item.id)) return false;
       seen.add(item.id);
       return true;
     });
+
+    for (let i = 0; i < collabUrls.length; i++) {
+      const url = collabUrls[i];
+      const { thumbnail_url } = oembedList[i];
+      if (!thumbnail_url) continue;
+      const match = url.match(/\/(reel|p)\/([A-Za-z0-9_-]+)/);
+      const id = match?.[2] ?? url;
+      if (!seen.has(id)) {
+        seen.add(id);
+        reels.push({ id, media_type: 'REELS', thumbnail_url, permalink: url, timestamp: '' });
+      }
+    }
 
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
     return res.status(200).json({ reels });

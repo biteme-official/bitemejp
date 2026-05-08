@@ -15,7 +15,6 @@ import { useCartStore } from "@/stores/cartStore";
 import { useWishlistStore } from "@/stores/wishlistStore";
 import { ReviewWidget } from "@/components/product/ReviewWidget";
 import { useAuthStore } from "@/stores/authStore";
-import { fetchCustomerOrdersViaAdmin } from "@/lib/shopify";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CartDrawer } from "@/components/cart/CartDrawer";
@@ -135,7 +134,7 @@ export default function ProductDetail() {
   const [product, setProduct] = useState<ShopifyProduct['node'] | null>(null);
   const [recommendations, setRecommendations] = useState<ProductRecommendation[]>([]);
   const [activeTab, setActiveTab] = useState<'detail' | 'review'>('detail');
-  const [canReview, setCanReview] = useState(false);
+  const [reviewCount, setReviewCount] = useState<number | null>(null);
   const { user, isLoggedIn } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -154,6 +153,7 @@ export default function ProductDetail() {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' });
     setActiveTab('detail');
+    setReviewCount(null);
   }, [id]);
 
   useEffect(() => {
@@ -193,6 +193,16 @@ export default function ProductDetail() {
     loadProduct();
   }, [id]);
 
+  // Prefetch review count so badge shows before user clicks the tab
+  useEffect(() => {
+    if (!product?.id) return;
+    const numericId = product.id.split('/').pop()!;
+    fetch(`/api/kr-reviews?shopify_product_id=${numericId}`)
+      .then(r => r.ok ? r.json() : { reviews: [] })
+      .then(data => setReviewCount((data.reviews || []).length))
+      .catch(() => {});
+  }, [product?.id]);
+
   const checkScrollability = () => {
     if (thumbnailRef.current) {
       const { scrollLeft, scrollWidth, clientWidth } = thumbnailRef.current;
@@ -214,21 +224,6 @@ export default function ProductDetail() {
       .catch(() => {});
   }, [product?.id]);
 
-  useEffect(() => {
-    if (!isLoggedIn || !product?.title) { setCanReview(false); return; }
-    const savedEmail = (() => {
-      try { return JSON.parse(localStorage.getItem('checkout-shipping') || '{}').email || undefined; }
-      catch { return undefined; }
-    })();
-    fetchCustomerOrdersViaAdmin(user!.shopifyCustomerToken, user!.shopifyCustomerId, user!.userId, user!.email || savedEmail)
-      .then((orders) => {
-        const purchased = orders.some(order =>
-          order.lineItems.some(item => item.title === product.title)
-        );
-        setCanReview(purchased);
-      })
-      .catch(() => setCanReview(false));
-  }, [isLoggedIn, product?.title]);
 
   const scrollThumbnails = (direction: 'left' | 'right') => {
     if (thumbnailRef.current) {
@@ -735,6 +730,11 @@ export default function ProductDetail() {
               className={`flex-1 py-2.5 text-sm font-medium transition-colors ${activeTab === 'review' ? 'border-b-2 border-primary text-primary' : 'text-muted-foreground'}`}
             >
               レビュー
+              {reviewCount !== null && reviewCount > 0 && (
+                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-xs font-semibold text-primary-foreground">
+                  {reviewCount}
+                </span>
+              )}
             </button>
           </div>
           {activeTab === 'detail' && (product.descriptionHtml || product.description) && (
@@ -765,8 +765,7 @@ export default function ProductDetail() {
           {activeTab === 'review' && product?.id && (
             <ReviewWidget
               productNumericId={product.id.split('/').pop()!}
-              canReview={canReview}
-              isLoggedIn={isLoggedIn}
+              onCount={setReviewCount}
             />
           )}
         </div>
@@ -780,11 +779,11 @@ export default function ProductDetail() {
             {recommendations.slice(0, 6).map((rec) => (
               <div
                 key={rec.id}
-                className="flex-none w-36 bg-card rounded-xl border border-border overflow-hidden cursor-pointer hover:shadow-md transition-shadow"
+                className="flex-none w-36 bg-card rounded-xl border border-border overflow-hidden cursor-pointer hover:shadow-lg transition-shadow group"
                 onClick={() => navigate(`/product/${rec.handle}`)}
               >
                 {rec.imageUrl ? (
-                  <img src={rec.imageUrl} alt={rec.imageAlt || rec.title} className="w-full aspect-square object-cover" />
+                  <img src={rec.imageUrl} alt={rec.imageAlt || rec.title} className="w-full aspect-square object-cover group-hover:scale-105 transition-transform duration-300" />
                 ) : (
                   <div className="w-full aspect-square bg-secondary" />
                 )}
