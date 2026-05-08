@@ -60,6 +60,7 @@ interface AnalyticsData {
   revenueOverTime: { date: string; purchaseRevenue: number; transactions: number; sessions: number; activeUsers: number; itemsViewed: number }[];
   topPages: { pagePath: string; screenPageViews: number; activeUsers: number; averageSessionDuration: number }[];
   trafficSources: { sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number; transactions: number; purchaseRevenue: number }[];
+  trafficSourcesOverTime: { date: string; sessionSource: string; sessionMedium: string; sessions: number; activeUsers: number }[];
   devices: { deviceCategory: string; sessions: number }[];
   itemViews: { itemName: string; itemsViewed: number; itemsAddedToCart: number }[];
   exitPages: { pagePath: string; sessions: number; bounceRate: number; screenPageViews: number; averageSessionDuration: number }[];
@@ -373,6 +374,91 @@ function TopProductsTable({ data }: { data: ShopifyData["topProducts"] }) {
             ))}
           </tbody>
         </table>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ─── 일자별 유입 소스 차트 ───────────────────────────────────────────────────────
+
+const SOURCE_LABEL_MAP: Record<string, string> = {
+  "google / organic": "Google 검색",
+  "google / cpc": "Google 광고",
+  "(direct) / (none)": "직접",
+  "line / referral": "LINE",
+  "instagram / referral": "Instagram",
+  "yahoo / organic": "Yahoo 검색",
+  "bing / organic": "Bing 검색",
+};
+
+function sourceLabel(source: string, medium: string) {
+  return SOURCE_LABEL_MAP[`${source} / ${medium}`] ?? `${source} / ${medium}`;
+}
+
+function DailySourceChart({ data }: { data: AnalyticsData["trafficSourcesOverTime"] }) {
+  const top = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const row of data) {
+      const k = `${row.sessionSource}|||${row.sessionMedium}`;
+      totals.set(k, (totals.get(k) ?? 0) + Number(row.sessions));
+    }
+    return [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k]) => k);
+  }, [data]);
+
+  const chartData = useMemo(() => {
+    const dateMap = new Map<string, Record<string, number | string>>();
+    for (const row of data) {
+      const iso = ga4DateToISO(row.date);
+      if (!dateMap.has(iso)) dateMap.set(iso, { _date: isoToLabel(iso) });
+      const entry = dateMap.get(iso)!;
+      const k = `${row.sessionSource}|||${row.sessionMedium}`;
+      const target = top.includes(k) ? k : "기타|||";
+      entry[target] = ((entry[target] as number) ?? 0) + Number(row.sessions);
+    }
+    return [...dateMap.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v);
+  }, [data, top]);
+
+  const keys = [...top, "기타|||"].filter(k => chartData.some(d => (d[k] as number) > 0));
+  const interval = Math.max(0, Math.ceil(chartData.length / 10) - 1);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold">일자별 유입 소스</CardTitle>
+        <p className="text-xs text-muted-foreground">날짜별 세션 수 — 상위 4개 소스/매체 + 기타</p>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={240}>
+          <ComposedChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <XAxis dataKey="_date" tick={{ fontSize: 10 }} interval={interval} />
+            <YAxis tick={{ fontSize: 10 }} width={36} />
+            <Tooltip
+              formatter={(value: number, name: string) => {
+                if (name === "기타|||") return [value.toLocaleString(), "기타"];
+                const [src, med] = name.split("|||");
+                return [value.toLocaleString(), sourceLabel(src, med)];
+              }}
+            />
+            <Legend
+              formatter={(v) => {
+                if (v === "기타|||") return "기타";
+                const [src, med] = v.split("|||");
+                return sourceLabel(src, med);
+              }}
+              wrapperStyle={{ fontSize: 11 }}
+            />
+            {keys.map((k, i) => (
+              <Bar
+                key={k}
+                dataKey={k}
+                stackId="src"
+                fill={PALETTE[i % PALETTE.length]}
+                radius={i === keys.length - 1 ? [2, 2, 0, 0] : undefined}
+              />
+            ))}
+          </ComposedChart>
+        </ResponsiveContainer>
       </CardContent>
     </Card>
   );
@@ -1134,6 +1220,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               {data && (
                 <>
                   <SectionLabel>트래픽 분석</SectionLabel>
+                  <DailySourceChart data={data.trafficSourcesOverTime} />
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     <div className="lg:col-span-2"><TrafficSourcesTable data={data.trafficSources} /></div>
                     <DevicesChart data={data.devices} />
