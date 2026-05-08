@@ -40,6 +40,11 @@
       ]
     }
   ],
+  "functions": {
+    "api/kr-reviews.ts": {
+      "includeFiles": "data/**"
+    }
+  },
   "rewrites": [
     { "source": "/sitemap.xml", "destination": "/api/sitemap" },
     { "source": "/api/shopify", "destination": "/api/shopify" },
