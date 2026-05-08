@@ -121,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const token = await getAccessToken();
 
-    const [overviewRaw, funnelRaw, revenueRaw, pagesRaw, sourcesRaw, devicesRaw, itemViewsRaw, exitPagesRaw, sourcesByDateRaw, notSetLandingRaw] = await Promise.all([
+    const [overviewRaw, funnelRaw, revenueRaw, pagesRaw, sourcesRaw, devicesRaw, itemViewsRaw, exitPagesRaw, sourcesByDateRaw, notSetLandingRaw, newVsReturningRaw] = await Promise.all([
       runReport(token, {
         dateRanges: [dateRange],
         metrics: [
@@ -215,6 +215,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         orderBys: [{ dimension: { dimensionName: 'date' } }],
         limit: 500,
       }),
+      // 신규 vs 재방문 유저
+      runReport(token, {
+        dateRanges: [dateRange],
+        dimensions: [{ name: 'newVsReturning' }],
+        metrics: [{ name: 'activeUsers' }, { name: 'sessions' }],
+      }),
     ]);
 
     return res.status(200).json({
@@ -228,6 +234,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       exitPages: parseRows(exitPagesRaw),
       trafficSourcesOverTime: parseRows(sourcesByDateRaw),
       notSetLandingPages: parseRows(notSetLandingRaw),
+      newVsReturning: parseRows(newVsReturningRaw),
     });
   } catch (error) {
     console.error('[Analytics]', error);

@@ -65,6 +65,17 @@ interface AnalyticsData {
   devices: { deviceCategory: string; sessions: number }[];
   itemViews: { itemName: string; itemsViewed: number; itemsAddedToCart: number }[];
   exitPages: { pagePath: string; sessions: number; bounceRate: number; screenPageViews: number; averageSessionDuration: number }[];
+  newVsReturning: { newVsReturning: string; activeUsers: number; sessions: number }[];
+}
+
+interface CustomerData {
+  totalCustomers: number;
+  newCustomersCount: number;
+  repeatCustomers: number;
+  repeatRate: number;
+  segments: { noOrders: number; oneOrder: number; twoThreeOrders: number; fourPlusOrders: number };
+  avgNewLTV: number;
+  dailyNewCustomers: { date: string; count: number }[];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -124,6 +135,15 @@ async function fetchShopify(range: Range, secret: string, customFrom?: string, c
   const res = await fetch(`/api/shopify-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "Shopify 오류"); }
+  return res.json();
+}
+
+async function fetchCustomers(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<CustomerData> {
+  const params = new URLSearchParams({ range });
+  if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
+  const res = await fetch(`/api/customer-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "회원 데이터 오류"); }
   return res.json();
 }
 
@@ -1162,6 +1182,114 @@ function PageTypeSummary({ data }: { data: AnalyticsData["exitPages"] }) {
   );
 }
 
+// ─── 회원 분석 컴포넌트 ────────────────────────────────────────────────────────
+
+function NewCustomerTrendChart({ data }: { data: CustomerData["dailyNewCustomers"] }) {
+  const interval = Math.max(0, Math.ceil(data.length / 10) - 1);
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold">신규 회원 가입 추이</CardTitle>
+        <p className="text-xs text-muted-foreground">기간 내 일별 신규 가입 수</p>
+      </CardHeader>
+      <CardContent>
+        <ResponsiveContainer width="100%" height={200}>
+          <ComposedChart data={data.map(d => ({ ...d, label: isoToLabel(d.date) }))} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <XAxis dataKey="label" tick={{ fontSize: 10 }} interval={interval} />
+            <YAxis tick={{ fontSize: 10 }} allowDecimals={false} width={36} />
+            <Tooltip formatter={(v: number) => [v.toLocaleString() + "명", "신규 가입"]} />
+            <Bar dataKey="count" fill={BRAND} opacity={0.8} radius={[3, 3, 0, 0]} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </CardContent>
+    </Card>
+  );
+}
+
+function CustomerSegmentChart({ segments }: { segments: CustomerData["segments"] }) {
+  const items = [
+    { name: "미구매", value: segments.noOrders, color: "#e2e8f0" },
+    { name: "1회 구매", value: segments.oneOrder, color: "#fdb997" },
+    { name: "2~3회", value: segments.twoThreeOrders, color: "#fb8c5a" },
+    { name: "4회 이상", value: segments.fourPlusOrders, color: BRAND },
+  ].filter(d => d.value > 0);
+  const total = items.reduce((s, d) => s + d.value, 0);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold">고객 구매 횟수 분포</CardTitle>
+        <p className="text-xs text-muted-foreground">전체 회원 세그먼트</p>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center gap-4">
+          <PieChart width={140} height={140}>
+            <Pie data={items} dataKey="value" cx={65} cy={65} innerRadius={38} outerRadius={60} paddingAngle={2}>
+              {items.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+            </Pie>
+          </PieChart>
+          <div className="flex-1 space-y-2">
+            {items.map((item, i) => (
+              <div key={i} className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span>{item.name}</span>
+                </div>
+                <div className="text-right">
+                  <span className="font-medium">{item.value.toLocaleString()}명</span>
+                  <span className="text-muted-foreground ml-1.5">
+                    {total > 0 ? ((item.value / total) * 100).toFixed(1) : 0}%
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function NewVsReturningChart({ data }: { data: AnalyticsData["newVsReturning"] }) {
+  const labeled = data.map(d => ({
+    name: d.newVsReturning === "new" ? "신규 유저" : "재방문 유저",
+    activeUsers: d.activeUsers,
+    sessions: d.sessions,
+    color: d.newVsReturning === "new" ? BRAND : "#94a3b8",
+  }));
+  const total = labeled.reduce((s, d) => s + d.activeUsers, 0);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold">신규 vs 재방문 유저</CardTitle>
+        <p className="text-xs text-muted-foreground">GA4 기준 활성 사용자</p>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-3 mt-1">
+          {labeled.map((d, i) => (
+            <div key={i}>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="font-medium">{d.name}</span>
+                <span className="text-muted-foreground">
+                  {d.activeUsers.toLocaleString()}명 ({total > 0 ? ((d.activeUsers / total) * 100).toFixed(1) : 0}%)
+                </span>
+              </div>
+              <div className="h-2.5 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${total > 0 ? (d.activeUsers / total) * 100 : 0}%`, backgroundColor: d.color }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── 비밀번호 게이트 ───────────────────────────────────────────────────────────
 
 function PasswordGate({ onAuth }: { onAuth: (s: string) => void }) {
@@ -1225,6 +1353,14 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
   const { data: shopify, isLoading: shopifyLoading, isError: shopifyIsError, error: shopifyErr } = useQuery({
     queryKey: ["shopify-analytics", range, secret, customFrom, customTo],
     queryFn: () => fetchShopify(range, secret, customFrom, customTo),
+    staleTime: 5 * 60 * 1000,
+    enabled: canQuery,
+    retry,
+  });
+
+  const { data: customers, isLoading: customersLoading } = useQuery({
+    queryKey: ["customer-analytics", range, secret, customFrom, customTo],
+    queryFn: () => fetchCustomers(range, secret, customFrom, customTo),
     staleTime: 5 * 60 * 1000,
     enabled: canQuery,
     retry,
@@ -1350,6 +1486,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
             <TabsList className="h-9">
               <TabsTrigger value="dashboard" className="text-xs px-4">대시보드</TabsTrigger>
               <TabsTrigger value="funnel" className="text-xs px-4">퍼널 분석</TabsTrigger>
+              <TabsTrigger value="members" className="text-xs px-4">회원 분석</TabsTrigger>
             </TabsList>
 
             {/* ══ 대시보드 탭 ══ */}
@@ -1415,6 +1552,88 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               <p className="text-center text-xs text-muted-foreground pb-4">
                 GA4: G-WLTZH90W2L · Shopify: biteme-jp.myshopify.com · {RANGE_LABELS[range]} 데이터
               </p>
+            </TabsContent>
+
+            {/* ══ 회원 분석 탭 ══ */}
+            <TabsContent value="members" className="space-y-5 mt-0">
+              {customersLoading ? (
+                <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+                  회원 데이터를 불러오는 중...
+                </div>
+              ) : customers ? (
+                <>
+                  <SectionLabel>회원 핵심 지표</SectionLabel>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <KpiCard label="총 회원 수" value={`${customers.totalCustomers.toLocaleString()}명`} accent />
+                    <KpiCard
+                      label="신규 가입"
+                      value={`${customers.newCustomersCount.toLocaleString()}명`}
+                      sub={`${RANGE_LABELS[range]} 신규 등록`}
+                      accent
+                    />
+                    <KpiCard
+                      label="재구매율"
+                      value={`${(customers.repeatRate * 100).toFixed(1)}%`}
+                      sub={`${customers.repeatCustomers.toLocaleString()}명 (2회 이상 구매)`}
+                    />
+                    <KpiCard
+                      label="신규 고객 평균 LTV"
+                      value={customers.avgNewLTV > 0 ? formatRevenue(customers.avgNewLTV) : "—"}
+                      sub="신규 가입 구매 고객 기준"
+                    />
+                  </div>
+
+                  <SectionLabel>가입 · 세그먼트</SectionLabel>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <NewCustomerTrendChart data={customers.dailyNewCustomers} />
+                    <CustomerSegmentChart segments={customers.segments} />
+                  </div>
+
+                  {data?.newVsReturning && data.newVsReturning.length > 0 && (
+                    <>
+                      <SectionLabel>유저 재방문</SectionLabel>
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                        <NewVsReturningChart data={data.newVsReturning} />
+                        <Card>
+                          <CardHeader className="pb-2">
+                            <CardTitle className="text-sm font-semibold">세그먼트 상세</CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="border-b">
+                                  <th className="text-left py-2 font-medium text-muted-foreground">구분</th>
+                                  <th className="text-right py-2 font-medium text-muted-foreground">활성 유저</th>
+                                  <th className="text-right py-2 font-medium text-muted-foreground">세션</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {data.newVsReturning.map((row, i) => (
+                                  <tr key={i} className="border-b last:border-0">
+                                    <td className="py-2.5 font-medium">
+                                      {row.newVsReturning === "new" ? "신규 유저" : "재방문 유저"}
+                                    </td>
+                                    <td className="py-2.5 text-right">{(row.activeUsers as number).toLocaleString()}</td>
+                                    <td className="py-2.5 text-right">{(row.sessions as number).toLocaleString()}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    </>
+                  )}
+
+                  <p className="text-center text-xs text-muted-foreground pb-4">
+                    Shopify: biteme-jp.myshopify.com · GA4: G-WLTZH90W2L · {RANGE_LABELS[range]} 데이터
+                  </p>
+                </>
+              ) : (
+                <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+                  회원 데이터를 불러올 수 없습니다.
+                </div>
+              )}
             </TabsContent>
 
             {/* ══ 퍼널 분석 탭 ══ */}
