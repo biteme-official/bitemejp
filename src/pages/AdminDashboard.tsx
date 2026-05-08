@@ -396,6 +396,8 @@ function sourceLabel(source: string, medium: string) {
 }
 
 function DailySourceChart({ data }: { data: AnalyticsData["trafficSourcesOverTime"] }) {
+  const [selectedIso, setSelectedIso] = useState<string | null>(null);
+
   const top = useMemo(() => {
     const totals = new Map<string, number>();
     for (const row of data) {
@@ -405,11 +407,28 @@ function DailySourceChart({ data }: { data: AnalyticsData["trafficSourcesOverTim
     return [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k]) => k);
   }, [data]);
 
+  // 날짜 → 원본 소스별 행 목록 (드릴다운용)
+  const rawByIso = useMemo(() => {
+    const map = new Map<string, { source: string; medium: string; sessions: number; activeUsers: number }[]>();
+    for (const row of data) {
+      const iso = ga4DateToISO(row.date);
+      if (!map.has(iso)) map.set(iso, []);
+      map.get(iso)!.push({
+        source: row.sessionSource,
+        medium: row.sessionMedium,
+        sessions: Number(row.sessions),
+        activeUsers: Number(row.activeUsers),
+      });
+    }
+    for (const rows of map.values()) rows.sort((a, b) => b.sessions - a.sessions);
+    return map;
+  }, [data]);
+
   const chartData = useMemo(() => {
     const dateMap = new Map<string, Record<string, number | string>>();
     for (const row of data) {
       const iso = ga4DateToISO(row.date);
-      if (!dateMap.has(iso)) dateMap.set(iso, { _date: isoToLabel(iso) });
+      if (!dateMap.has(iso)) dateMap.set(iso, { _date: isoToLabel(iso), _iso: iso });
       const entry = dateMap.get(iso)!;
       const k = `${row.sessionSource}|||${row.sessionMedium}`;
       const target = top.includes(k) ? k : "기타|||";
@@ -421,15 +440,29 @@ function DailySourceChart({ data }: { data: AnalyticsData["trafficSourcesOverTim
   const keys = [...top, "기타|||"].filter(k => chartData.some(d => (d[k] as number) > 0));
   const interval = Math.max(0, Math.ceil(chartData.length / 10) - 1);
 
+  const detailRows = selectedIso ? (rawByIso.get(selectedIso) ?? []) : [];
+  const detailTotal = detailRows.reduce((s, r) => s + r.sessions, 0);
+
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-semibold">일자별 유입 소스</CardTitle>
-        <p className="text-xs text-muted-foreground">날짜별 세션 수 — 상위 4개 소스/매체 + 기타</p>
+        <p className="text-xs text-muted-foreground">
+          날짜별 세션 수 — 상위 4개 소스/매체 + 기타
+          {!selectedIso && <span className="ml-2 text-muted-foreground/60">막대 클릭 시 상세 내역</span>}
+        </p>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-4">
         <ResponsiveContainer width="100%" height={240}>
-          <ComposedChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+          <ComposedChart
+            data={chartData}
+            margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
+            onClick={(e) => {
+              const iso = e?.activePayload?.[0]?.payload?._iso as string | undefined;
+              if (iso) setSelectedIso(prev => prev === iso ? null : iso);
+            }}
+            style={{ cursor: "pointer" }}
+          >
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
             <XAxis dataKey="_date" tick={{ fontSize: 10 }} interval={interval} />
             <YAxis tick={{ fontSize: 10 }} width={36} />
@@ -459,6 +492,68 @@ function DailySourceChart({ data }: { data: AnalyticsData["trafficSourcesOverTim
             ))}
           </ComposedChart>
         </ResponsiveContainer>
+
+        {/* 드릴다운: 선택된 날짜의 전체 소스 내역 */}
+        {selectedIso && (
+          <div className="border rounded-lg overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2 bg-muted/40 border-b">
+              <span className="text-xs font-semibold">{selectedIso} 전체 유입 소스</span>
+              <button
+                onClick={() => setSelectedIso(null)}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                닫기 ✕
+              </button>
+            </div>
+            <div className="max-h-64 overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-background border-b">
+                  <tr>
+                    <th className="text-left px-4 py-2 font-medium text-muted-foreground">소스 / 매체</th>
+                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">세션</th>
+                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">비율</th>
+                    <th className="text-right px-4 py-2 font-medium text-muted-foreground">사용자</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detailRows.map((row, i) => (
+                    <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                      <td className="px-4 py-2">
+                        <div className="flex items-center gap-2">
+                          <div className="h-1 flex-1 max-w-[80px] bg-muted rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full"
+                              style={{ width: `${detailTotal > 0 ? (row.sessions / detailTotal) * 100 : 0}%`, backgroundColor: BRAND }}
+                            />
+                          </div>
+                          <span>{sourceLabel(row.source, row.medium)}</span>
+                          {sourceLabel(row.source, row.medium) !== `${row.source} / ${row.medium}` && (
+                            <span className="text-muted-foreground/60">{row.source} / {row.medium}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2 text-right font-medium">{row.sessions.toLocaleString()}</td>
+                      <td className="px-4 py-2 text-right text-muted-foreground">
+                        {detailTotal > 0 ? ((row.sessions / detailTotal) * 100).toFixed(1) : 0}%
+                      </td>
+                      <td className="px-4 py-2 text-right">{row.activeUsers.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="sticky bottom-0 bg-background border-t">
+                  <tr>
+                    <td className="px-4 py-2 font-semibold">합계</td>
+                    <td className="px-4 py-2 text-right font-semibold">{detailTotal.toLocaleString()}</td>
+                    <td className="px-4 py-2 text-right text-muted-foreground">100%</td>
+                    <td className="px-4 py-2 text-right font-semibold">
+                      {detailRows.reduce((s, r) => s + r.activeUsers, 0).toLocaleString()}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
