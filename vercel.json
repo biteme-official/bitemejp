@@ -15,7 +15,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com https://*.judge.me; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.judge.me; img-src 'self' https: data:; font-src 'self' https: data:; connect-src 'self' https://api.line.me https://access.line.me https://page.line.me https://www.google-analytics.com https://www.googletagmanager.com https://zipcloud.ibsnet.co.jp https://*.judge.me; frame-src 'none'; object-src 'none'; base-uri 'self';"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' https: data:; font-src 'self' https: data:; connect-src 'self' https://api.line.me https://access.line.me https://page.line.me https://www.google-analytics.com https://www.googletagmanager.com https://zipcloud.ibsnet.co.jp; frame-src 'none'; object-src 'none'; base-uri 'self';"
         },
         {
           "key": "X-Content-Type-Options",
@@ -41,6 +41,7 @@
     }
   ],
   "rewrites": [
+    { "source": "/sitemap.xml", "destination": "/api/sitemap" },
     { "source": "/api/shopify", "destination": "/api/shopify" },
     { "source": "/api/line-callback", "destination": "/api/line-callback" },
     { "source": "/api/wishlist", "destination": "/api/wishlist" },
@@ -51,6 +52,7 @@
     { "source": "/api/customer-orders", "destination": "/api/customer-orders" },
     { "source": "/api/refresh-customer-token", "destination": "/api/refresh-customer-token" },
     { "source": "/api/instagram-reels", "destination": "/api/instagram-reels" },
+    { "source": "/api/kr-reviews", "destination": "/api/kr-reviews" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
