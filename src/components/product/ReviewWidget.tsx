@@ -43,7 +43,7 @@ export function ReviewWidget({ productNumericId, onCount }: { productNumericId: 
     fetch(`/api/kr-reviews?shopify_product_id=${productNumericId}`)
       .then(r => r.ok ? r.json() : { reviews: [] })
       .then(data => {
-        const list = data.reviews || [];
+        const list = (data.reviews || []).slice().sort((a: Review, b: Review) => b.rating - a.rating);
         setReviews(list);
         onCount?.(list.length);
       })
