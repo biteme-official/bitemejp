@@ -7,15 +7,17 @@ import { CategorySections } from "@/components/home/CategorySections";
 import { InstagramReels } from "@/components/home/InstagramReels";
 import { ProductGrid } from "@/components/shop/ProductGrid";
 import { CategoryNav } from "@/components/shop/CategoryNav";
+import { SortOption } from "@/components/shop/ProductFilters";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 
 const Index = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedCollection = searchParams.get("collection");
   const searchQuery = searchParams.get("q") || "";
+  const sortParam = searchParams.get("sort") as SortOption | null;
   useScrollRestoration();
 
-  const isFiltered = !!(selectedCollection || searchQuery);
+  const isFiltered = !!(selectedCollection || searchQuery || sortParam);
 
   const handleSearch = (query: string) => {
     if (query) {
@@ -45,8 +47,8 @@ const Index = () => {
           <InstagramReels />
         </div>
       )}
-      <main className="max-w-7xl mx-auto pb-20">
-        <ProductGrid searchQuery={searchQuery} collectionHandle={selectedCollection} />
+      <main id="product-grid" className="max-w-7xl mx-auto pb-20">
+        <ProductGrid searchQuery={searchQuery} collectionHandle={selectedCollection} initialSort={sortParam ?? undefined} />
       </main>
       <Footer />
     </div>

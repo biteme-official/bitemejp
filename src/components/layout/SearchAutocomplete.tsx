@@ -153,7 +153,8 @@ export function SearchAutocomplete({ onSearch }: SearchAutocompleteProps) {
   const handleSelectSuggestion = useCallback((suggestion: ProductSuggestion) => {
     saveRecentSearch(suggestion.title);
     setIsOpen(false);
-    navigate(`/product/${suggestion.handle}`);
+    const numericId = suggestion.id.split('/').pop();
+    navigate(`/product/${numericId || suggestion.handle}`);
   }, [navigate, saveRecentSearch]);
 
   // Handle selecting a recent search

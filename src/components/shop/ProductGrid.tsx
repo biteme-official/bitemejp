@@ -1,10 +1,11 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ShopifyProduct, fetchProducts, fetchCollectionProducts, formatPrice } from '@/lib/shopify';
+import { ShopifyProduct, fetchProducts, fetchCollectionProducts, fetchBestSellingProducts, formatPrice, getPreorderDate, fetchCartPreview } from '@/lib/shopify';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ShoppingCart, Loader2, Heart } from 'lucide-react';
 import { useWishlistStore } from '@/stores/wishlistStore';
+import { useDiscountStore } from '@/stores/discountStore';
 import { saveScrollPosition } from '@/hooks/useScrollRestoration';
 import { ProductFilters, SortOption, FilterState } from './ProductFilters';
 import { ProductOptionDialog } from './ProductOptionDialog';
@@ -29,16 +30,18 @@ const ProductSkeleton = () => (
 interface ProductGridProps {
   searchQuery?: string;
   collectionHandle?: string | null;
+  initialSort?: SortOption;
 }
 
 const PRODUCTS_PER_PAGE = 12;
 const DEFAULT_MAX_PRICE = 10000;
 
-export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: ProductGridProps) => {
+export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initialSort }: ProductGridProps) => {
   const [allProducts, setAllProducts] = useState<ShopifyProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasNextPage, setHasNextPage] = useState(false);
+  const { productDiscounts: discountMap, setProductDiscounts } = useDiscountStore();
   const { isWishlisted, toggleItem: toggleWishlist } = useWishlistStore();
   const [endCursor, setEndCursor] = useState<string | null>(null);
   const [totalProductCount, setTotalProductCount] = useState<number | null>(null);
@@ -59,6 +62,13 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
+
+  // Extract discount % from collection handle (e.g. "初夏アイテム-15-off" → 15)
+  const collectionDiscountPct = useMemo(() => {
+    if (!collectionHandle) return 0;
+    const match = collectionHandle.match(/-(\d+)-off/i);
+    return match ? parseInt(match[1], 10) : 0;
+  }, [collectionHandle]);
 
   // Calculate max price from products
   const maxPrice = useMemo(() => {
@@ -138,6 +148,20 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
     }
   }, [loading, totalProductCount, filteredAndSortedProducts]);
 
+  // 상품 목록이 바뀌면 Shopify Cart API로 자동 할인 금액 일괄 조회 (결과는 store에 캐시)
+  useEffect(() => {
+    if (allProducts.length === 0) return;
+    const variants: { variantId: string; quantity: number }[] = [];
+    allProducts.forEach(p => {
+      const v = (p.node.variants.edges.find(e => e.node.availableForSale) ?? p.node.variants.edges[0])?.node;
+      if (v) variants.push({ variantId: v.id, quantity: 1 });
+    });
+    fetchCartPreview(variants).then(info => {
+      if (!info || Object.keys(info.productDiscounts).length === 0) return;
+      setProductDiscounts(info.productDiscounts);
+    });
+  }, [allProducts]);
+
   // Count active filters
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -146,9 +170,9 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
     return count;
   }, [filters, maxPrice]);
 
-  const handleProductClick = (handle: string) => {
+  const handleProductClick = (numericId: string) => {
     saveScrollPosition(location.pathname);
-    navigate(`/product/${handle}`);
+    navigate(`/product/${numericId}`);
   };
 
   const getQuery = useCallback(() => {
@@ -161,12 +185,12 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
 
   // Reset filters and sort when search or collection changes
   useEffect(() => {
-    setSortOption("default");
+    setSortOption(initialSort ?? "default");
     setFilters({
       priceRange: [0, DEFAULT_MAX_PRICE],
       availability: "all",
     });
-  }, [searchQuery, collectionHandle]);
+  }, [searchQuery, collectionHandle, initialSort]);
 
   // Initial load
   useEffect(() => {
@@ -185,6 +209,12 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
           console.log('[ProductGrid] Collection response:', collectionResponse.collectionTitle, collectionResponse.products.length, 'products');
           response = collectionResponse;
           setCollectionTitle(collectionResponse.collectionTitle);
+        } else if (initialSort === 'best_selling') {
+          const products = await fetchBestSellingProducts(50);
+          setAllProducts(products);
+          setHasNextPage(false);
+          setEndCursor(null);
+          return;
         } else {
           const query = getQuery();
           response = await fetchProducts(PRODUCTS_PER_PAGE, query, undefined);
@@ -357,7 +387,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
                 <div
                   key={product.node.id}
                   className="bg-card rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow cursor-pointer group"
-                  onClick={() => handleProductClick(product.node.handle)}
+                  onClick={() => handleProductClick(product.node.id.split('/').pop()!)}
                 >
                   <div className="aspect-square bg-muted relative overflow-hidden">
                     {image ? (
@@ -401,6 +431,29 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
                         </span>
                       </div>
                     )}
+                    {/* 割引率バッジ */}
+                    {!isCompletelyOutOfStock && (() => {
+                      const pctFromDiscount = discountMap[product.node.id] ?? 0;
+                      const saleVariant = product.node.variants.edges.find(e => {
+                        const ca = e.node.compareAtPrice;
+                        return ca && parseFloat(ca.amount) > parseFloat(e.node.price.amount);
+                      });
+                      const pct = pctFromDiscount || (saleVariant
+                        ? Math.round((1 - parseFloat(saleVariant.node.price.amount) / parseFloat(saleVariant.node.compareAtPrice!.amount)) * 100)
+                        : collectionDiscountPct);
+                      if (!pct) return null;
+                      return (
+                        <div className="absolute top-2 left-2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                          -{pct}%
+                        </div>
+                      );
+                    })()}
+                    {/* 予約配送バッジ */}
+                    {!isCompletelyOutOfStock && getPreorderDate(product.node.tags ?? []) && (
+                      <div className="absolute top-2 left-2 bg-amber-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+                        予約
+                      </div>
+                    )}
                   </div>
                   <div className="p-4">
                     <h3 className="font-medium text-sm line-clamp-2 mb-1 group-hover:text-primary transition-colors">
@@ -413,9 +466,51 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null }: Produ
                     />
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1 min-w-0">
-                        <span className={`font-bold text-sm ${isCompletelyOutOfStock ? 'text-muted-foreground' : 'text-primary'}`} translate="no">
-                          {formatPrice(price.amount, price.currencyCode)}
-                        </span>
+                        {(() => {
+                          const pct = (discountMap[product.node.id] ?? 0) || collectionDiscountPct;
+                          const originalAmt = parseFloat(price.amount);
+                          const saleVariant = product.node.variants.edges.find(e => {
+                            const ca = e.node.compareAtPrice;
+                            return ca && parseFloat(ca.amount) > parseFloat(e.node.price.amount);
+                          });
+                          if (pct) {
+                            const discounted = originalAmt * (1 - pct / 100);
+                            return (
+                              <div>
+                                <span className="font-bold text-sm text-red-500" translate="no">
+                                  {formatPrice(discounted.toFixed(0), price.currencyCode)}
+                                </span>
+                                <span className="ml-1 text-[10px] text-muted-foreground line-through" translate="no">
+                                  {formatPrice(price.amount, price.currencyCode)}
+                                </span>
+                              </div>
+                            );
+                          } else if (saleVariant) {
+                            return (
+                              <div>
+                                <span className="font-bold text-sm text-red-500" translate="no">
+                                  {formatPrice(saleVariant.node.price.amount, saleVariant.node.price.currencyCode)}
+                                </span>
+                                <span className="ml-1 text-[10px] text-muted-foreground line-through" translate="no">
+                                  {formatPrice(saleVariant.node.compareAtPrice!.amount, saleVariant.node.compareAtPrice!.currencyCode)}
+                                </span>
+                              </div>
+                            );
+                          }
+                          return (
+                            <span className={`font-bold text-sm ${isCompletelyOutOfStock ? 'text-muted-foreground' : 'text-primary'}`} translate="no">
+                              {formatPrice(price.amount, price.currencyCode)}
+                            </span>
+                          );
+                        })()}
+                        {(() => {
+                          const preorderDate = getPreorderDate(product.node.tags ?? []);
+                          if (!preorderDate) return null;
+                          const [y, m, d] = preorderDate.split('-');
+                          return (
+                            <p className="text-[10px] text-amber-600 mt-0.5">{y}/{m}/{d} 発送予定</p>
+                          );
+                        })()}
                       </div>
                       <Button
                         size="sm"

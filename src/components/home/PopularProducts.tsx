@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { ShopifyProduct, fetchBestSellingProducts, formatPrice } from "@/lib/shopify";
+import { ShopifyProduct, fetchBestSellingProducts, formatPrice, getPreorderDate, fetchCartPreview } from "@/lib/shopify";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const BADGES = ["BEST", "人気", "おすすめ", "TOP", "新着", "注目"];
@@ -10,10 +10,31 @@ export function PopularProducts() {
   const navigate = useNavigate();
   const [products, setProducts] = useState<ShopifyProduct[]>([]);
   const [loading, setLoading] = useState(true);
+  const [discountMap, setDiscountMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
     fetchBestSellingProducts(8)
-      .then((result) => setProducts(result))
+      .then((result) => {
+        setProducts(result);
+        const variantMeta: Record<string, { productId: string; price: number }> = {};
+        const variants: { variantId: string; quantity: number }[] = [];
+        result.forEach(p => {
+          const v = (p.node.variants.edges.find(e => e.node.availableForSale) ?? p.node.variants.edges[0])?.node;
+          if (v) {
+            variantMeta[v.id] = { productId: p.node.id, price: parseFloat(v.price.amount) };
+            variants.push({ variantId: v.id, quantity: 1 });
+          }
+        });
+        fetchCartPreview(variants).then(info => {
+          if (!info) return;
+          const pctMap: Record<string, number> = {};
+          for (const [variantId, { productId, price }] of Object.entries(variantMeta)) {
+            const discountAmt = info.lineDiscounts[variantId];
+            if (discountAmt && price > 0) pctMap[productId] = Math.round((discountAmt / price) * 100);
+          }
+          if (Object.keys(pctMap).length > 0) setDiscountMap(pctMap);
+        });
+      })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
@@ -47,7 +68,7 @@ export function PopularProducts() {
       <div className="flex items-center justify-between px-4 mb-3">
         <h2 className="text-base font-bold text-foreground">人気商品</h2>
         <button
-          onClick={() => navigate("/")}
+          onClick={() => navigate("/?collection=%E4%BA%BA%E6%B0%97%E5%95%86%E5%93%81")}
           className="flex items-center gap-0.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           すべて見る
@@ -63,7 +84,7 @@ export function PopularProducts() {
           return (
             <div
               key={product.node.id}
-              onClick={() => navigate(`/product/${product.node.handle}`)}
+              onClick={() => navigate(`/product/${product.node.id.split('/').pop()}`)}
               className="bg-card rounded-xl border border-border overflow-hidden shadow-sm hover:shadow-card transition-all hover:-translate-y-0.5 cursor-pointer"
             >
               <div className="aspect-square bg-secondary relative overflow-hidden">
@@ -82,6 +103,24 @@ export function PopularProducts() {
                 <span className="absolute top-2 left-2 bg-primary text-primary-foreground text-[10px] font-bold px-1.5 py-0.5 rounded-md">
                   {BADGES[index] ?? "人気"}
                 </span>
+                {(() => {
+                  const pct = discountMap[product.node.id] ?? 0;
+                  const originalAmt = parseFloat(price.amount);
+                  const compareAt = product.node.variants.edges[0]?.node.compareAtPrice;
+                  const finalPct = pct || (compareAt && parseFloat(compareAt.amount) > originalAmt
+                    ? Math.round((1 - originalAmt / parseFloat(compareAt.amount)) * 100) : 0);
+                  if (!finalPct) return null;
+                  return (
+                    <span className="absolute top-2 right-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+                      -{finalPct}%
+                    </span>
+                  );
+                })()}
+                {getPreorderDate(product.node.tags ?? []) && (
+                  <span className="absolute bottom-2 left-2 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+                    予約
+                  </span>
+                )}
               </div>
               <div className="p-3">
                 <h3 className="text-xs font-medium text-foreground line-clamp-2 mb-1 min-h-[32px]">
@@ -92,9 +131,39 @@ export function PopularProducts() {
                   data-id={product.node.id?.split('/').pop()}
                   data-handle={product.node.handle}
                 />
-                <p className="text-sm font-bold text-primary" translate="no">
-                  {formatPrice(price.amount, price.currencyCode)}
-                </p>
+                {(() => {
+                  const pct = discountMap[product.node.id] ?? 0;
+                  const originalAmt = parseFloat(price.amount);
+                  const compareAt = product.node.variants.edges[0]?.node.compareAtPrice;
+                  if (pct) {
+                    return (
+                      <div>
+                        <span className="text-sm font-bold text-red-500" translate="no">
+                          {formatPrice((originalAmt * (1 - pct / 100)).toFixed(0), price.currencyCode)}
+                        </span>
+                        <span className="ml-1 text-[10px] text-muted-foreground line-through" translate="no">
+                          {formatPrice(price.amount, price.currencyCode)}
+                        </span>
+                      </div>
+                    );
+                  } else if (compareAt && parseFloat(compareAt.amount) > originalAmt) {
+                    return (
+                      <div>
+                        <span className="text-sm font-bold text-red-500" translate="no">
+                          {formatPrice(price.amount, price.currencyCode)}
+                        </span>
+                        <span className="ml-1 text-[10px] text-muted-foreground line-through" translate="no">
+                          {formatPrice(compareAt.amount, compareAt.currencyCode)}
+                        </span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <p className="text-sm font-bold text-primary" translate="no">
+                      {formatPrice(price.amount, price.currencyCode)}
+                    </p>
+                  );
+                })()}
               </div>
             </div>
           );

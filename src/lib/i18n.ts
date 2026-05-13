@@ -82,6 +82,7 @@ export const translations: Record<string, Record<string, string | Record<string,
   filters: {
     sort: '並び替え',
     sortOptions: {
+      bestSelling: '人気順',
       default: 'デフォルト',
       priceAsc: '価格: 安い順',
       priceDesc: '価格: 高い順',

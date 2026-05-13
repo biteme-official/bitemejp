@@ -1,9 +1,6 @@
 name: Daily Review Sync
 
 on:
-  schedule:
-    # 매일 KST 새벽 2시 (UTC 17:00 전일)
-    - cron: '0 17 * * *'
   workflow_dispatch:
     inputs:
       date:

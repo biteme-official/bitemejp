@@ -36,6 +36,10 @@ export interface ShopifyProduct {
             amount: string;
             currencyCode: string;
           };
+          compareAtPrice: {
+            amount: string;
+            currencyCode: string;
+          } | null;
           availableForSale: boolean;
           quantityAvailable: number | null;
           image?: {
@@ -54,6 +58,14 @@ export interface ShopifyProduct {
       values: string[];
     }>;
   };
+}
+
+// 예약배송 태그 파싱: "preorder:YYYY-MM-DD" 형식 태그에서 날짜 추출
+export function getPreorderDate(tags: string[]): string | null {
+  const tag = tags.find(t => t.startsWith('preorder:'));
+  if (!tag) return null;
+  const date = tag.split(':')[1];
+  return date || null;
 }
 
 // Storefront API helper function - proxied through server for secure token management
@@ -129,6 +141,10 @@ const GET_PRODUCTS_QUERY = `
                   amount
                   currencyCode
                 }
+                compareAtPrice {
+                  amount
+                  currencyCode
+                }
                 availableForSale
                 image {
                   url
@@ -200,6 +216,10 @@ const GET_PRODUCT_BY_HANDLE_QUERY = `
               amount
               currencyCode
             }
+            compareAtPrice {
+              amount
+              currencyCode
+            }
             availableForSale
             quantityAvailable
             image {
@@ -234,16 +254,42 @@ const CART_CREATE_MUTATION = `
             currencyCode
           }
         }
+        cost {
+          subtotalAmount {
+            amount
+            currencyCode
+          }
+          totalAmount {
+            amount
+            currencyCode
+          }
+        }
         lines(first: 100) {
           edges {
             node {
               id
               quantity
+              discountAllocations {
+                discountedAmount {
+                  amount
+                  currencyCode
+                }
+              }
+              cost {
+                totalAmount {
+                  amount
+                  currencyCode
+                }
+              }
               merchandise {
                 ... on ProductVariant {
                   id
                   title
                   price {
+                    amount
+                    currencyCode
+                  }
+                  compareAtPrice {
                     amount
                     currencyCode
                   }
@@ -264,6 +310,105 @@ const CART_CREATE_MUTATION = `
     }
   }
 `;
+
+export interface CartDiscountInfo {
+  totalSavings: number;
+  discountedTotal: number;
+  currencyCode: string;
+  lineDiscounts: Record<string, number>; // variantId → discount amount
+  productDiscounts: Record<string, number>; // productId → discount percentage (0~100)
+}
+
+const CART_PREVIEW_MUTATION = `
+  mutation cartPreview($input: CartInput!) {
+    cartCreate(input: $input) {
+      cart {
+        cost {
+          subtotalAmount { amount currencyCode }
+          totalAmount { amount currencyCode }
+        }
+        lines(first: 100) {
+          edges {
+            node {
+              quantity
+              discountAllocations {
+                ... on CartAutomaticDiscountAllocation {
+                  discountedAmount { amount currencyCode }
+                }
+                ... on CartCodeDiscountAllocation {
+                  discountedAmount { amount currencyCode }
+                }
+                ... on CartCustomDiscountAllocation {
+                  discountedAmount { amount currencyCode }
+                }
+              }
+              merchandise {
+                ... on ProductVariant {
+                  id
+                  price { amount }
+                  product { id }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+export async function fetchCartPreview(
+  items: { variantId: string; quantity: number }[]
+): Promise<CartDiscountInfo | null> {
+  if (items.length === 0) return null;
+  // Deduplicate by variantId to prevent Shopify from merging lines and doubling discount amounts
+  const seen = new Set<string>();
+  const deduped = items.filter(item => {
+    if (seen.has(item.variantId)) return false;
+    seen.add(item.variantId);
+    return true;
+  });
+  try {
+    const data = await storefrontApiRequest(CART_PREVIEW_MUTATION, {
+      input: {
+        lines: deduped.map(item => ({
+          merchandiseId: item.variantId,
+          quantity: item.quantity,
+        })),
+      },
+    });
+    const cart = data?.data?.cartCreate?.cart;
+    if (!cart) return null;
+
+    const subtotal = parseFloat(cart.cost.subtotalAmount.amount);
+    const total = parseFloat(cart.cost.totalAmount.amount);
+    const currencyCode = cart.cost.totalAmount.currencyCode;
+    const lineDiscounts: Record<string, number> = {};
+    const productDiscounts: Record<string, number> = {};
+
+    for (const edge of cart.lines.edges) {
+      const node = edge.node;
+      const variantId = node.merchandise?.id;
+      const productId = node.merchandise?.product?.id;
+      const variantPrice = parseFloat(node.merchandise?.price?.amount || '0');
+      const discount = node.discountAllocations.reduce(
+        (sum: number, d: { discountedAmount: { amount: string } }) => sum + parseFloat(d.discountedAmount.amount),
+        0
+      );
+      if (discount > 0) {
+        if (variantId) lineDiscounts[variantId] = discount;
+        if (productId && variantPrice > 0) {
+          productDiscounts[productId] = Math.round((discount / variantPrice) * 100);
+        }
+      }
+    }
+
+    return { totalSavings: subtotal - total, discountedTotal: total, currencyCode, lineDiscounts, productDiscounts };
+  } catch (err) {
+    console.error('[fetchCartPreview] failed:', err);
+    return null;
+  }
+}
 
 // Collections
 export interface ShopifyCollection {
@@ -357,7 +502,7 @@ const GET_COLLECTION_PRODUCTS_QUERY = `
       id
       title
       handle
-      products(first: $first, after: $after, sortKey: CREATED, reverse: true) {
+      products(first: $first, after: $after, sortKey: COLLECTION_DEFAULT) {
         pageInfo {
           hasNextPage
           endCursor
@@ -391,6 +536,10 @@ const GET_COLLECTION_PRODUCTS_QUERY = `
                   id
                   title
                   price {
+                    amount
+                    currencyCode
+                  }
+                  compareAtPrice {
                     amount
                     currencyCode
                   }
@@ -439,12 +588,16 @@ const GET_BEST_SELLING_PRODUCTS_QUERY = `
               }
             }
           }
-          variants(first: 1) {
+          variants(first: 10) {
             edges {
               node {
                 id
                 title
                 price {
+                  amount
+                  currencyCode
+                }
+                compareAtPrice {
                   amount
                   currencyCode
                 }
@@ -456,6 +609,7 @@ const GET_BEST_SELLING_PRODUCTS_QUERY = `
               }
             }
           }
+          tags
           options {
             name
             values
@@ -598,6 +752,74 @@ export async function fetchProductByHandle(handle: string): Promise<ShopifyProdu
   const data = await storefrontApiRequest(GET_PRODUCT_BY_HANDLE_QUERY, { handle });
   if (!data) return null;
   return data.data?.productByHandle || null;
+}
+
+const GET_PRODUCT_BY_ID_QUERY = `
+  query GetProductById($id: ID!) {
+    node(id: $id) {
+      ... on Product {
+        id
+        title
+        description
+        descriptionHtml
+        handle
+        productType
+        tags
+        vendor
+        priceRange {
+          minVariantPrice {
+            amount
+            currencyCode
+          }
+        }
+        images(first: 20) {
+          edges {
+            node {
+              url
+              altText
+            }
+          }
+        }
+        variants(first: 50) {
+          edges {
+            node {
+              id
+              title
+              price {
+                amount
+                currencyCode
+              }
+              compareAtPrice {
+                amount
+                currencyCode
+              }
+              availableForSale
+              quantityAvailable
+              image {
+                url
+                altText
+              }
+              selectedOptions {
+                name
+                value
+              }
+            }
+          }
+        }
+        options {
+          name
+          values
+        }
+      }
+    }
+  }
+`;
+
+export async function fetchProductById(numericId: string): Promise<ShopifyProduct['node'] | null> {
+  const id = `gid://shopify/Product/${numericId}`;
+  const data = await storefrontApiRequest(GET_PRODUCT_BY_ID_QUERY, { id });
+  if (!data) return null;
+  return data.data?.node || null;
 }
 
 export async function fetchCollections(first: number = 20): Promise<ShopifyCollection[]> {

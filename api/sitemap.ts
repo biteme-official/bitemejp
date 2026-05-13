@@ -30,9 +30,9 @@ async function getStorefrontToken(): Promise<string> {
   return cachedToken!;
 }
 
-async function fetchAllProductHandles(): Promise<{ handle: string; updatedAt: string }[]> {
+async function fetchAllProductHandles(): Promise<{ numericId: string; updatedAt: string }[]> {
   const token = await getStorefrontToken();
-  const products: { handle: string; updatedAt: string }[] = [];
+  const products: { numericId: string; updatedAt: string }[] = [];
   let cursor: string | null = null;
   let hasNextPage = true;
 
@@ -41,7 +41,7 @@ async function fetchAllProductHandles(): Promise<{ handle: string; updatedAt: st
       query GetProducts($cursor: String) {
         products(first: 250, after: $cursor) {
           pageInfo { hasNextPage endCursor }
-          edges { node { handle updatedAt } }
+          edges { node { id updatedAt } }
         }
       }
     `;
@@ -61,7 +61,8 @@ async function fetchAllProductHandles(): Promise<{ handle: string; updatedAt: st
     if (!connection) break;
 
     for (const edge of connection.edges) {
-      products.push({ handle: edge.node.handle, updatedAt: edge.node.updatedAt });
+      const numericId = (edge.node.id as string).split('/').pop()!;
+      products.push({ numericId, updatedAt: edge.node.updatedAt });
     }
 
     hasNextPage = connection.pageInfo.hasNextPage;
@@ -89,7 +90,7 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     );
 
     const productUrls = products.map(p =>
-      `  <url>\n    <loc>${BASE_URL}/product/${p.handle}</loc>\n    <lastmod>${p.updatedAt.split('T')[0]}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
+      `  <url>\n    <loc>${BASE_URL}/product/${p.numericId}</loc>\n    <lastmod>${p.updatedAt.split('T')[0]}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.8</priority>\n  </url>`
     );
 
     const xml = [

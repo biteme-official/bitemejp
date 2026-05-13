@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/sheet";
 import { ShoppingCart, Minus, Plus, Trash2, ExternalLink, Loader2 } from "lucide-react";
 import { useCartStore } from "@/stores/cartStore";
-import { formatPrice } from "@/lib/shopify";
+import { formatPrice, getPreorderDate, fetchCartPreview, CartDiscountInfo } from "@/lib/shopify";
 import { ThresholdBanner } from "./ThresholdBanner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { safeNavigate } from "@/lib/browser-utils";
@@ -28,6 +28,7 @@ interface CartDrawerProps {
 export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = true }: CartDrawerProps) => {
   const [internalOpen, setInternalOpen] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [discountInfo, setDiscountInfo] = useState<CartDiscountInfo | null>(null);
   const { t } = useTranslation();
   const navigate = useNavigate();
   const {
@@ -42,6 +43,17 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
   // Support both controlled and uncontrolled modes
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setIsOpen = onOpenChange || setInternalOpen;
+
+  // 장바구니 열릴 때 Shopify Cart API로 실제 할인 금액 조회
+  useEffect(() => {
+    if (isOpen && items.length > 0) {
+      fetchCartPreview(items.map(i => ({ variantId: i.variantId, quantity: i.quantity })))
+        .then(setDiscountInfo)
+        .catch(() => setDiscountInfo(null));
+    } else {
+      setDiscountInfo(null);
+    }
+  }, [isOpen, items]);
 
   // GA4: view_cart event when drawer opens
   useEffect(() => {
@@ -132,9 +144,9 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
     navigate('/checkout');
   };
 
-  const handleProductClick = (handle: string) => {
+  const handleProductClick = (numericId: string) => {
     setIsOpen(false);
-    navigate(`/product/${handle}`);
+    navigate(`/product/${numericId}`);
   };
 
   const getItemCountText = () => {
@@ -217,7 +229,7 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
 
                       {/* Product Image - Clickable */}
                       <button
-                        onClick={() => handleProductClick(item.product.node.handle)}
+                        onClick={() => handleProductClick(item.product.node.id.split('/').pop()!)}
                         className="w-16 h-16 bg-muted rounded-md overflow-hidden flex-shrink-0 hover:opacity-80 transition-opacity"
                       >
                         {item.product.node.images?.edges?.[0]?.node && (
@@ -232,7 +244,7 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
                       {/* Product Info - Clickable */}
                       <div className="flex-1 min-w-0">
                         <button
-                          onClick={() => handleProductClick(item.product.node.handle)}
+                          onClick={() => handleProductClick(item.product.node.id.split('/').pop()!)}
                           className="text-left hover:text-primary transition-colors"
                         >
                           <h4 className="font-medium text-sm line-clamp-2">{item.product.node.title}</h4>
@@ -249,6 +261,14 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
                           <p className="font-semibold text-sm text-primary">
                             {formatPrice((parseFloat(item.price.amount) * item.quantity).toFixed(2), item.price.currencyCode)}
                           </p>
+                          {(() => {
+                            const preorderDate = getPreorderDate(item.product.node.tags ?? []);
+                            if (!preorderDate) return null;
+                            const [y, m, d] = preorderDate.split('-');
+                            return (
+                              <p className="text-[10px] text-amber-600 mt-0.5">🚚 {y}/{m}/{d} 発送予定</p>
+                            );
+                          })()}
                         </div>
                       </div>
 
@@ -297,12 +317,28 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
               </div>
 
               <div className="flex-shrink-0 space-y-4 pt-4 border-t mt-4">
+                {items.some(item => getPreorderDate(item.product.node.tags ?? [])) && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-[11px] text-amber-800 leading-relaxed">
+                    <p className="font-semibold mb-0.5">⚠️ 予約商品が含まれるご注文について</p>
+                    <p>予約商品を含むご注文は、予約出荷日に合わせて全商品をまとめて発送いたします。通常商品を早急にお受け取り希望の場合は、お手数ですが別途ご購入ください。</p>
+                  </div>
+                )}
+                {discountInfo && discountInfo.totalSavings > 0 && (
+                  <div className="flex justify-between items-center text-sm bg-red-50 px-3 py-2 rounded-lg">
+                    <span className="text-red-600 font-medium">割引合計</span>
+                    <span className="text-red-600 font-bold">
+                      -{formatPrice(discountInfo.totalSavings.toFixed(2), discountInfo.currencyCode)}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center">
                   <span className="text-lg font-semibold">
                     {t('cart.total')} ({selectedCount} {t('cart.itemCount') || 'items'})
                   </span>
                   <span className="text-xl font-bold">
-                    {formatPrice(totalPrice.toFixed(2), currencyCode)}
+                    {discountInfo && discountInfo.totalSavings > 0
+                      ? formatPrice(discountInfo.discountedTotal.toFixed(2), discountInfo.currencyCode)
+                      : formatPrice(totalPrice.toFixed(2), currencyCode)}
                   </span>
                 </div>
 

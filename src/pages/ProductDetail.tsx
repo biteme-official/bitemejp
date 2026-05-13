@@ -9,16 +9,37 @@ import biteMeLogo from "@/assets/bite-me-logo.png";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { fetchProductByHandle, formatPrice, ShopifyProduct, fetchProductRecommendations, ProductRecommendation } from "@/lib/shopify";
+import { fetchProductByHandle, fetchProductById, formatPrice, ShopifyProduct, fetchProductRecommendations, ProductRecommendation, getPreorderDate, fetchCartPreview } from "@/lib/shopify";
 import { trackViewItem, trackAddToCart, shopifyToGA4Item } from "@/lib/ga4-ecommerce";
 import { useCartStore } from "@/stores/cartStore";
 import { useWishlistStore } from "@/stores/wishlistStore";
+import { useDiscountStore } from "@/stores/discountStore";
 import { ReviewWidget } from "@/components/product/ReviewWidget";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CartDrawer } from "@/components/cart/CartDrawer";
 import { Footer } from "@/components/layout/Footer";
+
+function setOrCreateMeta(attrKey: string, attrVal: string, content: string) {
+  let el = document.querySelector(`meta[${attrKey}="${attrVal}"]`) as HTMLMetaElement | null;
+  if (!el) {
+    el = document.createElement('meta');
+    el.setAttribute(attrKey, attrVal);
+    document.head.appendChild(el);
+  }
+  el.content = content;
+}
+
+function setOrCreateLink(rel: string, href: string) {
+  let el = document.querySelector(`link[rel="${rel}"]`) as HTMLLinkElement | null;
+  if (!el) {
+    el = document.createElement('link');
+    el.rel = rel;
+    document.head.appendChild(el);
+  }
+  el.href = href;
+}
 
 // Product detail skeleton component
 function ProductDetailSkeleton() {
@@ -135,6 +156,7 @@ export default function ProductDetail() {
   const [recommendations, setRecommendations] = useState<ProductRecommendation[]>([]);
   const [activeTab, setActiveTab] = useState<'detail' | 'review'>('detail');
   const [reviewCount, setReviewCount] = useState<number | null>(null);
+  const { variantDiscounts: discountMap, setVariantDiscounts } = useDiscountStore();
   const { user, isLoggedIn } = useAuthStore();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -160,12 +182,45 @@ export default function ProductDetail() {
     const loadProduct = async () => {
       if (!id) return;
       try {
-        const data = await fetchProductByHandle(id);
+        // numeric ID이면 GID 기반 조회, handle이면 handle 기반 조회 후 URL을 numeric ID로 교체
+        const isNumeric = /^\d+$/.test(id);
+        const data = isNumeric ? await fetchProductById(id) : await fetchProductByHandle(id);
         setProduct(data);
-        // GA4: view_item event
+
         if (data) {
+          const numericId = data.id.split('/').pop()!;
+
+          // handle URL로 접근한 경우 → numeric ID URL로 교체 (뒤로가기 영향 없이)
+          if (!isNumeric) {
+            window.history.replaceState(null, '', `/product/${numericId}`);
+          }
+
+          // 동적 SEO 메타태그 업데이트
+          const pageTitle = `${data.title} | バイトミー (BITEME) JAPAN`;
+          const description = data.description?.slice(0, 160) || `バイトミー公式 ${data.title}`;
+          const image = data.images.edges[0]?.node.url || 'https://biteme.co.jp/meta.jpg';
+          const canonical = `https://biteme.co.jp/product/${numericId}`;
+
+          document.title = pageTitle;
+          setOrCreateMeta('property', 'og:title', pageTitle);
+          setOrCreateMeta('property', 'og:description', description);
+          setOrCreateMeta('property', 'og:image', image);
+          setOrCreateMeta('property', 'og:url', canonical);
+          setOrCreateMeta('property', 'og:type', 'product');
+          setOrCreateMeta('name', 'description', description);
+          setOrCreateLink('canonical', canonical);
+
+          // GA4: view_item event
           const variant = data.variants.edges[0]?.node;
           trackViewItem(shopifyToGA4Item(data, variant));
+
+          // 자동 할인 금액 조회 (결과는 store에 캐시)
+          const variants = data.variants.edges.map(e => ({ variantId: e.node.id, quantity: 1 }));
+          fetchCartPreview(variants).then(info => {
+            if (info?.lineDiscounts && Object.keys(info.lineDiscounts).length > 0) {
+              setVariantDiscounts(info.lineDiscounts);
+            }
+          });
         }
         if (data?.options) {
           // 재고 있는 첫 번째 variant의 옵션을 기본값으로, 없으면 첫 번째 옵션값
@@ -417,7 +472,11 @@ export default function ProductDetail() {
             </button>
             <button
               onClick={() => {
-                navigator.clipboard.writeText(window.location.href);
+                const numericId = product?.id.split('/').pop();
+                const url = numericId
+                  ? `${window.location.origin}/product/${numericId}`
+                  : window.location.href;
+                navigator.clipboard.writeText(url);
                 toast.success(t('product.linkCopied'), { position: 'top-center' });
               }}
               className="p-2 text-foreground"
@@ -505,10 +564,48 @@ export default function ProductDetail() {
         {/* Title & Price */}
         <div className="mb-4">
           <h1 className="text-xl font-bold text-foreground mb-2">{product.title}</h1>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-foreground" translate="no">
-              {formatPrice(price.amount, price.currencyCode)}
-            </span>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            {(() => {
+              const discountAmt = selectedVariant ? discountMap[selectedVariant.id] : 0;
+              const originalAmt = parseFloat(price.amount);
+              const compareAt = selectedVariant?.compareAtPrice;
+              if (discountAmt) {
+                const discounted = originalAmt - discountAmt;
+                const pct = Math.round((discountAmt / originalAmt) * 100);
+                return (
+                  <>
+                    <span className="text-2xl font-bold text-red-500" translate="no">
+                      {formatPrice(discounted.toFixed(0), price.currencyCode)}
+                    </span>
+                    <span className="text-base text-muted-foreground line-through" translate="no">
+                      {formatPrice(price.amount, price.currencyCode)}
+                    </span>
+                    <span className="text-sm font-semibold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">
+                      {pct}% OFF
+                    </span>
+                  </>
+                );
+              } else if (compareAt && parseFloat(compareAt.amount) > originalAmt) {
+                return (
+                  <>
+                    <span className="text-2xl font-bold text-red-500" translate="no">
+                      {formatPrice(price.amount, price.currencyCode)}
+                    </span>
+                    <span className="text-base text-muted-foreground line-through" translate="no">
+                      {formatPrice(compareAt.amount, compareAt.currencyCode)}
+                    </span>
+                    <span className="text-sm font-semibold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">
+                      {Math.round((1 - originalAmt / parseFloat(compareAt.amount)) * 100)}% OFF
+                    </span>
+                  </>
+                );
+              }
+              return (
+                <span className="text-2xl font-bold text-foreground" translate="no">
+                  {formatPrice(price.amount, price.currencyCode)}
+                </span>
+              );
+            })()}
           </div>
         </div>
 
@@ -697,6 +794,28 @@ export default function ProductDetail() {
             </button>
           </div>
         </div>
+
+        {/* 予約配送バナー */}
+        {(() => {
+          const preorderDate = getPreorderDate(product.tags ?? []);
+          if (!preorderDate) return null;
+          const [y, m, d] = preorderDate.split('-');
+          return (
+            <div className="space-y-2 mb-4">
+              <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800">
+                <Truck className="h-5 w-5 flex-shrink-0 text-amber-500" />
+                <div>
+                  <p className="text-sm font-semibold">予約商品</p>
+                  <p className="text-xs">{y}年{m}月{d}日 以降に順次発送予定</p>
+                </div>
+              </div>
+              <div className="px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-800 leading-relaxed">
+                <p className="font-semibold mb-0.5">⚠️ 予約商品が含まれるご注文について</p>
+                <p>予約商品を含むご注文は、予約出荷日に合わせて全商品をまとめて発送いたします。通常商品を早急にお受け取り希望の場合は、お手数ですが別途ご購入ください。</p>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Trust Badges */}
         <div className="flex gap-6 mb-6 py-4 border-y border-border justify-center">

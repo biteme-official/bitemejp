@@ -7,6 +7,8 @@ import {
   fetchCollections,
   fetchCollectionProducts,
   formatPrice,
+  getPreorderDate,
+  fetchCartPreview,
 } from "@/lib/shopify";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -43,6 +45,7 @@ export function CategorySections() {
   const navigate = useNavigate();
   const [sections, setSections] = useState<CategoryData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [discountMap, setDiscountMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const load = async () => {
@@ -59,7 +62,27 @@ export function CategorySections() {
           })
         );
 
-        setSections(results.filter((r) => r.products.length >= 4));
+        const validSections = results.filter((r) => r.products.length >= 4);
+        setSections(validSections);
+        const variantMeta: Record<string, { productId: string; price: number }> = {};
+        const allVariants: { variantId: string; quantity: number }[] = [];
+        validSections.flatMap(r => r.products).forEach(p => {
+          if (variantMeta[p.node.id]) return;
+          const v = (p.node.variants.edges.find(e => e.node.availableForSale) ?? p.node.variants.edges[0])?.node;
+          if (v) {
+            variantMeta[v.id] = { productId: p.node.id, price: parseFloat(v.price.amount) };
+            allVariants.push({ variantId: v.id, quantity: 1 });
+          }
+        });
+        fetchCartPreview(allVariants).then(info => {
+          if (!info) return;
+          const pctMap: Record<string, number> = {};
+          for (const [variantId, { productId, price }] of Object.entries(variantMeta)) {
+            const discountAmt = info.lineDiscounts[variantId];
+            if (discountAmt && price > 0) pctMap[productId] = Math.round((discountAmt / price) * 100);
+          }
+          if (Object.keys(pctMap).length > 0) setDiscountMap(pctMap);
+        });
       } catch (err) {
         console.error(err);
       } finally {
@@ -111,7 +134,7 @@ export function CategorySections() {
                 <div
                   key={product.node.id}
                   onClick={() =>
-                    navigate(`/product/${product.node.handle}`)
+                    navigate(`/product/${product.node.id.split('/').pop()}`)
                   }
                   className="flex-shrink-0 w-36 md:w-56 bg-card rounded-xl border border-border overflow-hidden shadow-sm hover:shadow-card transition-all cursor-pointer"
                 >
@@ -137,17 +160,62 @@ export function CategorySections() {
                         </span>
                       </div>
                     )}
+                    {isAvailable && (() => {
+                      const pct2 = discountMap[product.node.id] ?? 0;
+                      const originalAmt = parseFloat(price.amount);
+                      const compareAt = product.node.variants.edges[0]?.node.compareAtPrice;
+                      const pct = pct2 || (compareAt && parseFloat(compareAt.amount) > originalAmt
+                        ? Math.round((1 - originalAmt / parseFloat(compareAt.amount)) * 100) : 0);
+                      if (!pct) return null;
+                      return (
+                        <span className="absolute top-2 right-2 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+                          -{pct}%
+                        </span>
+                      );
+                    })()}
+                    {isAvailable && getPreorderDate(product.node.tags ?? []) && (
+                      <span className="absolute top-2 left-2 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md">
+                        予約
+                      </span>
+                    )}
                   </div>
                   <div className="p-2.5 md:p-3">
                     <h3 className="text-[11px] md:text-sm font-medium text-foreground line-clamp-2 mb-1.5 min-h-[28px] md:min-h-[40px]">
                       {product.node.title}
                     </h3>
-                    <p
-                      className="text-xs md:text-sm font-bold text-primary"
-                      translate="no"
-                    >
-                      {formatPrice(price.amount, price.currencyCode)}
-                    </p>
+                    {(() => {
+                      const pct3 = discountMap[product.node.id] ?? 0;
+                      const originalAmt = parseFloat(price.amount);
+                      const compareAt = product.node.variants.edges[0]?.node.compareAtPrice;
+                      if (pct3) {
+                        return (
+                          <div>
+                            <span className="text-xs md:text-sm font-bold text-red-500" translate="no">
+                              {formatPrice((originalAmt * (1 - pct3 / 100)).toFixed(0), price.currencyCode)}
+                            </span>
+                            <span className="ml-1 text-[10px] text-muted-foreground line-through" translate="no">
+                              {formatPrice(price.amount, price.currencyCode)}
+                            </span>
+                          </div>
+                        );
+                      } else if (compareAt && parseFloat(compareAt.amount) > originalAmt) {
+                        return (
+                          <div>
+                            <span className="text-xs md:text-sm font-bold text-red-500" translate="no">
+                              {formatPrice(price.amount, price.currencyCode)}
+                            </span>
+                            <span className="ml-1 text-[10px] text-muted-foreground line-through" translate="no">
+                              {formatPrice(compareAt.amount, compareAt.currencyCode)}
+                            </span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <p className="text-xs md:text-sm font-bold text-primary" translate="no">
+                          {formatPrice(price.amount, price.currencyCode)}
+                        </p>
+                      );
+                    })()}
                   </div>
                 </div>
               );

@@ -19,7 +19,7 @@ import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { useTranslation } from "@/hooks/useTranslation";
 
-export type SortOption = "default" | "price-asc" | "price-desc" | "title-asc" | "title-desc";
+export type SortOption = "best_selling" | "default" | "price-asc" | "price-desc" | "title-asc" | "title-desc";
 
 export interface FilterState {
   priceRange: [number, number];
@@ -55,6 +55,7 @@ export function ProductFilters({
   };
 
   const sortOptions: { value: SortOption; labelKey: string }[] = [
+    { value: "best_selling", labelKey: "filters.sortOptions.bestSelling" },
     { value: "default", labelKey: "filters.sortOptions.default" },
     { value: "price-asc", labelKey: "filters.sortOptions.priceAsc" },
     { value: "price-desc", labelKey: "filters.sortOptions.priceDesc" },

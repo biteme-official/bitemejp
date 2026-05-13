@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useCartStore } from '@/stores/cartStore';
 import { useAuthStore } from '@/stores/authStore';
-import { formatPrice, fetchShippingRates, fetchCustomerData, ShippingRate } from '@/lib/shopify';
+import { formatPrice, fetchShippingRates, fetchCustomerData, ShippingRate, getPreorderDate, fetchCartPreview, CartDiscountInfo } from '@/lib/shopify';
 import { getGA4LinkerParam } from '@/lib/ga4-ecommerce';
 import { toast } from 'sonner';
 
@@ -38,6 +38,7 @@ export default function Checkout() {
   const user = useAuthStore((s) => s.user);
   const [shippingRate, setShippingRate] = useState<ShippingRate | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [discountInfo, setDiscountInfo] = useState<CartDiscountInfo | null>(null);
 
   // Load saved shipping address
   const [form, setForm] = useState<ShippingForm>(() => {
@@ -64,6 +65,14 @@ export default function Checkout() {
     fetchShippingRates('JP')
       .then((rates) => { if (rates.length > 0) setShippingRate(rates[0]); })
       .catch(console.error);
+  }, []);
+
+  // Shopify Cart API로 자동할인 금액 조회
+  useEffect(() => {
+    if (items.length === 0) return;
+    fetchCartPreview(items.map(i => ({ variantId: i.variantId, quantity: i.quantity })))
+      .then(setDiscountInfo)
+      .catch(() => setDiscountInfo(null));
   }, []);
 
   // Pre-fill from Shopify customer data if available
@@ -145,10 +154,20 @@ export default function Checkout() {
         url.searchParams.set('checkout[shipping_address][phone]', form.phone);
         url.searchParams.set('checkout[shipping_address][country]', 'JP');
 
-        // GA4 cross-domain linker param을 return_to에 삽입해 Shopify 복귀 시 세션/소스 보존
+        // Shopify 결제 후 복귀 URL에 원본 UTM 파라미터를 그대로 전달
+        // GA4 _gl linker는 Shopify에 GA4 태그가 없어 작동하지 않으므로,
+        // 방문 시 저장해둔 UTM을 return_to에 붙여 소스 귀속을 복원한다.
+        const returnUrl = new URL(`${window.location.origin}/checkout-return`);
+        try {
+          const savedUtm = sessionStorage.getItem('_bm_utm');
+          if (savedUtm) {
+            const utmData = JSON.parse(savedUtm) as Record<string, string>;
+            Object.entries(utmData).forEach(([k, v]) => { if (v) returnUrl.searchParams.set(k, v); });
+          }
+        } catch { /* ignore */ }
         const glParam = await getGA4LinkerParam();
-        const returnBase = `${window.location.origin}/checkout-return`;
-        url.searchParams.set('return_to', glParam ? `${returnBase}?_gl=${encodeURIComponent(glParam)}` : returnBase);
+        if (glParam) returnUrl.searchParams.set('_gl', glParam);
+        url.searchParams.set('return_to', returnUrl.toString());
 
         // Shopify checkout URL에서 token 추출 (transaction_id로 사용)
         // 형식: /checkouts/cn/<TOKEN>/...
@@ -217,6 +236,14 @@ export default function Checkout() {
                     {item.variantTitle !== 'Default Title' && item.selectedOptions.map((o) => o.value).join(' / ')}
                     {' '}x{item.quantity}
                   </p>
+                  {(() => {
+                    const preorderDate = getPreorderDate(item.product.node.tags ?? []);
+                    if (!preorderDate) return null;
+                    const [y, m, d] = preorderDate.split('-');
+                    return (
+                      <p className="text-[10px] text-amber-600 mt-0.5">🚚 {y}/{m}/{d} 発送予定</p>
+                    );
+                  })()}
                 </div>
                 <span className="text-sm font-semibold" translate="no">
                   {formatPrice((parseFloat(item.price.amount) * item.quantity).toString(), item.price.currencyCode)}
@@ -229,6 +256,12 @@ export default function Checkout() {
               <span className="text-muted-foreground">小計</span>
               <span translate="no">{formatPrice(subtotal.toString(), currencyCode)}</span>
             </div>
+            {discountInfo && discountInfo.totalSavings > 0 && (
+              <div className="flex justify-between text-sm text-red-500">
+                <span className="font-medium">割引</span>
+                <span translate="no">-{formatPrice(discountInfo.totalSavings.toFixed(2), discountInfo.currencyCode)}</span>
+              </div>
+            )}
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground flex items-center gap-1">
                 <Truck className="h-3.5 w-3.5" />送料
@@ -237,10 +270,22 @@ export default function Checkout() {
             </div>
             <div className="flex justify-between text-base font-bold pt-1 border-t border-border">
               <span>合計</span>
-              <span translate="no">{formatPrice(total.toString(), currencyCode)}</span>
+              <span translate="no">
+                {discountInfo && discountInfo.totalSavings > 0
+                  ? formatPrice((discountInfo.discountedTotal + shipping).toFixed(2), currencyCode)
+                  : formatPrice(total.toString(), currencyCode)}
+              </span>
             </div>
           </div>
         </div>
+
+        {/* Preorder combined shipping notice */}
+        {items.some(item => getPreorderDate(item.product.node.tags ?? [])) && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-[11px] text-amber-800 leading-relaxed">
+            <p className="font-semibold mb-0.5">⚠️ 予約商品が含まれるご注文について</p>
+            <p>予約商品を含むご注文は、予約出荷日に合わせて全商品をまとめて発送いたします。通常商品を早急にお受け取り希望の場合は、お手数ですが別途ご購入ください。</p>
+          </div>
+        )}
 
         {/* Shipping Form - wrapped in <form> for browser autofill */}
         <form autoComplete="on" onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="bg-card rounded-xl border border-border p-4">
