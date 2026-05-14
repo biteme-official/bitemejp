@@ -33,7 +33,7 @@ test.describe('Purchase Flow E2E', () => {
       await page.waitForTimeout(2000);
 
       // 6. Open cart drawer via header cart icon
-      const cartButton = page.locator('header button').last();
+      const cartButton = page.locator('[data-testid="cart-trigger"]');
       await cartButton.click();
 
       // 7. Cart drawer opens - verify item exists
