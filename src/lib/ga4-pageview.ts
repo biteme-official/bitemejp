@@ -36,9 +36,15 @@ export function trackPageView(path: string, title?: string) {
   // URL에 UTM이 없고 저장된 UTM이 있으면 복원 (인앱 브라우저 등 쿠키 제한 환경 대응)
   const storedUtm = !hasLiveUtm ? getStoredUtmParams() : {};
 
+  // UTM이 URL에 있을 때는 쿼리스트링을 포함한 전체 URL을 page_location으로 전달
+  // — Shopify 결제 복귀 시 return_to에 붙인 utm_source 등이 GA4 귀속에 반영되도록
+  const pageLocation = hasLiveUtm
+    ? window.location.href
+    : window.location.origin + path;
+
   window.gtag('event', 'page_view', {
     page_path: path,
-    page_location: window.location.origin + path,
+    page_location: pageLocation,
     page_title: title || document.title,
     page_referrer: document.referrer || undefined,
     ...storedUtm,

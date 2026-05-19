@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { ShopifyProduct, fetchBestSellingProducts, formatPrice, getPreorderDate, fetchCartPreview } from "@/lib/shopify";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useDiscountStore } from "@/stores/discountStore";
 
 const BADGES = ["BEST", "人気", "おすすめ", "TOP", "新着", "注目"];
 
@@ -10,29 +11,22 @@ export function PopularProducts() {
   const navigate = useNavigate();
   const [products, setProducts] = useState<ShopifyProduct[]>([]);
   const [loading, setLoading] = useState(true);
-  const [discountMap, setDiscountMap] = useState<Record<string, number>>({});
+  const [localDiscountMap, setLocalDiscountMap] = useState<Record<string, number>>({});
+  const { productDiscounts: globalDiscountMap } = useDiscountStore();
+  const discountMap = { ...globalDiscountMap, ...localDiscountMap };
 
   useEffect(() => {
     fetchBestSellingProducts(8)
       .then((result) => {
         setProducts(result);
-        const variantMeta: Record<string, { productId: string; price: number }> = {};
         const variants: { variantId: string; quantity: number }[] = [];
         result.forEach(p => {
           const v = (p.node.variants.edges.find(e => e.node.availableForSale) ?? p.node.variants.edges[0])?.node;
-          if (v) {
-            variantMeta[v.id] = { productId: p.node.id, price: parseFloat(v.price.amount) };
-            variants.push({ variantId: v.id, quantity: 1 });
-          }
+          if (v) variants.push({ variantId: v.id, quantity: 1 });
         });
         fetchCartPreview(variants).then(info => {
-          if (!info) return;
-          const pctMap: Record<string, number> = {};
-          for (const [variantId, { productId, price }] of Object.entries(variantMeta)) {
-            const discountAmt = info.lineDiscounts[variantId];
-            if (discountAmt && price > 0) pctMap[productId] = Math.round((discountAmt / price) * 100);
-          }
-          if (Object.keys(pctMap).length > 0) setDiscountMap(pctMap);
+          if (!info || Object.keys(info.productDiscounts).length === 0) return;
+          setLocalDiscountMap(info.productDiscounts);
         });
       })
       .catch(console.error)

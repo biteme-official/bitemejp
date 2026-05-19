@@ -87,6 +87,42 @@
           var saved = {};
           utmKeys.forEach(function(k){ var v = params.get(k); if (v) saved[k] = v; });
           try { sessionStorage.setItem('_bm_utm', JSON.stringify(saved)); } catch(e){}
+        } else {
+          // UTM 없는 방문: Shopify 복귀 세션이 아닌 경우에만 소스를 추론해 저장
+          // LINE 인앱 브라우저 UA 또는 referrer로 감지, 기존 저장값이 없을 때만 기록
+          try {
+            var isShopifyReturn = document.referrer && (
+              document.referrer.indexOf('myshopify.com') !== -1 ||
+              document.referrer.indexOf('shopify.com') !== -1
+            );
+            if (!isShopifyReturn) {
+              var existing = JSON.parse(sessionStorage.getItem('_bm_utm') || '{}');
+              if (!existing.utm_source) {
+                var ua = navigator.userAgent;
+                var ref = document.referrer;
+                var src = null, med = null;
+                if (ua.indexOf('Line/') !== -1 || ua.indexOf('LIFF') !== -1) {
+                  src = 'line'; med = 'social';
+                } else if (ref && ref.indexOf('line.me') !== -1) {
+                  src = 'line'; med = 'social';
+                } else if (ref && ref.indexOf('instagram.com') !== -1) {
+                  src = 'instagram'; med = 'social';
+                } else if (ref && (ref.indexOf('twitter.com') !== -1 || ref.indexOf('t.co') !== -1 || ref.indexOf('x.com') !== -1)) {
+                  src = 'twitter'; med = 'social';
+                } else if (ref) {
+                  try {
+                    var refHost = new URL(ref).hostname.replace(/^www\./, '');
+                    if (refHost && refHost !== location.hostname) {
+                      src = refHost; med = 'referral';
+                    }
+                  } catch(e){}
+                }
+                if (src) {
+                  sessionStorage.setItem('_bm_utm', JSON.stringify({utm_source: src, utm_medium: med}));
+                }
+              }
+            }
+          } catch(e){}
         }
       })();
 
