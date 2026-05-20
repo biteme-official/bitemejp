@@ -16,9 +16,12 @@ export function PopularProducts() {
   const discountMap = { ...globalDiscountMap, ...localDiscountMap };
 
   useEffect(() => {
-    fetchBestSellingProducts(8)
+    fetchBestSellingProducts(12)
       .then((result) => {
-        setProducts(result);
+        const available = result.filter(p =>
+          p.node.variants.edges.some(e => e.node.availableForSale)
+        );
+        setProducts(available);
         const variants: { variantId: string; quantity: number }[] = [];
         result.forEach(p => {
           const v = (p.node.variants.edges.find(e => e.node.availableForSale) ?? p.node.variants.edges[0])?.node;
