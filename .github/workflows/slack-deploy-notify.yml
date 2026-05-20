@@ -1,0 +1,102 @@
+name: Slack Deploy Notify
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get merged PR info
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const commits = ${{ toJSON(github.event.commits) }};
+            const prNumbers = new Set();
+
+            for (const commit of commits) {
+              const match = commit.message.match(/\(#(\d+)\)/);
+              if (match) prNumbers.add(match[1]);
+            }
+
+            const changes = [];
+            for (const num of prNumbers) {
+              try {
+                const { data: pr } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: parseInt(num),
+                });
+                changes.push({
+                  number: num,
+                  title: pr.title,
+                  author: pr.user.login,
+                });
+              } catch (e) {
+                changes.push({
+                  number: num,
+                  title: commits.find(c => c.message.includes(`#${num}`))?.message.split('\n')[0] || 'Unknown',
+                  author: 'unknown',
+                });
+              }
+            }
+
+            if (changes.length === 0) {
+              const msg = commits[0]?.message.split('\n')[0] || 'Direct push';
+              changes.push({
+                number: null,
+                title: msg,
+                author: context.actor,
+              });
+            }
+
+            core.setOutput('changes', JSON.stringify(changes));
+            core.setOutput('deployer', context.actor);
+            core.setOutput('repo', context.repo.repo);
+
+      - name: Send Slack notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          CHANGES: ${{ steps.pr.outputs.changes }}
+          DEPLOYER: ${{ steps.pr.outputs.deployer }}
+          REPO: ${{ steps.pr.outputs.repo }}
+        run: |
+          CHANGE_LINES=""
+          for row in $(echo "$CHANGES" | jq -r '.[] | @base64'); do
+            _jq() { echo "$row" | base64 --decode | jq -r "$1"; }
+            NUM=$(_jq '.number')
+            TITLE=$(_jq '.title')
+            AUTHOR=$(_jq '.author')
+            if [ "$NUM" != "null" ]; then
+              CHANGE_LINES="${CHANGE_LINES}• #${NUM} ${TITLE} (@${AUTHOR})\n"
+            else
+              CHANGE_LINES="${CHANGE_LINES}• ${TITLE} (@${AUTHOR})\n"
+            fi
+          done
+
+          PAYLOAD=$(cat <<EOF
+          {
+            "blocks": [
+              {
+                "type": "header",
+                "text": { "type": "plain_text", "text": "🚀 Production 배포 — ${REPO}" }
+              },
+              { "type": "divider" },
+              {
+                "type": "section",
+                "text": { "type": "mrkdwn", "text": "*변경 내역:*\n$(echo -e "$CHANGE_LINES")" }
+              },
+              {
+                "type": "context",
+                "elements": [
+                  { "type": "mrkdwn", "text": "배포자: *@${DEPLOYER}*  |  <https://github.com/${GITHUB_REPOSITORY}|GitHub>" }
+                ]
+              }
+            ]
+          }
+          EOF
+          )
+
+          curl -s -X POST -H 'Content-Type: application/json' -d "$PAYLOAD" "$SLACK_WEBHOOK_URL"
