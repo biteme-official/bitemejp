@@ -19,6 +19,8 @@ import Checkout from "./pages/Checkout";
 import AdminDashboard from "./pages/AdminDashboard";
 import TokushoHo from "./pages/TokushoHo";
 import DiscountRedirect from "./pages/DiscountRedirect";
+import BlogList from "./pages/BlogList";
+import BlogPost from "./pages/BlogPost";
 import { LineFloatingButton } from "./components/layout/LineFloatingButton";
 import { useCartStore } from "@/stores/cartStore";
 
@@ -66,6 +68,8 @@ const App = () => (
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/tokusho" element={<TokushoHo />} />
           <Route path="/discount/:code" element={<DiscountRedirect />} />
+          <Route path="/blog" element={<BlogList />} />
+          <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
         <LineFloatingButton />

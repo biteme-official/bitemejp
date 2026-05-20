@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Menu, Phone, ChevronRight, ChevronDown, Package, User, LogOut } from "lucide-react";
+import { Menu, Phone, ChevronRight, ChevronDown, Package, User, LogOut, BookOpen } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { LineLoginButton } from "@/components/auth/LineLoginButton";
 import { Button } from "@/components/ui/button";
@@ -263,6 +263,17 @@ export function Header({ onSearch, onCollectionSelect }: HeaderProps) {
                   ))}
                 </div>
               )}
+
+              {/* Blog */}
+              <div className="border-b border-border/50">
+                <button
+                  onClick={() => { navigate("/blog"); setIsMenuOpen(false); }}
+                  className="w-full flex items-center gap-3 px-4 py-3 hover:bg-secondary/50 transition-colors"
+                >
+                  <BookOpen className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-medium text-sm">ブログ</span>
+                </button>
+              </div>
 
               {/* Contact Us */}
               <div className="border-b border-border/50">
