@@ -41,6 +41,21 @@ function setOrCreateLink(rel: string, href: string) {
   el.href = href;
 }
 
+function setJsonLd(id: string, data: object) {
+  let el = document.querySelector(`script[data-ld="${id}"]`) as HTMLScriptElement | null;
+  if (!el) {
+    el = document.createElement('script');
+    el.type = 'application/ld+json';
+    el.setAttribute('data-ld', id);
+    document.head.appendChild(el);
+  }
+  el.textContent = JSON.stringify(data);
+}
+
+function removeJsonLd(id: string) {
+  document.querySelector(`script[data-ld="${id}"]`)?.remove();
+}
+
 // Product detail skeleton component
 function ProductDetailSkeleton() {
   return (
@@ -176,6 +191,10 @@ export default function ProductDetail() {
     window.scrollTo({ top: 0, behavior: 'instant' });
     setActiveTab('detail');
     setReviewCount(null);
+    return () => {
+      removeJsonLd('product');
+      removeJsonLd('breadcrumb');
+    };
   }, [id]);
 
   useEffect(() => {
@@ -209,6 +228,39 @@ export default function ProductDetail() {
           setOrCreateMeta('property', 'og:type', 'product');
           setOrCreateMeta('name', 'description', description);
           setOrCreateLink('canonical', canonical);
+
+          // Product JSON-LD
+          const firstVariant = data.variants.edges[0]?.node;
+          const isAvailable = data.variants.edges.some(e => isVariantAvailable(e.node));
+          const allImages = data.images.edges.map(e => e.node.url);
+          setJsonLd('product', {
+            '@context': 'https://schema.org',
+            '@type': 'Product',
+            name: data.title,
+            image: allImages,
+            description: data.description?.slice(0, 5000) || '',
+            brand: { '@type': 'Brand', name: data.vendor || 'BITEME' },
+            offers: {
+              '@type': 'Offer',
+              url: canonical,
+              priceCurrency: firstVariant?.price.currencyCode || 'JPY',
+              price: firstVariant?.price.amount || data.priceRange.minVariantPrice.amount,
+              availability: isAvailable
+                ? 'https://schema.org/InStock'
+                : 'https://schema.org/OutOfStock',
+              seller: { '@type': 'Organization', name: 'バイトミー JAPAN' },
+            },
+          });
+
+          // BreadcrumbList JSON-LD
+          setJsonLd('breadcrumb', {
+            '@context': 'https://schema.org',
+            '@type': 'BreadcrumbList',
+            itemListElement: [
+              { '@type': 'ListItem', position: 1, name: 'ホーム', item: 'https://biteme.co.jp/' },
+              { '@type': 'ListItem', position: 2, name: data.title, item: canonical },
+            ],
+          });
 
           // GA4: view_item event
           const variant = data.variants.edges[0]?.node;
