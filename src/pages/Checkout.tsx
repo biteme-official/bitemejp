@@ -140,58 +140,58 @@ export default function Checkout() {
         quantity: item.quantity,
       }));
       const checkoutUrl = await createCheckout(lineItems, form.email);
-      if (checkoutUrl) {
-        // Append shipping info as URL params for Shopify pre-fill
-        const url = new URL(checkoutUrl);
-        url.searchParams.set('checkout[email]', form.email);
-        url.searchParams.set('checkout[shipping_address][last_name]', form.lastName);
-        url.searchParams.set('checkout[shipping_address][first_name]', form.firstName);
-        url.searchParams.set('checkout[shipping_address][zip]', form.zip);
-        url.searchParams.set('checkout[shipping_address][province]', form.prefecture);
-        url.searchParams.set('checkout[shipping_address][city]', form.city);
-        url.searchParams.set('checkout[shipping_address][address1]', form.address1);
-        url.searchParams.set('checkout[shipping_address][address2]', form.address2);
-        url.searchParams.set('checkout[shipping_address][phone]', form.phone);
-        url.searchParams.set('checkout[shipping_address][country]', 'JP');
+      if (!checkoutUrl) throw new Error('checkout URL not returned');
 
-        // Shopify 결제 후 복귀 URL에 원본 UTM 파라미터를 그대로 전달
-        // GA4 _gl linker는 Shopify에 GA4 태그가 없어 작동하지 않으므로,
-        // 방문 시 저장해둔 UTM을 return_to에 붙여 소스 귀속을 복원한다.
-        const returnUrl = new URL(`${window.location.origin}/checkout-return`);
-        try {
-          const savedUtm = sessionStorage.getItem('_bm_utm');
-          if (savedUtm) {
-            const utmData = JSON.parse(savedUtm) as Record<string, string>;
-            Object.entries(utmData).forEach(([k, v]) => { if (v) returnUrl.searchParams.set(k, v); });
-          }
-        } catch { /* ignore */ }
-        const glParam = await getGA4LinkerParam();
-        if (glParam) returnUrl.searchParams.set('_gl', glParam);
-        url.searchParams.set('return_to', returnUrl.toString());
+      // Append shipping info as URL params for Shopify pre-fill
+      const url = new URL(checkoutUrl);
+      url.searchParams.set('checkout[email]', form.email);
+      url.searchParams.set('checkout[shipping_address][last_name]', form.lastName);
+      url.searchParams.set('checkout[shipping_address][first_name]', form.firstName);
+      url.searchParams.set('checkout[shipping_address][zip]', form.zip);
+      url.searchParams.set('checkout[shipping_address][province]', form.prefecture);
+      url.searchParams.set('checkout[shipping_address][city]', form.city);
+      url.searchParams.set('checkout[shipping_address][address1]', form.address1);
+      url.searchParams.set('checkout[shipping_address][address2]', form.address2);
+      url.searchParams.set('checkout[shipping_address][phone]', form.phone);
+      url.searchParams.set('checkout[shipping_address][country]', 'JP');
 
-        // Shopify checkout URL에서 token 추출 (transaction_id로 사용)
-        // 형식: /checkouts/cn/<TOKEN>/...
-        const tokenMatch = checkoutUrl.match(/\/checkouts\/(?:cn\/)?([A-Za-z0-9]+)/);
-        const checkoutToken = tokenMatch?.[1] ?? `co_${Date.now()}`;
+      // Shopify 결제 후 복귀 URL에 원본 UTM 파라미터를 그대로 전달
+      // GA4 _gl linker는 Shopify에 GA4 태그가 없어 작동하지 않으므로,
+      // 방문 시 저장해둔 UTM을 return_to에 붙여 소스 귀속을 복원한다.
+      const returnUrl = new URL(`${window.location.origin}/checkout-return`);
+      try {
+        const savedUtm = sessionStorage.getItem('_bm_utm');
+        if (savedUtm) {
+          const utmData = JSON.parse(savedUtm) as Record<string, string>;
+          Object.entries(utmData).forEach(([k, v]) => { if (v) returnUrl.searchParams.set(k, v); });
+        }
+      } catch { /* ignore */ }
+      const glParam = await getGA4LinkerParam();
+      if (glParam) returnUrl.searchParams.set('_gl', glParam);
+      url.searchParams.set('return_to', returnUrl.toString());
 
-        // CheckoutReturn에서 purchase 이벤트 발생을 위해 장바구니 정보 저장
-        sessionStorage.setItem('checkout_pending', '1');
-        sessionStorage.setItem('checkout_ga4', JSON.stringify({
-          transactionId: checkoutToken,
-          items: items.map(item => ({
-            item_id: item.variantId,
-            item_name: item.product.node.title,
-            price: parseFloat(item.price.amount),
-            currency: item.price.currencyCode,
-            quantity: item.quantity,
-          })),
-          currency: items[0]?.price.currencyCode ?? 'JPY',
-          value: subtotal + shipping,
-          shipping,
-        }));
+      // Shopify checkout URL에서 token 추출 (transaction_id로 사용)
+      // 형식: /checkouts/cn/<TOKEN>/...
+      const tokenMatch = checkoutUrl.match(/\/checkouts\/(?:cn\/)?([A-Za-z0-9]+)/);
+      const checkoutToken = tokenMatch?.[1] ?? `co_${Date.now()}`;
 
-        window.location.href = url.toString();
-      }
+      // CheckoutReturn에서 purchase 이벤트 발생을 위해 장바구니 정보 저장
+      sessionStorage.setItem('checkout_pending', '1');
+      sessionStorage.setItem('checkout_ga4', JSON.stringify({
+        transactionId: checkoutToken,
+        items: items.map(item => ({
+          item_id: item.variantId,
+          item_name: item.product.node.title,
+          price: parseFloat(item.price.amount),
+          currency: item.price.currencyCode,
+          quantity: item.quantity,
+        })),
+        currency: items[0]?.price.currencyCode ?? 'JPY',
+        value: subtotal + shipping,
+        shipping,
+      }));
+
+      window.location.href = url.toString();
     } catch (err) {
       console.error('Checkout error:', err);
       toast.error('決済ページへの移動に失敗しました。', { position: 'top-center' });
