@@ -23,10 +23,10 @@ export default function BlogList() {
       <main className="max-w-4xl mx-auto px-4 pt-6 pb-24">
         <div className="mb-8">
           <h1 className="text-2xl sm:text-3xl font-bold text-foreground tracking-tight">
-            Blog
+            ブログ
           </h1>
           <p className="text-muted-foreground mt-2 text-sm sm:text-base">
-            Guides, tips, and stories for life with your dog.
+            愛犬との毎日に役立つガイド、ヒント、ストーリー。
           </p>
         </div>
 
@@ -40,7 +40,7 @@ export default function BlogList() {
                 : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
             )}
           >
-            All
+            すべて
           </button>
           {categories.map((cat) => (
             <button
@@ -80,7 +80,7 @@ export default function BlogList() {
                   </Badge>
                   <span className="text-xs text-muted-foreground flex items-center gap-1">
                     <Clock className="h-3 w-3" />
-                    {filtered[0].readingTime} min read
+                    {filtered[0].readingTime} 分で読める
                   </span>
                 </div>
                 <h2 className="text-lg sm:text-xl font-semibold text-foreground group-hover:text-primary transition-colors leading-snug">
@@ -90,7 +90,7 @@ export default function BlogList() {
                   {filtered[0].description}
                 </p>
                 <span className="inline-flex items-center gap-1 text-primary text-sm font-medium mt-4">
-                  Read more <ArrowRight className="h-4 w-4" />
+                  続きを読む <ArrowRight className="h-4 w-4" />
                 </span>
               </div>
             </article>
@@ -122,7 +122,7 @@ export default function BlogList() {
                       </Badge>
                       <span className="text-xs text-muted-foreground flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        {post.readingTime} min
+                        {post.readingTime} 分
                       </span>
                     </div>
                     <h2 className="text-base font-semibold text-foreground group-hover:text-primary transition-colors leading-snug">
@@ -132,7 +132,7 @@ export default function BlogList() {
                       {post.description}
                     </p>
                     <span className="inline-flex items-center gap-1 text-primary text-sm font-medium mt-3">
-                      Read more <ArrowRight className="h-4 w-4" />
+                      続きを読む <ArrowRight className="h-4 w-4" />
                     </span>
                   </div>
                 </article>
@@ -143,7 +143,7 @@ export default function BlogList() {
 
         {filtered.length === 0 && (
           <div className="text-center py-16 text-muted-foreground">
-            No posts in this category yet.
+            このカテゴリの記事はまだありません。
           </div>
         )}
       </main>

@@ -115,7 +115,7 @@ function SectionRenderer({ section }: { section: BlogSection }) {
                 {section.content}
               </p>
               <span className="inline-flex items-center gap-1 text-primary text-sm font-medium mt-2">
-                View product <ExternalLink className="h-3.5 w-3.5" />
+                商品を見る <ExternalLink className="h-3.5 w-3.5" />
               </span>
             </div>
           </div>
@@ -169,9 +169,9 @@ export default function BlogPost() {
       <div className="bg-background min-h-screen">
         <Header />
         <div className="max-w-4xl mx-auto px-4 py-20 text-center">
-          <h1 className="text-2xl font-bold mb-4">Post not found</h1>
+          <h1 className="text-2xl font-bold mb-4">記事が見つかりません</h1>
           <Link to="/blog" className="text-primary font-medium">
-            Back to Blog
+            ブログに戻る
           </Link>
         </div>
         <Footer />
@@ -181,7 +181,7 @@ export default function BlogPost() {
 
   const currentIndex = blogPosts.findIndex((p) => p.slug === post.slug);
   const nextPost = blogPosts[currentIndex + 1] || blogPosts[0];
-  const publishDate = new Date(post.publishedAt).toLocaleDateString("en-US", {
+  const publishDate = new Date(post.publishedAt).toLocaleDateString("ja-JP", {
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -217,7 +217,7 @@ export default function BlogPost() {
           <span className="text-sm text-muted-foreground">{publishDate}</span>
           <span className="text-sm text-muted-foreground flex items-center gap-1">
             <Clock className="h-3.5 w-3.5" />
-            {post.readingTime} min read
+            {post.readingTime} 分で読める
           </span>
         </div>
 
@@ -247,7 +247,7 @@ export default function BlogPost() {
         {post.relatedProducts.length > 0 && (
           <div className="mt-10 pt-6 border-t border-border">
             <h2 className="text-lg font-semibold text-foreground mb-4">
-              Products Mentioned
+              紹介した商品
             </h2>
             <div className="grid gap-3 sm:grid-cols-2">
               {post.relatedProducts.map((product) => (
@@ -280,7 +280,7 @@ export default function BlogPost() {
             className="block mt-10 p-5 rounded-xl bg-secondary/50 border border-border hover:border-primary/30 transition-all group"
           >
             <span className="text-xs text-muted-foreground uppercase tracking-wide">
-              Next article
+              次の記事
             </span>
             <p className="text-base font-semibold text-foreground mt-1 group-hover:text-primary transition-colors">
               {nextPost.title}
