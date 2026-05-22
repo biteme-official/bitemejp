@@ -202,32 +202,36 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
       setTotalProductCount(null);
 
       try {
-        let response;
-        if (collectionHandle) {
-          console.log('[ProductGrid] Fetching collection:', collectionHandle);
-          const collectionResponse = await fetchCollectionProducts(collectionHandle, PRODUCTS_PER_PAGE);
-          console.log('[ProductGrid] Collection response:', collectionResponse.collectionTitle, collectionResponse.products.length, 'products');
-          response = collectionResponse;
-          setCollectionTitle(collectionResponse.collectionTitle);
-        } else if (initialSort === 'best_selling') {
-          const products = await fetchBestSellingProducts(50);
+        if (initialSort === 'best_selling') {
+          const products = await fetchBestSellingProducts(250);
           setAllProducts(products);
-          setHasNextPage(false);
-          setEndCursor(null);
           return;
-        } else if (initialSort === 'created_at_desc') {
-          const products = await fetchNewProducts(50);
-          setAllProducts(products);
-          setHasNextPage(false);
-          setEndCursor(null);
-          return;
-        } else {
-          const query = getQuery();
-          response = await fetchProducts(PRODUCTS_PER_PAGE, query, undefined);
         }
-        setAllProducts(response.products);
-        setHasNextPage(response.pageInfo.hasNextPage);
-        setEndCursor(response.pageInfo.endCursor);
+        if (initialSort === 'created_at_desc') {
+          const products = await fetchNewProducts(250);
+          setAllProducts(products);
+          return;
+        }
+
+        const allFetched: ShopifyProduct[] = [];
+        let cursor: string | undefined = undefined;
+
+        while (true) {
+          let response;
+          if (collectionHandle) {
+            response = await fetchCollectionProducts(collectionHandle, 250, cursor);
+            setCollectionTitle(response.collectionTitle);
+          } else {
+            response = await fetchProducts(250, getQuery(), cursor);
+          }
+          allFetched.push(...response.products);
+          if (!response.pageInfo.hasNextPage || !response.pageInfo.endCursor) break;
+          cursor = response.pageInfo.endCursor;
+        }
+
+        setAllProducts(allFetched);
+        setHasNextPage(false);
+        setEndCursor(null);
       } catch (error) {
         console.error('Failed to fetch products:', error);
       } finally {
