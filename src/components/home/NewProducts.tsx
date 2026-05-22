@@ -17,7 +17,10 @@ export function NewProducts() {
     fetchNewProducts(12)
       .then((result) => {
         const available = result.filter(p =>
-          p.node.variants.edges.some(e => e.node.availableForSale)
+          p.node.variants.edges.some(e =>
+            e.node.availableForSale &&
+            (e.node.quantityAvailable === null || e.node.quantityAvailable > 0)
+          )
         );
         setProducts(available);
         const variants: { variantId: string; quantity: number }[] = [];

@@ -62,7 +62,14 @@ export function CategorySections() {
           })
         );
 
-        const validSections = results.filter((r) => r.products.length >= 4);
+        const validSections = results
+          .map(({ collection, products }) => ({
+            collection,
+            products: products.filter(p =>
+              p.node.variants.edges.some(e => e.node.availableForSale)
+            ),
+          }))
+          .filter((r) => r.products.length >= 4);
         setSections(validSections);
         const variantMeta: Record<string, { productId: string; price: number }> = {};
         const allVariants: { variantId: string; quantity: number }[] = [];
