@@ -71,7 +71,7 @@ export function NewProducts() {
         </button>
       </div>
 
-      <div className="flex gap-3 px-4 overflow-x-auto scrollbar-hide snap-x snap-mandatory">
+      <div className="flex gap-3 md:gap-4 px-4 overflow-x-auto pb-2 scrollbar-hide">
         {products.slice(0, 6).map((product) => {
           const image = product.node.images.edges[0]?.node;
           const price = product.node.priceRange.minVariantPrice;
@@ -80,7 +80,7 @@ export function NewProducts() {
             <div
               key={product.node.id}
               onClick={() => navigate(`/product/${product.node.id.split('/').pop()}`)}
-              className="flex-none w-36 snap-start bg-card rounded-xl border border-border overflow-hidden shadow-sm hover:shadow-card transition-all hover:-translate-y-0.5 cursor-pointer"
+              className="flex-shrink-0 w-36 md:w-56 bg-card rounded-xl border border-border overflow-hidden shadow-sm hover:shadow-card transition-all cursor-pointer"
             >
               <div className="aspect-square bg-secondary relative overflow-hidden">
                 {image ? (
