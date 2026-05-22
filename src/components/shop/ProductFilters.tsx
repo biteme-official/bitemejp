@@ -67,7 +67,6 @@ export function ProductFilters({
   const availabilityOptions = [
     { value: "all", labelKey: "filters.all" },
     { value: "available", labelKey: "filters.available" },
-    { value: "sold-out", labelKey: "product.soldOut" },
   ];
 
   const handleApplyFilters = () => {

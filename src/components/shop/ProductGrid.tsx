@@ -89,19 +89,16 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
   const filteredAndSortedProducts = useMemo(() => {
     let result = [...allProducts];
 
+    // 품절 상품 제거
+    result = result.filter(product =>
+      product.node.variants.edges.some(v => v.node.availableForSale)
+    );
+
     // Apply price filter
     result = result.filter(product => {
       const price = parseFloat(product.node.priceRange.minVariantPrice.amount);
       return price >= filters.priceRange[0] && price <= filters.priceRange[1];
     });
-
-    // Apply availability filter
-    if (filters.availability !== "all") {
-      result = result.filter(product => {
-        const isAvailable = product.node.variants.edges.some(v => v.node.availableForSale);
-        return filters.availability === "available" ? isAvailable : !isAvailable;
-      });
-    }
 
     // Apply sorting
     switch (sortOption) {
@@ -126,13 +123,6 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
       default:
         break;
     }
-
-    // Always push completely sold-out products to the bottom
-    result.sort((a, b) => {
-      const aOutOfStock = !a.node.variants.edges.some(v => v.node.availableForSale);
-      const bOutOfStock = !b.node.variants.edges.some(v => v.node.availableForSale);
-      return Number(aOutOfStock) - Number(bOutOfStock);
-    });
 
     return result;
   }, [allProducts, sortOption, filters]);
