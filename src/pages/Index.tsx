@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
@@ -10,9 +11,24 @@ import { CategoryNav } from "@/components/shop/CategoryNav";
 import { SortOption } from "@/components/shop/ProductFilters";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 
+// 구 핸들(일본어 포함) → 신 핸들(ASCII) 매핑
+const HANDLE_ALIASES: Record<string, string> = {
+  "bite-me-チェゴシム": "bite-me-chegosim",
+};
+
 const Index = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const selectedCollection = searchParams.get("collection");
+  const rawCollection = searchParams.get("collection");
+  const selectedCollection = rawCollection ? (HANDLE_ALIASES[rawCollection] ?? rawCollection) : null;
+
+  useEffect(() => {
+    if (rawCollection && HANDLE_ALIASES[rawCollection]) {
+      setSearchParams(
+        { collection: HANDLE_ALIASES[rawCollection] },
+        { replace: true }
+      );
+    }
+  }, [rawCollection]); // eslint-disable-line react-hooks/exhaustive-deps
   const searchQuery = searchParams.get("q") || "";
   const sortParam = searchParams.get("sort") as SortOption | null;
   useScrollRestoration();
