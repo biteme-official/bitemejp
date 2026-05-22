@@ -28,7 +28,7 @@ export function NewProducts() {
         fetchCartPreview(variants).then(info => {
           if (!info || Object.keys(info.productDiscounts).length === 0) return;
           setLocalDiscountMap(info.productDiscounts);
-        });
+        }).catch(console.error);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -40,9 +40,9 @@ export function NewProducts() {
         <div className="flex items-center justify-between px-4 mb-3">
           <Skeleton className="h-5 w-24" />
         </div>
-        <div className="grid grid-cols-3 gap-3 px-4">
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="bg-card rounded-xl border border-border overflow-hidden">
+        <div className="flex gap-3 md:gap-4 px-4 overflow-x-auto pb-2 scrollbar-hide">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="flex-shrink-0 w-36 md:w-56 bg-card rounded-xl border border-border overflow-hidden">
               <Skeleton className="aspect-square w-full" />
               <div className="p-3 space-y-2">
                 <Skeleton className="h-3 w-full" />
@@ -101,7 +101,7 @@ export function NewProducts() {
                 {(() => {
                   const pct = discountMap[product.node.id] ?? 0;
                   const originalAmt = parseFloat(price.amount);
-                  const compareAt = product.node.variants.edges[0]?.node.compareAtPrice;
+                  const compareAt = (product.node.variants.edges.find(e => e.node.availableForSale) ?? product.node.variants.edges[0])?.node.compareAtPrice;
                   const finalPct = pct || (compareAt && parseFloat(compareAt.amount) > originalAmt
                     ? Math.round((1 - originalAmt / parseFloat(compareAt.amount)) * 100) : 0);
                   if (!finalPct) return null;
@@ -129,7 +129,7 @@ export function NewProducts() {
                 {(() => {
                   const pct = discountMap[product.node.id] ?? 0;
                   const originalAmt = parseFloat(price.amount);
-                  const compareAt = product.node.variants.edges[0]?.node.compareAtPrice;
+                  const compareAt = (product.node.variants.edges.find(e => e.node.availableForSale) ?? product.node.variants.edges[0])?.node.compareAtPrice;
                   if (pct) {
                     return (
                       <div>

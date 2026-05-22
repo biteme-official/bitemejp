@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ShopifyProduct, fetchProducts, fetchCollectionProducts, fetchBestSellingProducts, formatPrice, getPreorderDate, fetchCartPreview } from '@/lib/shopify';
+import { ShopifyProduct, fetchProducts, fetchCollectionProducts, fetchBestSellingProducts, fetchNewProducts, formatPrice, getPreorderDate, fetchCartPreview } from '@/lib/shopify';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ShoppingCart, Loader2, Heart } from 'lucide-react';
@@ -215,6 +215,12 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
           setHasNextPage(false);
           setEndCursor(null);
           return;
+        } else if (initialSort === 'created_at_desc') {
+          const products = await fetchNewProducts(50);
+          setAllProducts(products);
+          setHasNextPage(false);
+          setEndCursor(null);
+          return;
         } else {
           const query = getQuery();
           response = await fetchProducts(PRODUCTS_PER_PAGE, query, undefined);
@@ -229,7 +235,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
       }
     };
     loadProducts();
-  }, [searchQuery, collectionHandle, getQuery]);
+  }, [searchQuery, collectionHandle, initialSort, getQuery]);
 
   // Load more products
   const loadMore = useCallback(async () => {
