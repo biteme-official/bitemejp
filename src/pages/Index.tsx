@@ -3,6 +3,7 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { HeroBanner } from "@/components/home/HeroBanner";
 import { PopularProducts } from "@/components/home/PopularProducts";
+import { NewProducts } from "@/components/home/NewProducts";
 import { CategorySections } from "@/components/home/CategorySections";
 import { InstagramReels } from "@/components/home/InstagramReels";
 import { ProductGrid } from "@/components/shop/ProductGrid";
@@ -42,6 +43,7 @@ const Index = () => {
       {!isFiltered && (
         <div className="max-w-7xl mx-auto">
           <HeroBanner />
+          <NewProducts />
           <PopularProducts />
           <CategorySections />
           <InstagramReels />

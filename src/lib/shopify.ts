@@ -626,6 +626,66 @@ export async function fetchBestSellingProducts(first: number = 8): Promise<Shopi
   return data.data?.products?.edges || [];
 }
 
+const GET_NEW_PRODUCTS_QUERY = `
+  query GetNewProducts($first: Int!) {
+    products(first: $first, sortKey: CREATED_AT, reverse: true) {
+      edges {
+        node {
+          id
+          title
+          handle
+          priceRange {
+            minVariantPrice {
+              amount
+              currencyCode
+            }
+          }
+          images(first: 1) {
+            edges {
+              node {
+                url
+                altText
+              }
+            }
+          }
+          variants(first: 10) {
+            edges {
+              node {
+                id
+                title
+                price {
+                  amount
+                  currencyCode
+                }
+                compareAtPrice {
+                  amount
+                  currencyCode
+                }
+                availableForSale
+                selectedOptions {
+                  name
+                  value
+                }
+              }
+            }
+          }
+          tags
+          options {
+            name
+            values
+          }
+        }
+      }
+    }
+  }
+`;
+
+export async function fetchNewProducts(first: number = 8): Promise<ShopifyProduct[]> {
+  const data = await storefrontApiRequest(GET_NEW_PRODUCTS_QUERY, { first });
+  if (!data) return [];
+  return data.data?.products?.edges || [];
+}
+
 // Banners (Metaobjects)
 export interface ShopifyBanner {
   id: string;
