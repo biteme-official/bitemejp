@@ -192,36 +192,28 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
       setTotalProductCount(null);
 
       try {
-        if (initialSort === 'best_selling') {
-          const products = await fetchBestSellingProducts(250);
+        let response;
+        if (collectionHandle) {
+          response = await fetchCollectionProducts(collectionHandle, PRODUCTS_PER_PAGE);
+          setCollectionTitle(response.collectionTitle);
+        } else if (initialSort === 'best_selling') {
+          const products = await fetchBestSellingProducts(50);
           setAllProducts(products);
+          setHasNextPage(false);
+          setEndCursor(null);
           return;
-        }
-        if (initialSort === 'created_at_desc') {
-          const products = await fetchNewProducts(250);
+        } else if (initialSort === 'created_at_desc') {
+          const products = await fetchNewProducts(50);
           setAllProducts(products);
+          setHasNextPage(false);
+          setEndCursor(null);
           return;
+        } else {
+          response = await fetchProducts(PRODUCTS_PER_PAGE, getQuery(), undefined);
         }
-
-        const allFetched: ShopifyProduct[] = [];
-        let cursor: string | undefined = undefined;
-
-        while (true) {
-          let response;
-          if (collectionHandle) {
-            response = await fetchCollectionProducts(collectionHandle, 250, cursor);
-            setCollectionTitle(response.collectionTitle);
-          } else {
-            response = await fetchProducts(250, getQuery(), cursor);
-          }
-          allFetched.push(...response.products);
-          if (!response.pageInfo.hasNextPage || !response.pageInfo.endCursor) break;
-          cursor = response.pageInfo.endCursor;
-        }
-
-        setAllProducts(allFetched);
-        setHasNextPage(false);
-        setEndCursor(null);
+        setAllProducts(response.products);
+        setHasNextPage(response.pageInfo.hasNextPage);
+        setEndCursor(response.pageInfo.endCursor);
       } catch (error) {
         console.error('Failed to fetch products:', error);
       } finally {
