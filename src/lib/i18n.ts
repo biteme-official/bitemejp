@@ -84,6 +84,7 @@ export const translations: Record<string, Record<string, string | Record<string,
     sortOptions: {
       bestSelling: '人気順',
       default: 'デフォルト',
+      newestFirst: '新着順',
       priceAsc: '価格: 安い順',
       priceDesc: '価格: 高い順',
       titleAsc: '名前: あ-ん',
