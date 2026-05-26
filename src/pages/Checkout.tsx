@@ -155,9 +155,12 @@ export default function Checkout() {
       url.searchParams.set('checkout[shipping_address][phone]', form.phone);
       url.searchParams.set('checkout[shipping_address][country]', 'JP');
 
-      // Shopify 결제 후 복귀 URL에 원본 UTM 파라미터를 그대로 전달
-      // GA4 _gl linker는 Shopify에 GA4 태그가 없어 작동하지 않으므로,
-      // 방문 시 저장해둔 UTM을 return_to에 붙여 소스 귀속을 복원한다.
+      // Shopify checkout URL에 _gl 추가: 크로스도메인 세션 링크용
+      // window.location.href 방식은 GA4 자동 링커가 작동하지 않으므로 수동으로 주입
+      const glParam = await getGA4LinkerParam();
+      if (glParam) url.searchParams.set('_gl', glParam);
+
+      // 결제 복귀 URL: 원본 UTM + _gl 포함 → GA4가 복귀 시 세션 소스를 복원
       const returnUrl = new URL(`${window.location.origin}/checkout-return`);
       try {
         const savedUtm = sessionStorage.getItem('_bm_utm');
@@ -166,7 +169,6 @@ export default function Checkout() {
           Object.entries(utmData).forEach(([k, v]) => { if (v) returnUrl.searchParams.set(k, v); });
         }
       } catch { /* ignore */ }
-      const glParam = await getGA4LinkerParam();
       if (glParam) returnUrl.searchParams.set('_gl', glParam);
       url.searchParams.set('return_to', returnUrl.toString());
 
