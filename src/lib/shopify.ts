@@ -1002,7 +1002,25 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
      }
    } catch { /* continue without buyer identity */ }
 
-   let data = await storefrontApiRequest(CART_CREATE_MUTATION, { input });
+   // GA4 어트리뷰션용 카트 속성 추가
+  // Shopify thank-you 페이지의 Customer Events 픽셀에서 참조하여 purchase 이벤트 발동
+  const trackingAttributes: { key: string; value: string }[] = [];
+  try {
+    const savedUtm = sessionStorage.getItem('_bm_utm');
+    if (savedUtm) {
+      const utmData = JSON.parse(savedUtm) as Record<string, string>;
+      ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'].forEach(k => {
+        if (utmData[k]) trackingAttributes.push({ key: k, value: utmData[k] });
+      });
+    }
+  } catch { /* ignore */ }
+  const gaClientMatch = document.cookie.match(/_ga=GA\d+\.\d+\.(\d+\.\d+)/);
+  if (gaClientMatch?.[1]) trackingAttributes.push({ key: 'ga_client_id', value: gaClientMatch[1] });
+  const gaSessionMatch = document.cookie.match(/_ga_WLTZH90W2L=GS\d+\.\d+\.(\d+)/);
+  if (gaSessionMatch?.[1]) trackingAttributes.push({ key: 'ga_session_id', value: gaSessionMatch[1] });
+  if (trackingAttributes.length > 0) input.attributes = trackingAttributes;
+
+  let data = await storefrontApiRequest(CART_CREATE_MUTATION, { input });
 
    // If customer token is expired/invalid, retry without it
    const tokenError = data?.data?.cartCreate?.userErrors?.some(
