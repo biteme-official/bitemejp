@@ -20,7 +20,13 @@ analytics.subscribe('checkout_completed', (event) => {
   );
 
   const clientId = attrs.ga_client_id;
-  if (!clientId) return;
+
+  // ga_client_id가 없으면 GA4 Measurement Protocol에서 이벤트를 처리할 수 없음
+  // 이 경우 checkout.customAttributes 전체를 console.error로 출력해 진단에 활용
+  if (!clientId) {
+    console.error('[GA4 Pixel] ga_client_id missing. customAttributes:', JSON.stringify(checkout.customAttributes || []));
+    return;
+  }
 
   const items = (checkout.lineItems || []).map((item) => ({
     item_id: item.variant?.id ?? item.title,
@@ -41,8 +47,8 @@ analytics.subscribe('checkout_completed', (event) => {
     ...(attrs.utm_campaign && { campaign: attrs.utm_campaign }),
   };
 
-  navigator.sendBeacon(
-    `https://www.google-analytics.com/mp/collect?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`,
-    JSON.stringify({ client_id: clientId, events: [{ name: 'purchase', params }] })
-  );
+  const url = `https://www.google-analytics.com/mp/collect?measurement_id=${GA4_MEASUREMENT_ID}&api_secret=${GA4_API_SECRET}`;
+  const body = JSON.stringify({ client_id: clientId, events: [{ name: 'purchase', params }] });
+
+  navigator.sendBeacon(url, body);
 });
