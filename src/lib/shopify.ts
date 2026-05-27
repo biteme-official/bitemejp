@@ -398,11 +398,12 @@ async function _doFetchCartPreview(
           (sum: number, d: { discountedAmount: { amount: string } }) => sum + parseFloat(d.discountedAmount.amount),
           0
         );
-        if (discount > 0) {
-          if (variantId) lineDiscounts[variantId] = discount;
-          if (productId && variantPrice > 0) {
-            productDiscounts[productId] = Math.round((discount / variantPrice) * 100);
-          }
+        // Always write (including 0) so stale positive values get overwritten when a discount ends
+        if (variantId) lineDiscounts[variantId] = discount;
+        if (productId && variantPrice > 0) {
+          productDiscounts[productId] = discount > 0
+            ? Math.round((discount / variantPrice) * 100)
+            : 0;
         }
       }
 
