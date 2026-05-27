@@ -15,3 +15,6 @@ create index if not exists idx_events_props        on public.events using gin (p
 
 -- 서버 측(service_role)에서만 insert/select 허용
 alter table public.events enable row level security;
+
+grant all privileges on public.events to service_role;
+grant usage, select on sequence public.events_id_seq to service_role;
