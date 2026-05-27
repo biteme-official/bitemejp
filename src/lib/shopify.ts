@@ -357,6 +357,71 @@ const CART_PREVIEW_MUTATION = `
   }
 `;
 
+// In-flight deduplication: same variant set → share one promise
+const _cartPreviewInFlight = new Map<string, Promise<CartDiscountInfo | null>>();
+
+function _cartPreviewKey(items: { variantId: string; quantity: number }[]): string {
+  return [...items]
+    .sort((a, b) => a.variantId.localeCompare(b.variantId))
+    .map(i => `${i.variantId}:${i.quantity}`)
+    .join('|');
+}
+
+async function _doFetchCartPreview(
+  deduped: { variantId: string; quantity: number }[]
+): Promise<CartDiscountInfo | null> {
+  const attempt = async (): Promise<CartDiscountInfo | null> => {
+    try {
+      const data = await storefrontApiRequest(CART_PREVIEW_MUTATION, {
+        input: {
+          lines: deduped.map(item => ({
+            merchandiseId: item.variantId,
+            quantity: item.quantity,
+          })),
+        },
+      });
+      const cart = data?.data?.cartCreate?.cart;
+      if (!cart) return null;
+
+      const subtotal = parseFloat(cart.cost.subtotalAmount.amount);
+      const total = parseFloat(cart.cost.totalAmount.amount);
+      const currencyCode = cart.cost.totalAmount.currencyCode;
+      const lineDiscounts: Record<string, number> = {};
+      const productDiscounts: Record<string, number> = {};
+
+      for (const edge of cart.lines.edges) {
+        const node = edge.node;
+        const variantId = node.merchandise?.id;
+        const productId = node.merchandise?.product?.id;
+        const variantPrice = parseFloat(node.merchandise?.price?.amount || '0');
+        const discount = node.discountAllocations.reduce(
+          (sum: number, d: { discountedAmount: { amount: string } }) => sum + parseFloat(d.discountedAmount.amount),
+          0
+        );
+        if (discount > 0) {
+          if (variantId) lineDiscounts[variantId] = discount;
+          if (productId && variantPrice > 0) {
+            productDiscounts[productId] = Math.round((discount / variantPrice) * 100);
+          }
+        }
+      }
+
+      return { totalSavings: subtotal - total, discountedTotal: total, currencyCode, lineDiscounts, productDiscounts };
+    } catch (err) {
+      console.error('[fetchCartPreview] failed:', err);
+      return null;
+    }
+  };
+
+  const result = await attempt();
+  // Retry once on network/server failure (null result) after a short delay
+  if (result === null) {
+    await new Promise(r => setTimeout(r, 1500));
+    return attempt();
+  }
+  return result;
+}
+
 export async function fetchCartPreview(
   items: { variantId: string; quantity: number }[]
 ): Promise<CartDiscountInfo | null> {
@@ -368,46 +433,15 @@ export async function fetchCartPreview(
     seen.add(item.variantId);
     return true;
   });
-  try {
-    const data = await storefrontApiRequest(CART_PREVIEW_MUTATION, {
-      input: {
-        lines: deduped.map(item => ({
-          merchandiseId: item.variantId,
-          quantity: item.quantity,
-        })),
-      },
-    });
-    const cart = data?.data?.cartCreate?.cart;
-    if (!cart) return null;
 
-    const subtotal = parseFloat(cart.cost.subtotalAmount.amount);
-    const total = parseFloat(cart.cost.totalAmount.amount);
-    const currencyCode = cart.cost.totalAmount.currencyCode;
-    const lineDiscounts: Record<string, number> = {};
-    const productDiscounts: Record<string, number> = {};
-
-    for (const edge of cart.lines.edges) {
-      const node = edge.node;
-      const variantId = node.merchandise?.id;
-      const productId = node.merchandise?.product?.id;
-      const variantPrice = parseFloat(node.merchandise?.price?.amount || '0');
-      const discount = node.discountAllocations.reduce(
-        (sum: number, d: { discountedAmount: { amount: string } }) => sum + parseFloat(d.discountedAmount.amount),
-        0
-      );
-      if (discount > 0) {
-        if (variantId) lineDiscounts[variantId] = discount;
-        if (productId && variantPrice > 0) {
-          productDiscounts[productId] = Math.round((discount / variantPrice) * 100);
-        }
-      }
-    }
-
-    return { totalSavings: subtotal - total, discountedTotal: total, currencyCode, lineDiscounts, productDiscounts };
-  } catch (err) {
-    console.error('[fetchCartPreview] failed:', err);
-    return null;
+  const key = _cartPreviewKey(deduped);
+  if (_cartPreviewInFlight.has(key)) {
+    return _cartPreviewInFlight.get(key)!;
   }
+  const promise = _doFetchCartPreview(deduped);
+  _cartPreviewInFlight.set(key, promise);
+  promise.finally(() => _cartPreviewInFlight.delete(key));
+  return promise;
 }
 
 // Collections
