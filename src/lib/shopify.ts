@@ -1,4 +1,5 @@
 import { toast } from "sonner";
+import { getGA4ClientId, getGA4SessionId } from './ga4-ecommerce';
 
 // Shopify API - requests go through the server proxy which handles authentication
 const SHOPIFY_PROXY_URL = '/api/shopify';
@@ -1049,10 +1050,9 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
       });
     }
   } catch { /* ignore */ }
-  const gaClientMatch = document.cookie.match(/_ga=GA\d+\.\d+\.(\d+\.\d+)/);
-  if (gaClientMatch?.[1]) trackingAttributes.push({ key: 'ga_client_id', value: gaClientMatch[1] });
-  const gaSessionMatch = document.cookie.match(/_ga_WLTZH90W2L=GS\d+\.\d+\.(\d+)/);
-  if (gaSessionMatch?.[1]) trackingAttributes.push({ key: 'ga_session_id', value: gaSessionMatch[1] });
+  const [clientId, sessionId] = await Promise.all([getGA4ClientId(), getGA4SessionId()]);
+  if (clientId) trackingAttributes.push({ key: 'ga_client_id', value: clientId });
+  if (sessionId) trackingAttributes.push({ key: 'ga_session_id', value: sessionId });
   if (trackingAttributes.length > 0) input.attributes = trackingAttributes;
 
   let data = await storefrontApiRequest(CART_CREATE_MUTATION, { input });
