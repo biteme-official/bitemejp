@@ -105,9 +105,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } else {
     const rangeMap: Record<string, string> = {
       today: 'today',
-      '7d': '7daysAgo',
-      '28d': '28daysAgo',
-      '90d': '90daysAgo',
+      '7d': '6daysAgo',
+      '28d': '27daysAgo',
+      '90d': '89daysAgo',
     };
     const startDate = rangeMap[range];
     if (!startDate) return res.status(400).json({ error: 'Invalid range' });
