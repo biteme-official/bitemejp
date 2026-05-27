@@ -11,9 +11,7 @@ export function PopularProducts() {
   const navigate = useNavigate();
   const [products, setProducts] = useState<ShopifyProduct[]>([]);
   const [loading, setLoading] = useState(true);
-  const [localDiscountMap, setLocalDiscountMap] = useState<Record<string, number>>({});
-  const { productDiscounts: globalDiscountMap } = useDiscountStore();
-  const discountMap = { ...globalDiscountMap, ...localDiscountMap };
+  const { productDiscounts: discountMap, setProductDiscounts } = useDiscountStore();
 
   useEffect(() => {
     fetchBestSellingProducts(12)
@@ -23,14 +21,14 @@ export function PopularProducts() {
         );
         setProducts(available);
         const variants: { variantId: string; quantity: number }[] = [];
-        result.forEach(p => {
+        available.forEach(p => {
           const v = (p.node.variants.edges.find(e => e.node.availableForSale) ?? p.node.variants.edges[0])?.node;
           if (v) variants.push({ variantId: v.id, quantity: 1 });
         });
         fetchCartPreview(variants).then(info => {
-          if (!info || Object.keys(info.productDiscounts).length === 0) return;
-          setLocalDiscountMap(info.productDiscounts);
-        });
+          if (!info) return;
+          setProductDiscounts(info.productDiscounts);
+        }).catch(console.error);
       })
       .catch(console.error)
       .finally(() => setLoading(false));

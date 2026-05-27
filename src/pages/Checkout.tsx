@@ -39,6 +39,7 @@ export default function Checkout() {
   const [shippingRate, setShippingRate] = useState<ShippingRate | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [discountInfo, setDiscountInfo] = useState<CartDiscountInfo | null>(null);
+  const [discountLoading, setDiscountLoading] = useState(true);
 
   // Load saved shipping address
   const [form, setForm] = useState<ShippingForm>(() => {
@@ -69,10 +70,11 @@ export default function Checkout() {
 
   // Shopify Cart API로 자동할인 금액 조회
   useEffect(() => {
-    if (items.length === 0) return;
+    if (items.length === 0) { setDiscountLoading(false); return; }
     fetchCartPreview(items.map(i => ({ variantId: i.variantId, quantity: i.quantity })))
       .then(setDiscountInfo)
-      .catch(() => setDiscountInfo(null));
+      .catch(() => setDiscountInfo(null))
+      .finally(() => setDiscountLoading(false));
   }, []);
 
   // Pre-fill from Shopify customer data if available
@@ -272,11 +274,15 @@ export default function Checkout() {
             </div>
             <div className="flex justify-between text-base font-bold pt-1 border-t border-border">
               <span>合計</span>
-              <span translate="no">
-                {discountInfo && discountInfo.totalSavings > 0
-                  ? formatPrice((discountInfo.discountedTotal + shipping).toFixed(2), currencyCode)
-                  : formatPrice(total.toString(), currencyCode)}
-              </span>
+              {discountLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              ) : (
+                <span translate="no">
+                  {discountInfo && discountInfo.totalSavings > 0
+                    ? formatPrice((discountInfo.discountedTotal + shipping).toFixed(2), currencyCode)
+                    : formatPrice(total.toString(), currencyCode)}
+                </span>
+              )}
             </div>
           </div>
         </div>
