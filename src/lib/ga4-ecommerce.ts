@@ -131,6 +131,40 @@ export function getGA4LinkerParam(): Promise<string | null> {
   });
 }
 
+// Get GA4 client_id via gtag API — more reliable than cookie regex on Safari/ITP
+export function getGA4ClientId(): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.gtag) { resolve(null); return; }
+    const timer = setTimeout(() => resolve(null), 500);
+    try {
+      window.gtag('get', 'G-WLTZH90W2L', 'client_id', (clientId: unknown) => {
+        clearTimeout(timer);
+        resolve(typeof clientId === 'string' && clientId ? clientId : null);
+      });
+    } catch {
+      clearTimeout(timer);
+      resolve(null);
+    }
+  });
+}
+
+// Get GA4 session_id via gtag API
+export function getGA4SessionId(): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.gtag) { resolve(null); return; }
+    const timer = setTimeout(() => resolve(null), 500);
+    try {
+      window.gtag('get', 'G-WLTZH90W2L', 'session_id', (sessionId: unknown) => {
+        clearTimeout(timer);
+        resolve(typeof sessionId === 'string' && sessionId ? sessionId : null);
+      });
+    } catch {
+      clearTimeout(timer);
+      resolve(null);
+    }
+  });
+}
+
 // Helper: convert Shopify product node to GA4 item
 export function shopifyToGA4Item(
   product: {
