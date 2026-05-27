@@ -132,18 +132,22 @@ export function getGA4LinkerParam(): Promise<string | null> {
 }
 
 // Get GA4 client_id via gtag API — more reliable than cookie regex on Safari/ITP
+// Falls back to cookie regex if gtag times out (slow network, ad-blockers delaying gtag init)
 export function getGA4ClientId(): Promise<string | null> {
   return new Promise((resolve) => {
-    if (typeof window === 'undefined' || !window.gtag) { resolve(null); return; }
-    const timer = setTimeout(() => resolve(null), 500);
+    if (typeof window === 'undefined' || !window.gtag) {
+      resolve(_ga4ClientIdFromCookie());
+      return;
+    }
+    const timer = setTimeout(() => resolve(_ga4ClientIdFromCookie()), 2000);
     try {
       window.gtag('get', 'G-WLTZH90W2L', 'client_id', (clientId: unknown) => {
         clearTimeout(timer);
-        resolve(typeof clientId === 'string' && clientId ? clientId : null);
+        resolve(typeof clientId === 'string' && clientId ? clientId : _ga4ClientIdFromCookie());
       });
     } catch {
       clearTimeout(timer);
-      resolve(null);
+      resolve(_ga4ClientIdFromCookie());
     }
   });
 }
@@ -152,7 +156,7 @@ export function getGA4ClientId(): Promise<string | null> {
 export function getGA4SessionId(): Promise<string | null> {
   return new Promise((resolve) => {
     if (typeof window === 'undefined' || !window.gtag) { resolve(null); return; }
-    const timer = setTimeout(() => resolve(null), 500);
+    const timer = setTimeout(() => resolve(null), 2000);
     try {
       window.gtag('get', 'G-WLTZH90W2L', 'session_id', (sessionId: unknown) => {
         clearTimeout(timer);
@@ -163,6 +167,12 @@ export function getGA4SessionId(): Promise<string | null> {
       resolve(null);
     }
   });
+}
+
+function _ga4ClientIdFromCookie(): string | null {
+  if (typeof document === 'undefined') return null;
+  const m = document.cookie.match(/_ga=GA\d+\.\d+\.(\d+\.\d+)/);
+  return m?.[1] ?? null;
 }
 
 // Helper: convert Shopify product node to GA4 item
