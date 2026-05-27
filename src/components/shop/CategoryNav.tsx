@@ -75,7 +75,7 @@ export function CategoryNav({ selectedCollection, onSelect }: CategoryNavProps) 
           return (
             <button
               key={item.id}
-              onClick={() => { if (handle) { track('category_click', item.title, handle); onSelect(handle); } }}
+              onClick={() => { if (handle) { track('category_click', { name: item.title, handle }); onSelect(handle); } }}
               className={cn(
                 'flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
                 isActive
@@ -119,7 +119,7 @@ export function CategoryNav({ selectedCollection, onSelect }: CategoryNavProps) 
             return (
               <button
                 key={child.id}
-                onClick={() => { if (handle) { track('category_click', child.title, handle); onSelect(handle); } }}
+                onClick={() => { if (handle) { track('category_click', { name: child.title, handle }); onSelect(handle); } }}
                 className={cn(
                   'flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap',
                   isActive

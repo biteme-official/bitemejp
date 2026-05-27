@@ -135,7 +135,11 @@ export default function Checkout() {
   const handleSubmit = async () => {
     if (!isFormValid || isSubmitting) return;
     setIsSubmitting(true);
-    track('checkout_start', undefined, String(items.length));
+    track('checkout_start', {
+      item_count: items.length,
+      cart_value: discountInfo ? discountInfo.discountedTotal + shipping : total,
+      currency: currencyCode,
+    });
     // Save shipping address for next time
     try { localStorage.setItem('checkout-shipping', JSON.stringify(form)); } catch { /* ignore */ }
     try {

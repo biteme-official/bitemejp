@@ -7,6 +7,7 @@ import { useCartStore } from "@/stores/cartStore";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Confetti } from "@/components/checkout/Confetti";
 import { trackPurchase } from "@/lib/ga4-ecommerce";
+import { track } from "@/lib/track";
 
 export default function CheckoutReturn() {
   const navigate = useNavigate();
@@ -23,6 +24,12 @@ export default function CheckoutReturn() {
       try {
         const { transactionId, items, currency, value, shipping } = JSON.parse(raw);
         trackPurchase(transactionId, items, currency, value, shipping);
+        track('order_complete', {
+          order_id: transactionId,
+          order_value: value,
+          item_count: Array.isArray(items) ? items.length : 0,
+          currency,
+        });
       } catch { /* ignore */ }
       sessionStorage.removeItem('checkout_ga4');
     }

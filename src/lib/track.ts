@@ -8,16 +8,16 @@ function getSessionId(): string {
   return sid;
 }
 
-export function track(eventType: string, eventLabel?: string, eventValue?: string): void {
+export function track(eventType: string, properties?: Record<string, unknown>): void {
   fetch('/api/track-event', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       event_type: eventType,
-      event_label: eventLabel ?? null,
-      event_value: eventValue ?? null,
-      page_path: window.location.pathname + window.location.search,
       session_id: getSessionId(),
+      properties: properties ?? {},
+      page_path: window.location.pathname + window.location.search,
+      referrer: document.referrer || null,
     }),
   }).catch(() => {});
 }

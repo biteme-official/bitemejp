@@ -1,18 +1,17 @@
-create table if not exists public.click_events (
+create table if not exists public.events (
   id         bigserial primary key,
   event_type text        not null,
-  event_label text,
-  event_value text,
+  session_id text        not null,
+  user_id    text,
+  properties jsonb       not null default '{}',
   page_path  text,
-  session_id text,
+  referrer   text,
   created_at timestamptz not null default now()
 );
 
-create index if not exists idx_click_events_type_created
-  on public.click_events (event_type, created_at desc);
-
-create index if not exists idx_click_events_created
-  on public.click_events (created_at desc);
+create index if not exists idx_events_type_created on public.events (event_type, created_at desc);
+create index if not exists idx_events_session      on public.events (session_id, created_at);
+create index if not exists idx_events_props        on public.events using gin (properties);
 
 -- 서버 측(service_role)에서만 insert/select 허용
-alter table public.click_events enable row level security;
+alter table public.events enable row level security;

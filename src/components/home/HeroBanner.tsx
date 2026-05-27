@@ -84,7 +84,7 @@ export function HeroBanner() {
             key={banner.id}
             className="w-full flex-shrink-0"
             onClick={() => {
-              track('banner_click', banner.fields['title'] || banner.handle, banner.id);
+              track('banner_click', { banner_title: banner.fields['title'] || banner.handle, banner_id: banner.id, position: currentIndex });
               if (banner.linkUrl) window.location.href = banner.linkUrl;
             }}
             style={{ cursor: banner.linkUrl ? 'pointer' : 'default' }}

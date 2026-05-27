@@ -139,10 +139,10 @@ async function fetchShopify(range: Range, secret: string, customFrom?: string, c
 }
 
 interface BehaviorData {
+  funnel: { step: string; label: string; count: number }[];
   bannerRanking: { label: string; count: number }[];
   categoryRanking: { label: string; count: number }[];
   productRanking: { label: string; count: number }[];
-  funnel: { event_type: string; count: number }[];
 }
 
 async function fetchBehavior(range: Range, secret: string): Promise<BehaviorData> {
@@ -1307,31 +1307,25 @@ function NewVsReturningChart({ data }: { data: AnalyticsData["newVsReturning"] }
 
 // ─── 행동 분석 컴포넌트 ────────────────────────────────────────────────────────
 
-const BEHAVIOR_FUNNEL_STEPS = [
-  { key: "product_click",  label: "상품 클릭",    color: "#f85a24" },
-  { key: "add_to_cart",    label: "장바구니 추가", color: "#f59e0b" },
-  { key: "checkout_start", label: "결제 시작",    color: "#3b82f6" },
-];
+const BEHAVIOR_FUNNEL_COLORS = ["#f85a24", "#fb8c5a", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6"];
 
 function BehaviorFunnel({ funnel }: { funnel: BehaviorData["funnel"] }) {
-  const map = Object.fromEntries(funnel.map((d) => [d.event_type, d.count]));
-  const steps = BEHAVIOR_FUNNEL_STEPS.map((s) => ({ ...s, count: map[s.key] ?? 0 }));
-  const maxCount = Math.max(...steps.map((s) => s.count), 1);
+  const maxCount = Math.max(...funnel.map((s) => s.count), 1);
 
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">클릭 전환 퍼널</CardTitle>
-        <p className="text-xs text-muted-foreground">사이트 내 클릭 이벤트 기반 전환 흐름</p>
+        <CardTitle className="text-sm font-semibold">구매 전환 퍼널</CardTitle>
+        <p className="text-xs text-muted-foreground">각 단계에 도달한 고유 세션 수 (Supabase 이벤트 기반)</p>
       </CardHeader>
       <CardContent className="space-y-1 pt-2">
-        {steps.map((step, i) => {
-          const prev = i > 0 ? steps[i - 1].count : null;
+        {funnel.map((step, i) => {
+          const prev = i > 0 ? funnel[i - 1].count : null;
           const dropRate = prev && prev > 0 ? (((prev - step.count) / prev) * 100).toFixed(1) : null;
           const convRate = prev && prev > 0 ? ((step.count / prev) * 100).toFixed(1) : null;
           const widthPct = maxCount > 0 ? (step.count / maxCount) * 100 : 0;
           return (
-            <div key={step.key}>
+            <div key={step.step}>
               {dropRate && (
                 <div className="flex items-center gap-2 py-1 pl-4">
                   <div className="w-px h-4 bg-muted-foreground/30" />
@@ -1345,7 +1339,7 @@ function BehaviorFunnel({ funnel }: { funnel: BehaviorData["funnel"] }) {
                 <div className="flex-1">
                   <div
                     className="h-9 rounded-md flex items-center px-3 text-white text-xs font-medium transition-all duration-500"
-                    style={{ width: `${Math.max(widthPct, 15)}%`, backgroundColor: step.color, minWidth: "80px" }}
+                    style={{ width: `${Math.max(widthPct, 15)}%`, backgroundColor: BEHAVIOR_FUNNEL_COLORS[i % BEHAVIOR_FUNNEL_COLORS.length], minWidth: "80px" }}
                   >
                     {step.label}
                   </div>

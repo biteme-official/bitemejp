@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { track } from "@/lib/track";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { HeroBanner } from "@/components/home/HeroBanner";
@@ -29,6 +30,10 @@ const Index = () => {
       );
     }
   }, [rawCollection]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    track('page_view', { title: 'メイン' });
+  }, []);
   const searchQuery = searchParams.get("q") || "";
   const sortParam = searchParams.get("sort") as SortOption | null;
   useScrollRestoration();

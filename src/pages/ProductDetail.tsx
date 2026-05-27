@@ -267,6 +267,14 @@ export default function ProductDetail() {
           const variant = data.variants.edges[0]?.node;
           trackViewItem(shopifyToGA4Item(data, variant));
 
+          // 행동 분석: product_view
+          track('product_view', {
+            product_id: numericId,
+            product_title: data.title,
+            price: parseFloat(variant?.price.amount ?? data.priceRange.minVariantPrice.amount),
+            currency: variant?.price.currencyCode ?? data.priceRange.minVariantPrice.currencyCode,
+          });
+
           // 자동 할인 금액 조회 (결과는 store에 캐시)
           const variants = data.variants.edges.map(e => ({ variantId: e.node.id, quantity: 1 }));
           fetchCartPreview(variants).then(info => {
@@ -407,7 +415,14 @@ export default function ProductDetail() {
       selectedOptions: variant.selectedOptions,
     });
 
-    track('add_to_cart', product.title, product.id.split('/').pop());
+    track('add_to_cart', {
+      product_id: product.id.split('/').pop(),
+      product_title: product.title,
+      price: variant ? parseFloat(variant.price.amount) : undefined,
+      currency: variant?.price.currencyCode,
+      variant_id: variant?.id.split('/').pop(),
+      quantity,
+    });
     // GA4: add_to_cart event
     trackAddToCart(shopifyToGA4Item(product, variant, quantity));
 

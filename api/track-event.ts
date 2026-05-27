@@ -23,9 +23,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { event_type, event_label, event_value, page_path, session_id } = req.body ?? {};
+  const { event_type, session_id, properties, page_path, referrer } = req.body ?? {};
   if (!event_type || typeof event_type !== 'string') {
     return res.status(400).json({ error: 'event_type required' });
+  }
+  if (!session_id || typeof session_id !== 'string') {
+    return res.status(400).json({ error: 'session_id required' });
   }
 
   const supabase = createClient(
@@ -33,12 +36,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  const { error } = await supabase.from('click_events').insert({
+  const { error } = await supabase.from('events').insert({
     event_type,
-    event_label: event_label ?? null,
-    event_value: event_value ?? null,
+    session_id,
+    properties: typeof properties === 'object' && properties !== null ? properties : {},
     page_path: page_path ?? null,
-    session_id: session_id ?? null,
+    referrer: referrer ?? null,
   });
 
   if (error) {

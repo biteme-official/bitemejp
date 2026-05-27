@@ -19,34 +19,72 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  const [bannerRes, categoryRes, productRes, funnelRes] = await Promise.all([
-    supabase.from('click_events').select('event_label').eq('event_type', 'banner_click').gte('created_at', since),
-    supabase.from('click_events').select('event_label').eq('event_type', 'category_click').gte('created_at', since),
-    supabase.from('click_events').select('event_label').eq('event_type', 'product_click').gte('created_at', since),
-    Promise.all(
-      ['product_click', 'add_to_cart', 'checkout_start'].map(type =>
-        supabase.from('click_events').select('*', { count: 'exact', head: true }).eq('event_type', type).gte('created_at', since)
-          .then(({ count }) => ({ event_type: type, count: count ?? 0 }))
-      )
-    ),
-  ]);
+  const { data: events, error } = await supabase
+    .from('events')
+    .select('event_type, session_id, properties, page_path')
+    .gte('created_at', since);
 
-  function aggregate(rows: { event_label: string | null }[] | null, limit = 10) {
-    const map = new Map<string, number>();
-    for (const row of rows ?? []) {
-      const key = row.event_label || '(不明)';
-      map.set(key, (map.get(key) ?? 0) + 1);
-    }
-    return Array.from(map.entries())
-      .map(([label, count]) => ({ label, count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, limit);
+  if (error) {
+    console.error('[behavior-analytics]', error);
+    return res.status(500).json({ error: 'Query failed' });
   }
 
+  // Session-level funnel — counts unique sessions that reached each step
+  const sessions = {
+    page_view_home: new Set<string>(),
+    product_click:  new Set<string>(),
+    product_view:   new Set<string>(),
+    add_to_cart:    new Set<string>(),
+    checkout_start: new Set<string>(),
+    order_complete: new Set<string>(),
+  };
+
+  const bannerMap   = new Map<string, number>();
+  const categoryMap = new Map<string, number>();
+  const productMap  = new Map<string, number>();
+
+  for (const e of events ?? []) {
+    const { event_type, session_id, properties, page_path } = e;
+    const props = (properties ?? {}) as Record<string, unknown>;
+
+    if (event_type === 'page_view' && page_path === '/') sessions.page_view_home.add(session_id);
+    if (event_type === 'product_click')  sessions.product_click.add(session_id);
+    if (event_type === 'product_view')   sessions.product_view.add(session_id);
+    if (event_type === 'add_to_cart')    sessions.add_to_cart.add(session_id);
+    if (event_type === 'checkout_start') sessions.checkout_start.add(session_id);
+    if (event_type === 'order_complete') sessions.order_complete.add(session_id);
+
+    if (event_type === 'banner_click') {
+      const key = String(props.banner_title ?? '(不明)');
+      bannerMap.set(key, (bannerMap.get(key) ?? 0) + 1);
+    }
+    if (event_type === 'category_click') {
+      const key = String(props.name ?? props.handle ?? '(不明)');
+      categoryMap.set(key, (categoryMap.get(key) ?? 0) + 1);
+    }
+    if (event_type === 'product_click' || event_type === 'product_view') {
+      const key = String(props.product_title ?? '(不明)');
+      productMap.set(key, (productMap.get(key) ?? 0) + 1);
+    }
+  }
+
+  const toRanking = (map: Map<string, number>, limit = 10) =>
+    [...map.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([label, count]) => ({ label, count }));
+
   return res.status(200).json({
-    bannerRanking: aggregate(bannerRes.data),
-    categoryRanking: aggregate(categoryRes.data),
-    productRanking: aggregate(productRes.data),
-    funnel: funnelRes,
+    funnel: [
+      { step: 'page_view_home', label: '메인 진입',  count: sessions.page_view_home.size },
+      { step: 'product_click',  label: '상품 클릭',  count: sessions.product_click.size },
+      { step: 'product_view',   label: '상품 상세',  count: sessions.product_view.size },
+      { step: 'add_to_cart',    label: '장바구니',   count: sessions.add_to_cart.size },
+      { step: 'checkout_start', label: '결제 시작',  count: sessions.checkout_start.size },
+      { step: 'order_complete', label: '주문 완료',  count: sessions.order_complete.size },
+    ],
+    bannerRanking:   toRanking(bannerMap),
+    categoryRanking: toRanking(categoryMap),
+    productRanking:  toRanking(productMap),
   });
 }
