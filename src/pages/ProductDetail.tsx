@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { fetchProductByHandle, fetchProductById, formatPrice, ShopifyProduct, fetchProductRecommendations, ProductRecommendation, getPreorderDate, fetchCartPreview } from "@/lib/shopify";
 import { trackViewItem, trackAddToCart, shopifyToGA4Item } from "@/lib/ga4-ecommerce";
+import { track } from "@/lib/track";
 import { useCartStore } from "@/stores/cartStore";
 import { useWishlistStore } from "@/stores/wishlistStore";
 import { useDiscountStore } from "@/stores/discountStore";
@@ -406,6 +407,7 @@ export default function ProductDetail() {
       selectedOptions: variant.selectedOptions,
     });
 
+    track('add_to_cart', product.title, product.id.split('/').pop());
     // GA4: add_to_cart event
     trackAddToCart(shopifyToGA4Item(product, variant, quantity));
 

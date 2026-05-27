@@ -138,6 +138,21 @@ async function fetchShopify(range: Range, secret: string, customFrom?: string, c
   return res.json();
 }
 
+interface BehaviorData {
+  bannerRanking: { label: string; count: number }[];
+  categoryRanking: { label: string; count: number }[];
+  productRanking: { label: string; count: number }[];
+  funnel: { event_type: string; count: number }[];
+}
+
+async function fetchBehavior(range: Range, secret: string): Promise<BehaviorData> {
+  const params = new URLSearchParams({ range });
+  const res = await fetch(`/api/behavior-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "행동 데이터 오류"); }
+  return res.json();
+}
+
 async function fetchCustomers(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<CustomerData> {
   const params = new URLSearchParams({ range });
   if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
@@ -1290,6 +1305,107 @@ function NewVsReturningChart({ data }: { data: AnalyticsData["newVsReturning"] }
   );
 }
 
+// ─── 행동 분석 컴포넌트 ────────────────────────────────────────────────────────
+
+const BEHAVIOR_FUNNEL_STEPS = [
+  { key: "product_click",  label: "상품 클릭",    color: "#f85a24" },
+  { key: "add_to_cart",    label: "장바구니 추가", color: "#f59e0b" },
+  { key: "checkout_start", label: "결제 시작",    color: "#3b82f6" },
+];
+
+function BehaviorFunnel({ funnel }: { funnel: BehaviorData["funnel"] }) {
+  const map = Object.fromEntries(funnel.map((d) => [d.event_type, d.count]));
+  const steps = BEHAVIOR_FUNNEL_STEPS.map((s) => ({ ...s, count: map[s.key] ?? 0 }));
+  const maxCount = Math.max(...steps.map((s) => s.count), 1);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold">클릭 전환 퍼널</CardTitle>
+        <p className="text-xs text-muted-foreground">사이트 내 클릭 이벤트 기반 전환 흐름</p>
+      </CardHeader>
+      <CardContent className="space-y-1 pt-2">
+        {steps.map((step, i) => {
+          const prev = i > 0 ? steps[i - 1].count : null;
+          const dropRate = prev && prev > 0 ? (((prev - step.count) / prev) * 100).toFixed(1) : null;
+          const convRate = prev && prev > 0 ? ((step.count / prev) * 100).toFixed(1) : null;
+          const widthPct = maxCount > 0 ? (step.count / maxCount) * 100 : 0;
+          return (
+            <div key={step.key}>
+              {dropRate && (
+                <div className="flex items-center gap-2 py-1 pl-4">
+                  <div className="w-px h-4 bg-muted-foreground/30" />
+                  <span className="text-[11px] text-muted-foreground">
+                    ↓ {convRate}% 진입
+                    <span className="ml-2 text-red-400">({dropRate}% 이탈)</span>
+                  </span>
+                </div>
+              )}
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <div
+                    className="h-9 rounded-md flex items-center px-3 text-white text-xs font-medium transition-all duration-500"
+                    style={{ width: `${Math.max(widthPct, 15)}%`, backgroundColor: step.color, minWidth: "80px" }}
+                  >
+                    {step.label}
+                  </div>
+                </div>
+                <div className="text-right w-28 shrink-0">
+                  <span className="text-sm font-bold">{step.count.toLocaleString()}</span>
+                  <span className="text-xs text-muted-foreground ml-1">
+                    ({maxCount > 0 ? ((step.count / maxCount) * 100).toFixed(1) : 0}%)
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+}
+
+function RankingTable({ title, data }: { title: string; data: { label: string; count: number }[] }) {
+  const max = data[0]?.count || 1;
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        {data.length === 0 ? (
+          <p className="text-xs text-muted-foreground text-center py-8">데이터 없음</p>
+        ) : (
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b">
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground">항목</th>
+                <th className="text-right px-4 py-2 font-medium text-muted-foreground">클릭 수</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((row, i) => (
+                <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-muted-foreground w-4 shrink-0 text-right">{i + 1}</span>
+                      <div className="h-1.5 w-14 shrink-0 rounded-full bg-muted overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${(row.count / max) * 100}%`, backgroundColor: BRAND }} />
+                      </div>
+                      <span className="truncate max-w-[160px]">{row.label}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2 text-right font-medium">{row.count.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── 비밀번호 게이트 ───────────────────────────────────────────────────────────
 
 function PasswordGate({ onAuth }: { onAuth: (s: string) => void }) {
@@ -1362,6 +1478,14 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
     queryKey: ["customer-analytics", range, secret, customFrom, customTo],
     queryFn: () => fetchCustomers(range, secret, customFrom, customTo),
     staleTime: 5 * 60 * 1000,
+    enabled: canQuery,
+    retry,
+  });
+
+  const { data: behavior } = useQuery({
+    queryKey: ["behavior-analytics", range, secret],
+    queryFn: () => fetchBehavior(range, secret),
+    staleTime: 3 * 60 * 1000,
     enabled: canQuery,
     retry,
   });
@@ -1486,6 +1610,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
             <TabsList className="h-9">
               <TabsTrigger value="dashboard" className="text-xs px-4">대시보드</TabsTrigger>
               <TabsTrigger value="funnel" className="text-xs px-4">퍼널 분석</TabsTrigger>
+              <TabsTrigger value="behavior" className="text-xs px-4">행동 분석</TabsTrigger>
               <TabsTrigger value="members" className="text-xs px-4">회원 분석</TabsTrigger>
             </TabsList>
 
@@ -1663,6 +1788,31 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               <p className="text-center text-xs text-muted-foreground pb-4">
                 GA4: G-WLTZH90W2L · {RANGE_LABELS[range]} 데이터
               </p>
+            </TabsContent>
+
+            {/* ══ 행동 분석 탭 ══ */}
+            <TabsContent value="behavior" className="space-y-5 mt-0">
+              {!behavior ? (
+                <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+                  행동 데이터를 불러오는 중...
+                </div>
+              ) : (
+                <>
+                  <SectionLabel>클릭 전환 퍼널</SectionLabel>
+                  <BehaviorFunnel funnel={behavior.funnel} />
+
+                  <SectionLabel>클릭 랭킹</SectionLabel>
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <RankingTable title="배너 클릭" data={behavior.bannerRanking} />
+                    <RankingTable title="카테고리 클릭" data={behavior.categoryRanking} />
+                    <RankingTable title="상품 클릭" data={behavior.productRanking} />
+                  </div>
+
+                  <p className="text-center text-xs text-muted-foreground pb-4">
+                    Supabase click_events · {RANGE_LABELS[range]} 데이터
+                  </p>
+                </>
+              )}
             </TabsContent>
           </Tabs>
         )}
