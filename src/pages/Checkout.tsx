@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { useCartStore } from '@/stores/cartStore';
 import { useAuthStore } from '@/stores/authStore';
 import { formatPrice, fetchShippingRates, fetchCustomerData, ShippingRate, getPreorderDate, fetchCartPreview, CartDiscountInfo } from '@/lib/shopify';
+import { track } from '@/lib/track';
 import { getGA4LinkerParam } from '@/lib/ga4-ecommerce';
 import { toast } from 'sonner';
 
@@ -134,6 +135,11 @@ export default function Checkout() {
   const handleSubmit = async () => {
     if (!isFormValid || isSubmitting) return;
     setIsSubmitting(true);
+    track('checkout_start', {
+      item_count: items.length,
+      cart_value: discountInfo ? discountInfo.discountedTotal + shipping : total,
+      currency: currencyCode,
+    });
     // Save shipping address for next time
     try { localStorage.setItem('checkout-shipping', JSON.stringify(form)); } catch { /* ignore */ }
     try {

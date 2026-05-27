@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { extractHandleFromUrl } from '@/lib/shopify';
 import { useCategoryMenu } from '@/hooks/useCategoryMenu';
+import { track } from '@/lib/track';
 
 interface CategoryNavProps {
   selectedCollection: string | null;
@@ -74,7 +75,7 @@ export function CategoryNav({ selectedCollection, onSelect }: CategoryNavProps) 
           return (
             <button
               key={item.id}
-              onClick={() => handle && onSelect(handle)}
+              onClick={() => { if (handle) { track('category_click', { name: item.title, handle }); onSelect(handle); } }}
               className={cn(
                 'flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
                 isActive
@@ -118,7 +119,7 @@ export function CategoryNav({ selectedCollection, onSelect }: CategoryNavProps) 
             return (
               <button
                 key={child.id}
-                onClick={() => handle && onSelect(handle)}
+                onClick={() => { if (handle) { track('category_click', { name: child.title, handle }); onSelect(handle); } }}
                 className={cn(
                   'flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap',
                   isActive

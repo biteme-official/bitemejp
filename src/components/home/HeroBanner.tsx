@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { fetchBanners, ShopifyBanner } from "@/lib/shopify";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { track } from "@/lib/track";
 
 export function HeroBanner() {
   const [banners, setBanners] = useState<ShopifyBanner[]>([]);
@@ -82,7 +83,10 @@ export function HeroBanner() {
           <div
             key={banner.id}
             className="w-full flex-shrink-0"
-            onClick={() => { if (banner.linkUrl) window.location.href = banner.linkUrl; }}
+            onClick={() => {
+              track('banner_click', { banner_title: banner.fields['title'] || banner.handle, banner_id: banner.id, position: currentIndex });
+              if (banner.linkUrl) window.location.href = banner.linkUrl;
+            }}
             style={{ cursor: banner.linkUrl ? 'pointer' : 'default' }}
           >
             <img

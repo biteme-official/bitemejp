@@ -11,6 +11,7 @@ import { ProductFilters, SortOption, FilterState } from './ProductFilters';
 import { ProductOptionDialog } from './ProductOptionDialog';
 import { useTranslation } from '@/hooks/useTranslation';
 import { trackViewItemList, shopifyToGA4Item } from '@/lib/ga4-ecommerce';
+import { track } from '@/lib/track';
 
 // Product skeleton component
 const ProductSkeleton = () => (
@@ -160,7 +161,8 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
     return count;
   }, [filters, maxPrice]);
 
-  const handleProductClick = (numericId: string) => {
+  const handleProductClick = (numericId: string, title?: string, price?: number) => {
+    track('product_click', { product_id: numericId, product_title: title, price, collection: collectionHandle ?? undefined });
     saveScrollPosition(location.pathname);
     navigate(`/product/${numericId}`);
   };
@@ -379,7 +381,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                 <div
                   key={product.node.id}
                   className="bg-card rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow cursor-pointer group"
-                  onClick={() => handleProductClick(product.node.id.split('/').pop()!)}
+                  onClick={() => handleProductClick(product.node.id.split('/').pop()!, product.node.title, parseFloat(product.node.priceRange.minVariantPrice.amount))}
                 >
                   <div className="aspect-square bg-muted relative overflow-hidden">
                     {image ? (
