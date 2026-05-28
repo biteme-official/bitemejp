@@ -416,7 +416,12 @@ export default function Checkout() {
                 処理中...
               </>
             ) : (
-              <>お支払いに進む — {formatPrice(total.toString(), currencyCode)}</>
+              <>お支払いに進む — {formatPrice(
+                discountInfo && discountInfo.totalSavings > 0
+                  ? (discountInfo.discountedTotal + shipping).toFixed(2)
+                  : total.toString(),
+                currencyCode
+              )}</>
             )}
           </Button>
         </div>
