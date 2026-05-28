@@ -155,7 +155,11 @@ export default function Checkout() {
         variantId: item.variantId,
         quantity: item.quantity,
       }));
-      const checkoutUrl = await createCheckout(lineItems, form.email);
+      // createCheckout과 getGA4LinkerParam 병렬 실행 — 순차 실행 대비 최대 500ms 단축
+      const [checkoutUrl, glParam] = await Promise.all([
+        createCheckout(lineItems, form.email),
+        getGA4LinkerParam(),
+      ]);
       if (!checkoutUrl) throw new Error('checkout URL not returned');
 
       // Append shipping info as URL params for Shopify pre-fill
@@ -170,10 +174,6 @@ export default function Checkout() {
       url.searchParams.set('checkout[shipping_address][address2]', form.address2);
       url.searchParams.set('checkout[shipping_address][phone]', form.phone);
       url.searchParams.set('checkout[shipping_address][country]', 'JP');
-
-      // Shopify checkout URL에 _gl 추가: 크로스도메인 세션 링크용
-      // window.location.href 방식은 GA4 자동 링커가 작동하지 않으므로 수동으로 주입
-      const glParam = await getGA4LinkerParam();
       if (glParam) url.searchParams.set('_gl', glParam);
 
       // 결제 복귀 URL: 원본 UTM + _gl 포함 → GA4가 복귀 시 세션 소스를 복원
