@@ -408,9 +408,9 @@ async function _doFetchCartPreview(
         }
       }
 
-      // lineDiscounts 합산으로 savings 계산 — subtotal/total 차이는 Shopify 버전에 따라 0이 될 수 있어 신뢰 불가
+      // lineDiscounts 합산으로 savings 계산, discountedTotal은 Shopify가 계산한 totalAmount 사용
       const savings = Object.values(lineDiscounts).reduce((sum, d) => sum + d, 0);
-      return { totalSavings: savings, discountedTotal: subtotal - savings, currencyCode, lineDiscounts, productDiscounts };
+      return { totalSavings: savings, discountedTotal: total, currencyCode, lineDiscounts, productDiscounts };
     } catch (err) {
       console.error('[fetchCartPreview] failed:', err);
       return null;
