@@ -255,9 +255,28 @@ export default function Checkout() {
                     );
                   })()}
                 </div>
-                <span className="text-sm font-semibold" translate="no">
-                  {formatPrice((parseFloat(item.price.amount) * item.quantity).toString(), item.price.currencyCode)}
-                </span>
+                {(() => {
+                  const lineDiscount = discountInfo?.lineDiscounts?.[item.variantId] ?? 0;
+                  const originalTotal = parseFloat(item.price.amount) * item.quantity;
+                  const discountedTotal = originalTotal - lineDiscount;
+                  if (lineDiscount > 0) {
+                    return (
+                      <div className="text-right" translate="no">
+                        <p className="text-xs text-muted-foreground line-through">
+                          {formatPrice(originalTotal.toString(), item.price.currencyCode)}
+                        </p>
+                        <p className="text-sm font-semibold text-red-500">
+                          {formatPrice(discountedTotal.toFixed(2), item.price.currencyCode)}
+                        </p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <span className="text-sm font-semibold" translate="no">
+                      {formatPrice(originalTotal.toString(), item.price.currencyCode)}
+                    </span>
+                  );
+                })()}
               </div>
             ))}
           </div>
