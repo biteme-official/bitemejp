@@ -41,6 +41,7 @@ export default function Checkout() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [discountInfo, setDiscountInfo] = useState<CartDiscountInfo | null>(null);
   const [discountLoading, setDiscountLoading] = useState(true);
+  const [showErrors, setShowErrors] = useState(false);
 
   // Load saved shipping address
   const [form, setForm] = useState<ShippingForm>(() => {
@@ -133,7 +134,14 @@ export default function Checkout() {
   const isFormValid = form.email && form.lastName && form.zip && form.prefecture && form.city && form.address1;
 
   const handleSubmit = async () => {
-    if (!isFormValid || isSubmitting) return;
+    if (isSubmitting) return;
+    if (!isFormValid) {
+      setShowErrors(true);
+      const firstEmpty = !form.email ? 'email' : !form.lastName ? 'lastName' : !form.zip ? 'zip' : !form.prefecture ? 'prefecture' : !form.city ? 'city' : 'address1';
+      document.getElementById(firstEmpty)?.focus();
+      toast.error('必須項目をすべて入力してください。', { position: 'top-center' });
+      return;
+    }
     setIsSubmitting(true);
     track('checkout_start', {
       item_count: items.length,
@@ -334,13 +342,16 @@ export default function Checkout() {
                 onChange={(e) => updateField('email', e.target.value)}
                 placeholder="example@email.com"
                 autoComplete="email"
+                className={showErrors && !form.email ? 'border-destructive' : ''}
               />
+              {showErrors && !form.email && <p className="text-xs text-destructive mt-1">メールアドレスを入力してください</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="lastName">姓 <span className="text-destructive">*</span></Label>
-                <Input id="lastName" name="family-name" value={form.lastName} onChange={(e) => updateField('lastName', e.target.value)} placeholder="山田" autoComplete="family-name" />
+                <Input id="lastName" name="family-name" value={form.lastName} onChange={(e) => updateField('lastName', e.target.value)} placeholder="山田" autoComplete="family-name" className={showErrors && !form.lastName ? 'border-destructive' : ''} />
+                {showErrors && !form.lastName && <p className="text-xs text-destructive mt-1">姓を入力してください</p>}
               </div>
               <div>
                 <Label htmlFor="firstName">名</Label>
@@ -357,13 +368,14 @@ export default function Checkout() {
                   onBlur={handleZipLookup}
                   placeholder="1000001"
                   maxLength={8}
-                  className="flex-1"
+                  className={`flex-1${showErrors && !form.zip ? ' border-destructive' : ''}`}
                   autoComplete="postal-code"
                 />
                 <Button type="button" variant="outline" size="sm" onClick={handleZipLookup} className="flex-shrink-0">
                   住所検索
                 </Button>
               </div>
+              {showErrors && !form.zip && <p className="text-xs text-destructive mt-1">郵便番号を入力してください</p>}
             </div>
 
             <div>
@@ -372,21 +384,24 @@ export default function Checkout() {
                 id="prefecture" name="address-level1" value={form.prefecture}
                 onChange={(e) => updateField('prefecture', e.target.value)}
                 autoComplete="address-level1"
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className={`flex h-10 w-full rounded-md border bg-background px-3 py-2 text-sm${showErrors && !form.prefecture ? ' border-destructive' : ' border-input'}`}
               >
                 <option value="">選択してください</option>
                 {PREFECTURES.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
+              {showErrors && !form.prefecture && <p className="text-xs text-destructive mt-1">都道府県を選択してください</p>}
             </div>
 
             <div>
               <Label htmlFor="city">市区町村 <span className="text-destructive">*</span></Label>
-              <Input id="city" name="address-level2" value={form.city} onChange={(e) => updateField('city', e.target.value)} placeholder="千代田区" autoComplete="address-level2" />
+              <Input id="city" name="address-level2" value={form.city} onChange={(e) => updateField('city', e.target.value)} placeholder="千代田区" autoComplete="address-level2" className={showErrors && !form.city ? 'border-destructive' : ''} />
+              {showErrors && !form.city && <p className="text-xs text-destructive mt-1">市区町村を入力してください</p>}
             </div>
 
             <div>
               <Label htmlFor="address1">番地 <span className="text-destructive">*</span></Label>
-              <Input id="address1" name="address-line1" value={form.address1} onChange={(e) => updateField('address1', e.target.value)} placeholder="丸の内1-1-1" autoComplete="address-line1" />
+              <Input id="address1" name="address-line1" value={form.address1} onChange={(e) => updateField('address1', e.target.value)} placeholder="丸の内1-1-1" autoComplete="address-line1" className={showErrors && !form.address1 ? 'border-destructive' : ''} />
+              {showErrors && !form.address1 && <p className="text-xs text-destructive mt-1">番地を入力してください</p>}
             </div>
 
             <div>
@@ -407,7 +422,7 @@ export default function Checkout() {
         <div className="max-w-lg mx-auto">
           <Button
             onClick={handleSubmit}
-            disabled={!isFormValid || isSubmitting || isLoading}
+            disabled={isSubmitting || isLoading}
             className="w-full h-12 text-base font-semibold"
           >
             {isSubmitting || isLoading ? (
