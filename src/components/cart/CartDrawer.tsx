@@ -258,9 +258,28 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
                           <p className="text-xs text-muted-foreground">
                             {formatPrice(item.price.amount, item.price.currencyCode)} x {item.quantity}
                           </p>
-                          <p className="font-semibold text-sm text-primary">
-                            {formatPrice((parseFloat(item.price.amount) * item.quantity).toFixed(2), item.price.currencyCode)}
-                          </p>
+                          {(() => {
+                            const lineDiscount = discountInfo?.lineDiscounts?.[item.variantId] ?? 0;
+                            const originalTotal = parseFloat(item.price.amount) * item.quantity;
+                            const discountedTotal = originalTotal - lineDiscount;
+                            if (lineDiscount > 0) {
+                              return (
+                                <div className="flex items-center gap-1.5">
+                                  <p className="text-xs text-muted-foreground line-through">
+                                    {formatPrice(originalTotal.toFixed(2), item.price.currencyCode)}
+                                  </p>
+                                  <p className="font-semibold text-sm text-red-500">
+                                    {formatPrice(discountedTotal.toFixed(2), item.price.currencyCode)}
+                                  </p>
+                                </div>
+                              );
+                            }
+                            return (
+                              <p className="font-semibold text-sm text-primary">
+                                {formatPrice(originalTotal.toFixed(2), item.price.currencyCode)}
+                              </p>
+                            );
+                          })()}
                           {(() => {
                             const preorderDate = getPreorderDate(item.product.node.tags ?? []);
                             if (!preorderDate) return null;
