@@ -1,47 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-let cachedToken: string | null = null;
-let tokenExpiresAt: number = 0;
-
-async function getAccessToken(): Promise<string> {
-  const now = Date.now();
-  if (cachedToken && now < tokenExpiresAt - 5 * 60 * 1000) {
-    return cachedToken;
-  }
-
-  const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN;
-  const clientId = process.env.VITE_SHOPIFY_CLIENT_ID;
-  const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
-
-  if (!shop || !clientId || !clientSecret) {
-    throw new Error(`Missing env vars: shop=${!!shop}, clientId=${!!clientId}, secret=${!!clientSecret}`);
-  }
-
-  const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: clientId,
-      client_secret: clientSecret,
-    }),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Token request failed (${response.status}): ${text.substring(0, 200)}`);
-  }
-
-  const data = await response.json();
-  console.log('[Shopify] Token response keys:', Object.keys(data), 'has access_token:', !!data.access_token, 'expires_in:', data.expires_in);
-  if (!data.access_token) {
-    throw new Error(`Token response missing access_token: ${JSON.stringify(data).substring(0, 200)}`);
-  }
-  cachedToken = data.access_token;
-  tokenExpiresAt = now + (data.expires_in ?? 3600) * 1000;
-  return cachedToken!;
-}
-
 const ALLOWED_ORIGINS = [
   'https://biteme.co.jp',
   'https://www.biteme.co.jp',
@@ -74,9 +32,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  const token = process.env.SHOPIFY_CLIENT_SECRET;
+  const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
+
+  if (!token) {
+    console.error('[Shopify Proxy] Missing SHOPIFY_CLIENT_SECRET');
+    return res.status(500).json({ error: 'Missing token configuration' });
+  }
+
   try {
-    const token = await getAccessToken();
-    const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
     const apiVersion = '2025-10';
 
     const shopifyResponse = await fetch(
@@ -85,7 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Shopify-Storefront-Private-Token': token,
+          'X-Shopify-Storefront-Access-Token': token,
         },
         body: JSON.stringify(req.body),
       }
