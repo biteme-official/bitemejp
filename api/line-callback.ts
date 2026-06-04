@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac } from 'crypto';
 
-const SHOPIFY_API_VERSION = '2026-04';
+const SHOPIFY_API_VERSION = '2025-10';
 
 interface LineProfile {
   userId: string;

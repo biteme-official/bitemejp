@@ -70,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
 
     const shopifyResponse = await fetch(
-      `https://${shop}/admin/api/2026-04/policies.json`,
+      `https://${shop}/admin/api/2025-10/policies.json`,
       {
         headers: {
           'X-Shopify-Access-Token': token,

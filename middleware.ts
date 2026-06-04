@@ -53,7 +53,7 @@ async function fetchProductMeta(numericId: string): Promise<ProductMeta | null> 
     const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN!;
     const token = await getStorefrontToken();
 
-    const res = await fetch(`https://${shop}/api/2026-04/graphql.json`, {
+    const res = await fetch(`https://${shop}/api/2025-10/graphql.json`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
