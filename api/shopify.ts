@@ -33,7 +33,7 @@ async function getAccessToken(): Promise<string> {
   }
 
   const data = await response.json();
-  console.log('[Shopify] Token acquired, type:', data.token_type, 'expires_in:', data.expires_in);
+  console.log('[Shopify] Token acquired, prefix:', data.access_token?.substring(0, 10), 'type:', data.token_type, 'scope:', data.scope, 'expires_in:', data.expires_in);
   if (!data.access_token) {
     throw new Error(`Token response missing access_token: ${JSON.stringify(data).substring(0, 200)}`);
   }
