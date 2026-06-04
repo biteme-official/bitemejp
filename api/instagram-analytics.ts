@@ -11,8 +11,8 @@ async function igGet(path: string, params: Record<string, string>) {
   const res = await fetch(url.toString());
   const json = await res.json() as Record<string, unknown>;
   if (!res.ok) {
-    const errMsg = (json?.error as { message?: string } | undefined)?.message;
-    throw new Error(errMsg || `Instagram API ${res.status}`);
+    const msg = (json?.error as { message?: string } | undefined)?.message;
+    throw new Error(msg || `IG API ${res.status}`);
   }
   return json;
 }
@@ -28,20 +28,29 @@ function getRangeDates(range: string, from?: string, to?: string) {
     since = new Date(from + 'T00:00:00');
     until.setTime(new Date(to + 'T00:00:00').getTime() + 86400000);
   } else if (range === 'today') {
-    // keep since = today
+    // since = today
   } else if (range === '7d') {
     since.setDate(since.getDate() - 7);
   } else if (range === '90d') {
     since.setDate(since.getDate() - 90);
   } else {
-    // default: 28d
     since.setDate(since.getDate() - 28);
   }
   return { since, until };
 }
 
-interface InsightValue { value: number; end_time: string }
-interface InsightMetric { name: string; values: InsightValue[] }
+// end_time → YYYY-MM-DD (Instagram returns UTC-based end-of-period timestamp)
+function endToDate(endTime: string): string {
+  // end_time is the END of the reporting period (next day midnight in account TZ)
+  // Subtract 1 second so it falls in the correct calendar day
+  const d = new Date(endTime);
+  d.setSeconds(d.getSeconds() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+interface RawValue { value: number | Record<string, number>; end_time: string }
+interface RawMetric { name: string; values?: RawValue[] }
+
 interface MediaItem {
   id: string;
   timestamp: string;
@@ -66,16 +75,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const untilUnix = Math.floor(until.getTime() / 1000).toString();
 
   try {
-    const [accountRes, profileViewsRes, followerCountRes, mediaRes] = await Promise.all([
+    // Fetch in parallel: account info + follower metrics (두 가지 시도) + 게시글
+    const [accountRes, followerCountRes, followsRes, mediaRes] = await Promise.all([
       igGet(`/${igId}`, { fields: 'followers_count' }).catch(() => null),
+      // 방법 1: 일별 누적 팔로워 수
       igGet(`/${igId}/insights`, {
-        metric: 'profile_views',
+        metric: 'follower_count',
         period: 'day',
         since: sinceUnix,
         until: untilUnix,
       }).catch(() => null),
+      // 방법 2: 일별 팔로우/언팔로우 수 (방법 1 실패 시 fallback)
       igGet(`/${igId}/insights`, {
-        metric: 'follower_count',
+        metric: 'follows_and_unfollows',
         period: 'day',
         since: sinceUnix,
         until: untilUnix,
@@ -88,24 +100,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const currentFollowers = (accountRes?.followers_count as number) ?? 0;
 
-    const profileViewsByDate = new Map<string, number>();
-    for (const metric of (profileViewsRes?.data as InsightMetric[] | undefined) ?? []) {
-      if (metric.name === 'profile_views') {
-        for (const val of metric.values) {
-          profileViewsByDate.set(val.end_time.slice(0, 10), val.value);
-        }
-      }
-    }
-
+    // ── 팔로워 수 파싱 ─────────────────────────────────────────────────────────
+    // 방법 1: follower_count → 일별 누적 수
     const followerByDate = new Map<string, number>();
-    for (const metric of (followerCountRes?.data as InsightMetric[] | undefined) ?? []) {
-      if (metric.name === 'follower_count') {
+    for (const metric of (followerCountRes?.data as RawMetric[] | undefined) ?? []) {
+      if (metric.name === 'follower_count' && Array.isArray(metric.values)) {
         for (const val of metric.values) {
-          followerByDate.set(val.end_time.slice(0, 10), val.value);
+          if (typeof val.value === 'number') {
+            followerByDate.set(endToDate(val.end_time), val.value);
+          }
         }
       }
     }
 
+    // 방법 2: follows_and_unfollows → 일별 델타 (방법 1이 비어 있을 때 사용)
+    const deltaByDate = new Map<string, number>();
+    if (followerByDate.size === 0) {
+      for (const metric of (followsRes?.data as RawMetric[] | undefined) ?? []) {
+        if (metric.name === 'follows_and_unfollows' && Array.isArray(metric.values)) {
+          for (const val of metric.values) {
+            const date = endToDate(val.end_time);
+            const v = val.value;
+            if (typeof v === 'number') {
+              deltaByDate.set(date, v);
+            } else if (typeof v === 'object' && v !== null) {
+              // { FOLLOW: n, UNFOLLOW: m } or { follows: n, unfollows: m }
+              const follows = (v['FOLLOW'] ?? v['follows'] ?? 0) as number;
+              const unfollows = (v['UNFOLLOW'] ?? v['unfollows'] ?? 0) as number;
+              deltaByDate.set(date, follows - unfollows);
+            }
+          }
+        }
+      }
+    }
+
+    // 오늘 날짜는 currentFollowers를 앵커로 설정 (항상 신뢰 가능)
+    const todayISO = new Date().toISOString().slice(0, 10);
+    if (followerByDate.size === 0 && currentFollowers > 0) {
+      followerByDate.set(todayISO, currentFollowers);
+    }
+
+    // delta만 있는 경우: currentFollowers에서 역산해 누적 수 채우기
+    if (followerByDate.size <= 1 && deltaByDate.size > 0) {
+      const dates: string[] = [];
+      const cur = new Date(since);
+      while (cur < until) {
+        dates.push(cur.toISOString().slice(0, 10));
+        cur.setDate(cur.getDate() + 1);
+      }
+      let cumulative = currentFollowers;
+      for (const date of [...dates].reverse()) {
+        followerByDate.set(date, cumulative);
+        cumulative -= deltaByDate.get(date) ?? 0;
+      }
+    }
+
+    // ── 게시글 인사이트 ────────────────────────────────────────────────────────
     const sinceMs = since.getTime();
     const untilMs = until.getTime();
     const mediaItems = ((mediaRes?.data as MediaItem[] | undefined) ?? [])
@@ -146,7 +196,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       postByDate.set(p.date, ex);
     }
 
-    // Build daily data for each date in range
+    // ── 날짜별 데이터 조립 ─────────────────────────────────────────────────────
     const dates: string[] = [];
     const cur = new Date(since);
     while (cur < until) {
@@ -157,12 +207,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let prevFollowers: number | null = null;
     const daily = dates.map((date) => {
       const followers = followerByDate.get(date) ?? null;
-      const delta = prevFollowers !== null && followers !== null ? followers - prevFollowers : null;
+      const delta = deltaByDate.size > 0
+        ? (deltaByDate.get(date) ?? null)
+        : (prevFollowers !== null && followers !== null ? followers - prevFollowers : null);
       if (followers !== null) prevFollowers = followers;
       const posts = postByDate.get(date) ?? { count: 0, reach: 0, engagement: 0 };
       return {
         date,
-        profileViews: profileViewsByDate.get(date) ?? 0,
         followerDelta: delta,
         cumulativeFollowers: followers,
         postsPublished: posts.count,
