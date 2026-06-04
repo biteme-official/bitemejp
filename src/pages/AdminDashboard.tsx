@@ -1831,7 +1831,24 @@ function WeeklyReviewTab({ secret }: { secret: string }) {
 
       {/* 기간 선택 */}
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-xs text-muted-foreground font-medium">기간</span>
+        <div className="flex rounded-lg border bg-background overflow-hidden text-xs">
+          {([
+            { label: "어제", days: 1 },
+            { label: "7일", days: 7 },
+            { label: "30일", days: 30 },
+            { label: "90일", days: 90 },
+          ] as const).map(({ label, days }) => {
+            const presetFrom = (() => { const d = new Date(); d.setDate(d.getDate() - days); return d.toISOString().slice(0, 10); })();
+            const active = from === presetFrom && to === todayISO;
+            return (
+              <button key={label} onClick={() => { setFrom(presetFrom); setTo(todayISO); }}
+                className={`px-3 py-1.5 transition-colors ${active ? "text-white font-medium" : "text-muted-foreground hover:text-foreground"}`}
+                style={active ? { backgroundColor: BRAND } : {}}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
         <input type="date" value={from} max={to}
           onChange={(e) => setFrom(e.target.value)}
           className="text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring/30" />
