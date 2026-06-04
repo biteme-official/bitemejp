@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || '';
 const CLIENT_ID = process.env.VITE_SHOPIFY_CLIENT_ID || '';
 const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || '';
-const API_VERSION = '2025-07';
+const API_VERSION = '2026-04';
 const BASE_URL = 'https://biteme.co.jp';
 
 let cachedToken: string | null = null;

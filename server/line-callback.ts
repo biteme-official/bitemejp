@@ -1,6 +1,6 @@
 import type { Connect } from 'vite';
 
-const SHOPIFY_API_VERSION = '2025-07';
+const SHOPIFY_API_VERSION = '2026-04';
 
 interface LineProfile {
   userId: string;

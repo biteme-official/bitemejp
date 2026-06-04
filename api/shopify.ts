@@ -73,7 +73,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const token = await getAccessToken();
     const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
-    const apiVersion = '2025-07';
+    const apiVersion = '2026-04';
 
     const shopifyResponse = await fetch(
       `https://${shop}/api/${apiVersion}/graphql.json`,

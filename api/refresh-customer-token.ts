@@ -8,7 +8,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac } from 'crypto';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
-const SHOPIFY_API_VERSION = '2025-07';
+const SHOPIFY_API_VERSION = '2026-04';
 
 const ALLOWED_ORIGINS = [
   'https://biteme.co.jp',
