@@ -1627,14 +1627,19 @@ function FollowerInputModal({
   );
 }
 
-function WeeklyReviewTab({ secret }: { secret: string }) {
+function WeeklyReviewTab({ secret, isActive }: { secret: string; isActive: boolean }) {
   const todayISO = new Date().toISOString().slice(0, 10);
   const [from, setFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); });
   const [to, setTo] = useState(todayISO);
   const [showInput, setShowInput] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [activated, setActivated] = useState(false);
 
-  const enabled = !!from && !!to && from <= to;
+  useEffect(() => {
+    if (isActive && !activated) setActivated(true);
+  }, [isActive]);
+
+  const enabled = activated && !!from && !!to && from <= to;
   const retry = (count: number, err: unknown) => {
     if (err instanceof Error && err.message === "UNAUTHORIZED") return false;
     return count < 2;
@@ -2339,7 +2344,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
             </TabsContent>
             {/* ══ 주간회고 탭 ══ */}
             <TabsContent value="weekly" className="space-y-5 mt-0">
-              <WeeklyReviewTab secret={secret} />
+              <WeeklyReviewTab secret={secret} isActive={activeTab === "weekly"} />
               <p className="text-center text-xs text-muted-foreground pb-4">
                 GA4 + Shopify + Instagram · {RANGE_LABELS[range]} 데이터
               </p>
