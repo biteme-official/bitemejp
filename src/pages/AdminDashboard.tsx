@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import { format } from "date-fns";
 import type { DateRange } from "react-day-picker";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, ClipboardCopy, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -164,6 +164,24 @@ async function fetchCustomers(range: Range, secret: string, customFrom?: string,
 
 // ─── 공통 컴포넌트 ─────────────────────────────────────────────────────────────
 
+function CopyButton({ getData }: { getData: () => string }) {
+  const [copied, setCopied] = useState(false);
+  const handle = async () => {
+    await navigator.clipboard.writeText(getData());
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button
+      onClick={handle}
+      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1 rounded border hover:bg-muted"
+    >
+      {copied ? <Check className="h-3 w-3 text-green-500" /> : <ClipboardCopy className="h-3 w-3" />}
+      {copied ? "복사됨" : "복사"}
+    </button>
+  );
+}
+
 function SectionLabel({ children }: { children: string }) {
   return (
     <div className="flex items-center gap-3">
@@ -282,6 +300,14 @@ function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-semibold">상세 데이터</CardTitle>
+          <div className="flex items-center gap-2">
+          <CopyButton getData={() => {
+            const header = "날짜\t총 사용자\t상품조회수\t세션\t주문 수\t매출(¥)";
+            const lines = rows.map(r =>
+              `${r.label}\t${r.activeUsers}\t${r.itemViews}\t${r.sessions}\t${r.orders}\t${r.revenue}`
+            );
+            return [header, ...lines].join("\n");
+          }} />
           <div className="flex rounded-md border overflow-hidden text-xs">
             {(["daily", "weekly", "monthly"] as const).map((t) => (
               <button
@@ -292,6 +318,7 @@ function TimelineTable({ timeline }: { timeline: ReturnType<typeof buildTimeline
                 {t === "daily" ? "일간" : t === "weekly" ? "주간" : "월간"}
               </button>
             ))}
+          </div>
           </div>
         </div>
       </CardHeader>
@@ -382,7 +409,14 @@ function TopProductsTable({ data }: { data: ShopifyData["topProducts"] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">상위 판매 상품</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold">상위 판매 상품</CardTitle>
+          <CopyButton getData={() => {
+            const header = "상품명\t수량\t매출(¥)";
+            const lines = data.map(r => `${translateTitle(r.title)}\t${r.quantity}\t${r.revenue}`);
+            return [header, ...lines].join("\n");
+          }} />
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <table className="w-full text-xs">
@@ -681,7 +715,18 @@ function TrafficSourcesTable({ data }: { data: AnalyticsData["trafficSources"] }
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">유입 경로</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold">유입 경로</CardTitle>
+          <CopyButton getData={() => {
+            const header = "소스/매체\t세션\t비율";
+            const lines = data.map(r => {
+              const sessions = r.sessions as number;
+              const pct = total > 0 ? ((sessions / total) * 100).toFixed(1) : "0.0";
+              return `${r.sessionSource} / ${r.sessionMedium}\t${sessions}\t${pct}%`;
+            });
+            return [header, ...lines].join("\n");
+          }} />
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <table className="w-full text-xs">
@@ -759,7 +804,16 @@ function TopPagesTable({ data }: { data: AnalyticsData["topPages"] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">상위 페이지</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold">상위 페이지</CardTitle>
+          <CopyButton getData={() => {
+            const header = "페이지\tPV\t유저\t체류";
+            const lines = data.map(r =>
+              `${r.pagePath}\t${r.screenPageViews}\t${r.activeUsers}\t${formatDuration(r.averageSessionDuration as number)}`
+            );
+            return [header, ...lines].join("\n");
+          }} />
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <table className="w-full text-xs">
@@ -1040,8 +1094,19 @@ function SourceConversionTable({ data }: { data: AnalyticsData["trafficSources"]
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">소스 / 매체별 전환율</CardTitle>
-        <p className="text-xs text-muted-foreground">전환율 높은 순 — 전환율 = 구매 완료 / 세션</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-sm font-semibold">소스 / 매체별 전환율</CardTitle>
+            <p className="text-xs text-muted-foreground">전환율 높은 순 — 전환율 = 구매 완료 / 세션</p>
+          </div>
+          <CopyButton getData={() => {
+            const header = "소스/매체\t세션\t구매\t전환율\t매출(¥)";
+            const lines = rows.map(r =>
+              `${r.sessionSource} / ${r.sessionMedium}\t${r.sessions}\t${r.transactions || 0}\t${r.convRate > 0 ? r.convRate.toFixed(2) + "%" : "0%"}\t${r.purchaseRevenue}`
+            );
+            return [header, ...lines].join("\n");
+          }} />
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <table className="w-full text-xs">
@@ -1104,8 +1169,21 @@ function ExitPagesTable({ data }: { data: AnalyticsData["exitPages"] }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">페이지별 이탈 포인트</CardTitle>
-        <p className="text-xs text-muted-foreground">이탈 위험도 = 트래픽 × 이탈률 (높은 순)</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-sm font-semibold">페이지별 이탈 포인트</CardTitle>
+            <p className="text-xs text-muted-foreground">이탈 위험도 = 트래픽 × 이탈률 (높은 순)</p>
+          </div>
+          <CopyButton getData={() => {
+            const header = "페이지\t유형\t세션\t이탈률\t체류\t위험도";
+            const sorted = withRisk.slice().sort((a, b) => b.risk - a.risk);
+            const lines = sorted.map(r => {
+              const { label } = getRiskLabel(r.risk, maxRisk);
+              return `${r.pagePath}\t${r.type}\t${r.sessions}\t${(r.bounceRate * 100).toFixed(1)}%\t${formatDuration(r.averageSessionDuration as number)}\t${label}`;
+            });
+            return [header, ...lines].join("\n");
+          }} />
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         <div className="overflow-x-auto">
@@ -1364,7 +1442,16 @@ function RankingTable({ title, data }: { title: string; data: { label: string; c
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold">{title}</CardTitle>
+          {data.length > 0 && (
+            <CopyButton getData={() => {
+              const header = "순위\t항목\t클릭 수";
+              const lines = data.map((r, i) => `${i + 1}\t${r.label}\t${r.count}`);
+              return [header, ...lines].join("\n");
+            }} />
+          )}
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         {data.length === 0 ? (
@@ -1442,6 +1529,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
   const [range, setRange] = useState<Range>("7d");
   const [customDates, setCustomDates] = useState<DateRange | undefined>();
   const [calOpen, setCalOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("dashboard");
 
   const customFrom = customDates?.from ? format(customDates.from, "yyyy-MM-dd") : undefined;
   const customTo = customDates?.to ? format(customDates.to, "yyyy-MM-dd") : undefined;
@@ -1600,7 +1688,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
         )}
 
         {(data || shopify) && (
-          <Tabs defaultValue="dashboard" className="space-y-5">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
             <TabsList className="h-9">
               <TabsTrigger value="dashboard" className="text-xs px-4">대시보드</TabsTrigger>
               <TabsTrigger value="funnel" className="text-xs px-4">퍼널 분석</TabsTrigger>
