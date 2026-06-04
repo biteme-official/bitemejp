@@ -33,8 +33,12 @@ async function getAccessToken(): Promise<string> {
   }
 
   const data = await response.json();
+  console.log('[Shopify] Token response keys:', Object.keys(data), 'has access_token:', !!data.access_token, 'expires_in:', data.expires_in);
+  if (!data.access_token) {
+    throw new Error(`Token response missing access_token: ${JSON.stringify(data).substring(0, 200)}`);
+  }
   cachedToken = data.access_token;
-  tokenExpiresAt = now + data.expires_in * 1000;
+  tokenExpiresAt = now + (data.expires_in ?? 3600) * 1000;
   return cachedToken!;
 }
 
