@@ -1621,17 +1621,48 @@ function FollowerInputModal({
   );
 }
 
-function WeeklyReviewTab({
-  timeline,
-  instagram,
-  secret,
-}: {
-  timeline: ReturnType<typeof buildTimeline>;
-  instagram: InstagramData | null | undefined;
-  secret: string;
-}) {
+function WeeklyReviewTab({ secret }: { secret: string }) {
+  const currentYear = new Date().getFullYear();
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const [from, setFrom] = useState(`${currentYear}-02-01`);
+  const [to, setTo] = useState(todayISO);
   const [showInput, setShowInput] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+  const enabled = !!from && !!to && from <= to;
+  const retry = (count: number, err: unknown) => {
+    if (err instanceof Error && err.message === "UNAUTHORIZED") return false;
+    return count < 2;
+  };
+
+  const { data: ga4Data, isLoading: ga4Loading } = useQuery({
+    queryKey: ["analytics-weekly", from, to, secret],
+    queryFn: () => fetchAnalytics("custom", secret, from, to),
+    staleTime: 10 * 60 * 1000,
+    enabled,
+    retry,
+  });
+  const { data: shopifyData, isLoading: shopifyLoading } = useQuery({
+    queryKey: ["shopify-analytics-weekly", from, to, secret],
+    queryFn: () => fetchShopify("custom", secret, from, to),
+    staleTime: 10 * 60 * 1000,
+    enabled,
+    retry,
+  });
+  const { data: instagram } = useQuery({
+    queryKey: ["instagram-analytics-weekly", from, to, secret],
+    queryFn: () => fetchInstagram("custom", secret, from, to),
+    staleTime: 10 * 60 * 1000,
+    enabled,
+    retry,
+  });
+
+  const isLoading = ga4Loading || shopifyLoading;
+
+  const timeline = useMemo(() => {
+    if (!ga4Data || !shopifyData) return [];
+    return buildTimeline(ga4Data.revenueOverTime, shopifyData.dailyOrders);
+  }, [ga4Data, shopifyData]);
 
   const igByDate = useMemo(() => new Map((instagram?.daily ?? []).map((d) => [d.date, d])), [instagram]);
   const sorted = useMemo(() => [...timeline].sort((a, b) => a.isoDate.localeCompare(b.isoDate)), [timeline]);
@@ -1797,6 +1828,20 @@ function WeeklyReviewTab({
           }}
         />
       )}
+
+      {/* 기간 선택 */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-muted-foreground font-medium">기간</span>
+        <input type="date" value={from} max={to}
+          onChange={(e) => setFrom(e.target.value)}
+          className="text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring/30" />
+        <span className="text-xs text-muted-foreground">~</span>
+        <input type="date" value={to} min={from} max={todayISO}
+          onChange={(e) => setTo(e.target.value)}
+          className="text-xs border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-ring/30" />
+        {isLoading && <span className="text-xs text-muted-foreground animate-pulse">불러오는 중...</span>}
+      </div>
+
       {instagram && !instagram.configured && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
           Instagram 미연동 — <code className="font-mono bg-amber-100 px-1 rounded">INSTAGRAM_ACCESS_TOKEN</code> / <code className="font-mono bg-amber-100 px-1 rounded">INSTAGRAM_ACCOUNT_ID</code> 환경 변수가 필요합니다.
@@ -2272,13 +2317,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
             </TabsContent>
             {/* ══ 주간회고 탭 ══ */}
             <TabsContent value="weekly" className="space-y-5 mt-0">
-              {timeline.length > 0 ? (
-                <WeeklyReviewTab timeline={timeline} instagram={instagram} secret={secret} />
-              ) : (
-                <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
-                  데이터를 불러오는 중...
-                </div>
-              )}
+              <WeeklyReviewTab secret={secret} />
               <p className="text-center text-xs text-muted-foreground pb-4">
                 GA4 + Shopify + Instagram · {RANGE_LABELS[range]} 데이터
               </p>
