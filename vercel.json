@@ -7,6 +7,10 @@
     {
       "path": "/api/slack-report",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/instagram-follower-cron",
+      "schedule": "0 15 * * *"
     }
   ],
   "headers": [
@@ -59,6 +63,8 @@
     { "source": "/api/instagram-reels", "destination": "/api/instagram-reels" },
     { "source": "/api/kr-reviews", "destination": "/api/kr-reviews" },
     { "source": "/api/shopify-purchase-webhook", "destination": "/api/shopify-purchase-webhook" },
+    { "source": "/api/instagram-follower-cron", "destination": "/api/instagram-follower-cron" },
+    { "source": "/api/instagram-analytics", "destination": "/api/instagram-analytics" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
