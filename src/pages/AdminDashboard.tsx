@@ -186,6 +186,15 @@ async function fetchInstagram(range: Range, secret: string, customFrom?: string,
   return res.json();
 }
 
+async function postFollowerData(rows: { date: string; followers_count: number }[], secret: string): Promise<void> {
+  const res = await fetch("/api/instagram-follower-input", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ rows }),
+  });
+  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "저장 실패"); }
+}
+
 async function fetchCustomers(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<CustomerData> {
   const params = new URLSearchParams({ range });
   if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
@@ -1522,65 +1531,115 @@ function RankingTable({ title, data }: { title: string; data: { label: string; c
 
 // ─── 주간회고 탭 ──────────────────────────────────────────────────────────────
 
-interface ReviewRow {
-  type: "day" | "week";
-  label: string;
-  dau: number;
-  revenue: number;
-  orders: number;
-  itemViews: number;
-  sessions: number;
-  followerDelta: number | null;
-  cumulativeFollowers: number | null;
-  postsPublished: number;
-  postReach: number;
-  postEngagement: number;
+function pctChange(curr: number, prev: number | undefined): number | null {
+  if (!prev || prev === 0) return null;
+  return ((curr - prev) / prev) * 100;
+}
+
+function PctBadge({ v }: { v: number | null | undefined }) {
+  if (v == null) return null;
+  const pos = v >= 0;
+  return <span className={`text-[10px] ${pos ? "text-green-600" : "text-red-500"}`}>{pos ? "▲" : "▼"}{Math.abs(v).toFixed(1)}%</span>;
+}
+
+function FollowerInputModal({
+  onClose,
+  onSave,
+}: {
+  onClose: () => void;
+  onSave: (rows: { date: string; followers_count: number }[]) => Promise<void>;
+}) {
+  const [text, setText] = useState("");
+  const [preview, setPreview] = useState<{ date: string; followers_count: number }[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function parseText() {
+    const rows = text.trim().split("\n").map((line) => {
+      const [d, c] = line.trim().split(/[\t,]/);
+      const count = parseInt((c ?? "").replace(/[^0-9]/g, ""), 10);
+      return { date: (d ?? "").trim(), followers_count: count };
+    }).filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.followers_count > 0);
+    setPreview(rows);
+  }
+
+  async function save() {
+    setSaving(true); setErr(null);
+    try { await onSave(preview); }
+    catch (e) { setErr(e instanceof Error ? e.message : "오류 발생"); setSaving(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-background rounded-xl border shadow-xl w-full max-w-lg space-y-4 p-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">팔로워 수 수기 입력</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">✕</button>
+        </div>
+        <p className="text-xs text-muted-foreground">날짜(YYYY-MM-DD)와 팔로워 수를 탭 또는 쉼표로 구분해서 붙여넣으세요. 스프레드시트에서 복사해서 붙여넣기 가능합니다.</p>
+        <div className="bg-muted rounded p-2 text-[11px] font-mono text-muted-foreground leading-5">
+          2025-12-01&nbsp;&nbsp;&nbsp;24000<br />
+          2025-12-08&nbsp;&nbsp;&nbsp;24150<br />
+          2025-12-15&nbsp;&nbsp;&nbsp;24320
+        </div>
+        <textarea
+          value={text}
+          onChange={(e) => { setText(e.target.value); setPreview([]); }}
+          className="w-full h-36 border rounded-lg px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-ring/30"
+          placeholder={"2025-12-01\t24000\n2025-12-08\t24150"}
+        />
+        <div className="flex items-center gap-2">
+          <button onClick={parseText} className="px-3 py-1.5 text-xs rounded border hover:bg-muted transition-colors">파싱 미리보기</button>
+          {preview.length > 0 && <span className="text-xs text-muted-foreground">{preview.length}개 행 인식됨</span>}
+        </div>
+        {preview.length > 0 && (
+          <div className="max-h-32 overflow-y-auto border rounded text-xs">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-muted">
+                <tr><th className="text-left px-2 py-1 font-medium">날짜</th><th className="text-right px-2 py-1 font-medium">팔로워</th></tr>
+              </thead>
+              <tbody>
+                {preview.slice(0, 10).map((r, i) => (
+                  <tr key={i} className="border-t"><td className="px-2 py-1 font-mono">{r.date}</td><td className="px-2 py-1 text-right">{r.followers_count.toLocaleString()}</td></tr>
+                ))}
+                {preview.length > 10 && <tr><td colSpan={2} className="px-2 py-1 text-center text-muted-foreground">외 {preview.length - 10}개</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {err && <p className="text-xs text-red-500">{err}</p>}
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 text-xs rounded border hover:bg-muted transition-colors">취소</button>
+          <button onClick={save} disabled={preview.length === 0 || saving}
+            className="px-3 py-1.5 text-xs rounded font-medium text-white disabled:opacity-50 hover:opacity-90 transition-opacity"
+            style={{ backgroundColor: BRAND }}>
+            {saving ? "저장 중..." : `${preview.length}개 저장`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function WeeklyReviewTab({
   timeline,
   instagram,
+  secret,
 }: {
   timeline: ReturnType<typeof buildTimeline>;
   instagram: InstagramData | null | undefined;
+  secret: string;
 }) {
-  const igByDate = new Map((instagram?.daily ?? []).map((d) => [d.date, d]));
-  const sorted = [...timeline].sort((a, b) => a.isoDate.localeCompare(b.isoDate));
+  const [viewTab, setViewTab] = useState<"daily" | "weekly" | "monthly">("daily");
+  const [showInput, setShowInput] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
-  const weekGroups = new Map<string, typeof sorted>();
-  for (const row of sorted) {
-    const key = getMondayISO(row.isoDate);
-    if (!weekGroups.has(key)) weekGroups.set(key, []);
-    weekGroups.get(key)!.push(row);
-  }
+  const igByDate = useMemo(() => new Map((instagram?.daily ?? []).map((d) => [d.date, d])), [instagram]);
+  const sorted = useMemo(() => [...timeline].sort((a, b) => a.isoDate.localeCompare(b.isoDate)), [timeline]);
 
-  const displayRows: ReviewRow[] = [];
-  for (const [mondayISO, days] of [...weekGroups.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    // 일별 행 추가
-    for (const day of days) {
-      const ig = igByDate.get(day.isoDate);
-      displayRows.push({
-        type: "day",
-        label: day.isoDate,
-        dau: day.activeUsers,
-        revenue: day.revenue,
-        orders: day.orders,
-        itemViews: day.itemViews,
-        sessions: day.sessions,
-        followerDelta: ig?.followerDelta ?? null,
-        cumulativeFollowers: ig?.cumulativeFollowers ?? null,
-        postsPublished: ig?.postsPublished ?? 0,
-        postReach: ig?.postReach ?? 0,
-        postEngagement: ig?.postEngagement ?? 0,
-      });
-    }
-
-    // 주간 합계 행 추가
-    const igDays = days.map((d) => igByDate.get(d.isoDate)).filter(Boolean) as InstagramDay[];
-    const lastIg = igDays[igDays.length - 1];
-    displayRows.push({
-      type: "week",
-      label: getWeekLabel(mondayISO),
+  function buildAgg(days: typeof sorted) {
+    const igDays = days.map((d) => igByDate.get(d.isoDate)).filter((x): x is InstagramDay => !!x);
+    return {
       dau: days.reduce((s, d) => s + d.activeUsers, 0),
       revenue: days.reduce((s, d) => s + d.revenue, 0),
       orders: days.reduce((s, d) => s + d.orders, 0),
@@ -1589,123 +1648,202 @@ function WeeklyReviewTab({
       followerDelta: igDays.some((d) => d.followerDelta !== null)
         ? igDays.reduce((s, d) => s + (d.followerDelta ?? 0), 0)
         : null,
-      cumulativeFollowers: lastIg?.cumulativeFollowers ?? null,
+      cumulativeFollowers: igDays[igDays.length - 1]?.cumulativeFollowers ?? null,
       postsPublished: igDays.reduce((s, d) => s + d.postsPublished, 0),
       postReach: igDays.reduce((s, d) => s + d.postReach, 0),
       postEngagement: igDays.reduce((s, d) => s + d.postEngagement, 0),
-    });
+    };
   }
 
-  const igNotConfigured = instagram && !instagram.configured;
+  const dailyRows = useMemo(() => sorted.map((day) => {
+    const ig = igByDate.get(day.isoDate);
+    return {
+      label: day.isoDate,
+      dau: day.activeUsers, revenue: day.revenue, orders: day.orders,
+      itemViews: day.itemViews, sessions: day.sessions,
+      followerDelta: ig?.followerDelta ?? null,
+      cumulativeFollowers: ig?.cumulativeFollowers ?? null,
+      postsPublished: ig?.postsPublished ?? 0,
+      postReach: ig?.postReach ?? 0,
+      postEngagement: ig?.postEngagement ?? 0,
+    };
+  }), [sorted, igByDate]);
 
+  const weeklyRows = useMemo(() => {
+    const groups = new Map<string, typeof sorted>();
+    for (const row of sorted) {
+      const key = getMondayISO(row.isoDate);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(row);
+    }
+    const raw = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
+      .map(([mondayISO, days]) => ({ label: getWeekLabel(mondayISO), ...buildAgg(days) }));
+    return raw.map((row, i) => ({
+      ...row,
+      dauPct: pctChange(row.dau, raw[i - 1]?.dau),
+      revenuePct: pctChange(row.revenue, raw[i - 1]?.revenue),
+      ordersPct: pctChange(row.orders, raw[i - 1]?.orders),
+      postReachPct: pctChange(row.postReach, raw[i - 1]?.postReach),
+    }));
+  }, [sorted, igByDate]);
+
+  const monthlyRows = useMemo(() => {
+    const groups = new Map<string, typeof sorted>();
+    for (const row of sorted) {
+      const key = row.isoDate.slice(0, 7);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(row);
+    }
+    const raw = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, days]) => ({
+        label: `${parseInt(key.slice(5, 7))}월`,
+        ...buildAgg(days),
+      }));
+    return raw.map((row, i) => ({
+      ...row,
+      dauPct: pctChange(row.dau, raw[i - 1]?.dau),
+      revenuePct: pctChange(row.revenue, raw[i - 1]?.revenue),
+      ordersPct: pctChange(row.orders, raw[i - 1]?.orders),
+      postReachPct: pctChange(row.postReach, raw[i - 1]?.postReach),
+    }));
+  }, [sorted, igByDate]);
+
+  // TSV helpers
+  const COL_HEADERS = ["기간", "DAU", "매출(¥)", "주문수", "상품조회", "객단가(¥)", "CVR", "팔로우 증감", "누적 팔로워", "게시글 수", "게시글 도달", "게시글당 도달", "게시글 인게이지", "인게이지율"];
+  function rowToTsv(r: { label: string; dau: number; revenue: number; orders: number; itemViews: number; sessions: number; followerDelta: number | null; cumulativeFollowers: number | null; postsPublished: number; postReach: number; postEngagement: number }) {
+    const aov = r.orders > 0 ? Math.round(r.revenue / r.orders) : 0;
+    const cvr = r.sessions > 0 ? (r.orders / r.sessions) * 100 : 0;
+    const rpp = r.postsPublished > 0 ? Math.round(r.postReach / r.postsPublished) : 0;
+    const er = r.postReach > 0 ? (r.postEngagement / r.postReach) * 100 : 0;
+    return [r.label, r.dau || "", r.revenue || "", r.orders || "", r.itemViews || "", aov || "",
+      cvr > 0 ? cvr.toFixed(2) + "%" : "", r.followerDelta ?? "", r.cumulativeFollowers ?? "",
+      r.postsPublished || "", r.postReach || "", rpp || "", r.postEngagement || "", er > 0 ? er.toFixed(2) + "%" : ""].join("\t");
+  }
   function tsvData() {
-    const header = [
-      "일자", "DAU", "매출(¥)", "주문수", "상품조회수", "객단가(¥)", "CVR",
-      "팔로우 증감", "누적 팔로워",
-      "게시글 수", "게시글 도달", "게시글당 도달", "게시글 인게이지", "게시글당 인게이지", "인게이지율",
-    ].join("\t");
-    const lines = displayRows.map((r) => {
-      const aov = r.orders > 0 ? Math.round(r.revenue / r.orders) : 0;
-      const cvr = r.sessions > 0 ? (r.orders / r.sessions) * 100 : 0;
-      const rpp = r.postsPublished > 0 ? Math.round(r.postReach / r.postsPublished) : 0;
-      const epp = r.postsPublished > 0 ? Math.round(r.postEngagement / r.postsPublished) : 0;
-      const er = r.postReach > 0 ? (r.postEngagement / r.postReach) * 100 : 0;
-      return [
-        r.label,
-        r.dau || "",
-        r.revenue || "",
-        r.orders || "",
-        r.itemViews || "",
-        aov || "",
-        cvr > 0 ? cvr.toFixed(2) + "%" : "",
-        r.followerDelta !== null ? r.followerDelta : "",
-        r.cumulativeFollowers !== null ? r.cumulativeFollowers : "",
-        r.postsPublished || "",
-        r.postReach || "",
-        rpp || "",
-        r.postEngagement || "",
-        epp || "",
-        er > 0 ? er.toFixed(2) + "%" : "",
-      ].join("\t");
-    });
-    return [header, ...lines].join("\n");
+    const rows = viewTab === "daily" ? dailyRows : viewTab === "weekly" ? weeklyRows : monthlyRows;
+    return [COL_HEADERS.join("\t"), ...rows.map(rowToTsv)].join("\n");
+  }
+
+  // Shared table header
+  const changeLabel = viewTab === "weekly" ? "WoW" : "MoM";
+  const THead = ({ showChange }: { showChange: boolean }) => (
+    <thead className="sticky top-0 z-20 bg-background border-b">
+      <tr>
+        <th className="sticky left-0 z-30 bg-background text-left px-3 py-2 font-medium text-muted-foreground min-w-[100px]">기간</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground">DAU{showChange && <span className="block text-[9px] text-muted-foreground/60">{changeLabel}</span>}</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground">매출{showChange && <span className="block text-[9px] text-muted-foreground/60">{changeLabel}</span>}</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground">주문수{showChange && <span className="block text-[9px] text-muted-foreground/60">{changeLabel}</span>}</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground">상품조회</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground">객단가</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground">CVR</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">팔로우 증감</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground">누적 팔로워</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">게시글 수</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글 도달{showChange && <span className="block text-[9px] text-muted-foreground/60">{changeLabel}</span>}</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글당 도달</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground">인게이지</th>
+        <th className="text-right px-3 py-2 font-medium text-muted-foreground">인게이지율</th>
+      </tr>
+    </thead>
+  );
+
+  function TRow({ r, highlight }: { r: typeof dailyRows[0] & { dauPct?: number | null; revenuePct?: number | null; ordersPct?: number | null; postReachPct?: number | null }; highlight?: boolean }) {
+    const aov = r.orders > 0 ? Math.round(r.revenue / r.orders) : 0;
+    const cvr = r.sessions > 0 ? (r.orders / r.sessions) * 100 : 0;
+    const rpp = r.postsPublished > 0 ? Math.round(r.postReach / r.postsPublished) : 0;
+    const er = r.postReach > 0 ? (r.postEngagement / r.postReach) * 100 : 0;
+    const cls = highlight ? "bg-orange-50 font-semibold border-t-2 border-orange-200" : "border-b hover:bg-muted/30 transition-colors";
+    const stickyBg = highlight ? "bg-orange-50" : "bg-background";
+    return (
+      <tr className={cls}>
+        <td className={`sticky left-0 z-10 px-3 py-2 font-mono ${stickyBg} ${highlight ? "text-orange-700" : ""}`}>{r.label}</td>
+        <td className="px-3 py-2 text-right">{r.dau > 0 ? r.dau.toLocaleString() : "—"}<PctBadge v={r.dauPct} /></td>
+        <td className="px-3 py-2 text-right">{r.revenue > 0 ? formatRevenue(r.revenue) : "—"}<PctBadge v={r.revenuePct} /></td>
+        <td className="px-3 py-2 text-right">{r.orders > 0 ? r.orders.toLocaleString() : "—"}<PctBadge v={r.ordersPct} /></td>
+        <td className="px-3 py-2 text-right">{r.itemViews > 0 ? r.itemViews.toLocaleString() : "—"}</td>
+        <td className="px-3 py-2 text-right">{aov > 0 ? formatRevenue(aov) : "—"}</td>
+        <td className="px-3 py-2 text-right">{cvr > 0 ? `${cvr.toFixed(2)}%` : "—"}</td>
+        <td className="px-3 py-2 text-right border-l border-muted">
+          {r.followerDelta !== null
+            ? <span className={r.followerDelta >= 0 ? "text-green-600" : "text-red-500"}>{r.followerDelta >= 0 ? "+" : ""}{r.followerDelta.toLocaleString()}</span>
+            : "—"}
+        </td>
+        <td className="px-3 py-2 text-right">{r.cumulativeFollowers !== null ? r.cumulativeFollowers.toLocaleString() : "—"}</td>
+        <td className="px-3 py-2 text-right border-l border-muted">{r.postsPublished > 0 ? r.postsPublished : "—"}</td>
+        <td className="px-3 py-2 text-right">{r.postReach > 0 ? r.postReach.toLocaleString() : "—"}<PctBadge v={r.postReachPct} /></td>
+        <td className="px-3 py-2 text-right">{rpp > 0 ? rpp.toLocaleString() : "—"}</td>
+        <td className="px-3 py-2 text-right">{r.postEngagement > 0 ? r.postEngagement.toLocaleString() : "—"}</td>
+        <td className="px-3 py-2 text-right">{er > 0 ? `${er.toFixed(2)}%` : "—"}</td>
+      </tr>
+    );
   }
 
   return (
     <div className="space-y-3">
-      {igNotConfigured && (
+      {showInput && (
+        <FollowerInputModal
+          onClose={() => setShowInput(false)}
+          onSave={async (rows) => {
+            await postFollowerData(rows, secret);
+            setSaveMsg(`${rows.length}개 저장 완료`);
+            setShowInput(false);
+            setTimeout(() => setSaveMsg(null), 3000);
+          }}
+        />
+      )}
+      {instagram && !instagram.configured && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
-          Instagram 미연동 — Vercel 환경 변수에 <code className="font-mono bg-amber-100 px-1 rounded">INSTAGRAM_ACCESS_TOKEN</code> / <code className="font-mono bg-amber-100 px-1 rounded">INSTAGRAM_ACCOUNT_ID</code> 가 필요합니다. Shopify·GA4 지표는 정상 표시됩니다.
+          Instagram 미연동 — <code className="font-mono bg-amber-100 px-1 rounded">INSTAGRAM_ACCESS_TOKEN</code> / <code className="font-mono bg-amber-100 px-1 rounded">INSTAGRAM_ACCOUNT_ID</code> 환경 변수가 필요합니다.
         </div>
+      )}
+      {saveMsg && (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-xs text-green-700">{saveMsg}</div>
       )}
       <Card>
         <CardHeader className="pb-2">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-sm font-semibold">주간회고 데이터</CardTitle>
-            <CopyButton getData={tsvData} />
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-sm font-semibold">주간회고 데이터</CardTitle>
+              <div className="flex rounded-md border overflow-hidden text-xs">
+                {(["daily", "weekly", "monthly"] as const).map((t) => (
+                  <button key={t} onClick={() => setViewTab(t)}
+                    className={`px-3 py-1 transition-colors ${viewTab === t ? "text-white font-medium" : "text-muted-foreground hover:bg-muted"}`}
+                    style={viewTab === t ? { backgroundColor: BRAND } : {}}>
+                    {t === "daily" ? "일간" : t === "weekly" ? "주간" : "월간"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setShowInput(true)}
+                className="text-xs px-2 py-1 rounded border hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
+                팔로워 수기 입력
+              </button>
+              <CopyButton getData={tsvData} />
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: "calc(100vh - 220px)" }}>
             <table className="text-xs whitespace-nowrap border-collapse w-full">
-              <thead className="sticky top-0 z-20 bg-background border-b">
-                <tr>
-                  <th className="sticky left-0 z-30 bg-background text-left px-3 py-2 font-medium text-muted-foreground">일자</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">DAU</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">매출</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">주문수</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">상품조회</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">객단가</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">CVR</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">팔로우 증감</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">누적 팔로워</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">게시글 수</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글 도달</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글당 도달</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글 인게이지</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글당 인게이지</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">인게이지율</th>
-                </tr>
-              </thead>
-              <tbody>
-                {displayRows.map((row, i) => {
-                  const isWeek = row.type === "week";
-                  const aov = row.orders > 0 ? Math.round(row.revenue / row.orders) : 0;
-                  const cvr = row.sessions > 0 ? (row.orders / row.sessions) * 100 : 0;
-                  const rpp = row.postsPublished > 0 ? Math.round(row.postReach / row.postsPublished) : 0;
-                  const epp = row.postsPublished > 0 ? Math.round(row.postEngagement / row.postsPublished) : 0;
-                  const er = row.postReach > 0 ? (row.postEngagement / row.postReach) * 100 : 0;
-                  const rowCls = isWeek
-                    ? "bg-orange-50 border-t-2 border-orange-200 font-semibold"
-                    : "border-b hover:bg-muted/30 transition-colors";
-                  const cellBase = isWeek ? "bg-orange-50" : "bg-background";
-                  return (
-                    <tr key={i} className={rowCls}>
-                      <td className={`sticky left-0 z-10 px-3 py-2 font-mono ${cellBase} ${isWeek ? "text-orange-700" : ""}`}>
-                        {row.label}
-                      </td>
-                      <td className="px-3 py-2 text-right">{row.dau > 0 ? row.dau.toLocaleString() : "—"}</td>
-                      <td className="px-3 py-2 text-right">{row.revenue > 0 ? formatRevenue(row.revenue) : "—"}</td>
-                      <td className="px-3 py-2 text-right">{row.orders > 0 ? row.orders.toLocaleString() : "—"}</td>
-                      <td className="px-3 py-2 text-right">{row.itemViews > 0 ? row.itemViews.toLocaleString() : "—"}</td>
-                      <td className="px-3 py-2 text-right">{aov > 0 ? formatRevenue(aov) : "—"}</td>
-                      <td className="px-3 py-2 text-right">{cvr > 0 ? `${cvr.toFixed(2)}%` : "—"}</td>
-                      <td className="px-3 py-2 text-right border-l border-muted">
-                        {row.followerDelta !== null
-                          ? <span className={row.followerDelta >= 0 ? "text-green-600" : "text-red-500"}>{row.followerDelta >= 0 ? "+" : ""}{row.followerDelta.toLocaleString()}</span>
-                          : "—"}
-                      </td>
-                      <td className="px-3 py-2 text-right">{row.cumulativeFollowers !== null ? row.cumulativeFollowers.toLocaleString() : "—"}</td>
-                      <td className="px-3 py-2 text-right border-l border-muted">{row.postsPublished > 0 ? row.postsPublished : "—"}</td>
-                      <td className="px-3 py-2 text-right">{row.postReach > 0 ? row.postReach.toLocaleString() : "—"}</td>
-                      <td className="px-3 py-2 text-right">{rpp > 0 ? rpp.toLocaleString() : "—"}</td>
-                      <td className="px-3 py-2 text-right">{row.postEngagement > 0 ? row.postEngagement.toLocaleString() : "—"}</td>
-                      <td className="px-3 py-2 text-right">{epp > 0 ? epp.toLocaleString() : "—"}</td>
-                      <td className="px-3 py-2 text-right">{er > 0 ? `${er.toFixed(2)}%` : "—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
+              {viewTab === "daily" && (
+                <>
+                  <THead showChange={false} />
+                  <tbody>{dailyRows.map((r, i) => <TRow key={i} r={r} />)}</tbody>
+                </>
+              )}
+              {viewTab === "weekly" && (
+                <>
+                  <THead showChange={true} />
+                  <tbody>{weeklyRows.map((r, i) => <TRow key={i} r={r} highlight />)}</tbody>
+                </>
+              )}
+              {viewTab === "monthly" && (
+                <>
+                  <THead showChange={true} />
+                  <tbody>{monthlyRows.map((r, i) => <TRow key={i} r={r} highlight />)}</tbody>
+                </>
+              )}
             </table>
           </div>
         </CardContent>
@@ -2135,7 +2273,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
             {/* ══ 주간회고 탭 ══ */}
             <TabsContent value="weekly" className="space-y-5 mt-0">
               {timeline.length > 0 ? (
-                <WeeklyReviewTab timeline={timeline} instagram={instagram} />
+                <WeeklyReviewTab timeline={timeline} instagram={instagram} secret={secret} />
               ) : (
                 <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
                   데이터를 불러오는 중...
