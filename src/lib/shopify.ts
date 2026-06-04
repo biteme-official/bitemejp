@@ -90,8 +90,6 @@ export async function storefrontApiRequest(query: string, variables: Record<stri
   }
 
   if (!response.ok) {
-    const body = await response.text().catch(() => '');
-    console.error(`[Shopify] ${response.status} error:`, body.substring(0, 300));
     throw new Error(`HTTP error! status: ${response.status}`);
   }
 

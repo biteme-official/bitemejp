@@ -1,7 +1,7 @@
 /**
  * /api/customer-orders
  *
- * Storefront API の customer クエリ (2025-10で不安定) を使わず、
+ * Storefront API の customer クエリ (2025-07で不安定) を使わず、
  * Admin API で顧客の注文を取得するプロキシエンドポイント。
  *
  * Flow:
@@ -13,7 +13,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
-const API_VERSION = '2025-10';
+const API_VERSION = '2025-07';
 
 // ── Admin API token (client_credentials) ──────────────────────────────────
 let cachedAdminToken: string | null = null;

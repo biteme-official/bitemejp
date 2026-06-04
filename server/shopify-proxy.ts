@@ -55,7 +55,7 @@ export function shopifyProxyMiddleware(): Connect.NextHandleFunction {
       const token = await getAccessToken();
 
       const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
-      const apiVersion = '2025-10';
+      const apiVersion = '2025-07';
 
       // Forward to Shopify Storefront API
       const shopifyResponse = await fetch(

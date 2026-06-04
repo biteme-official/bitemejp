@@ -42,7 +42,7 @@ async function getAccessToken(): Promise<string> {
 
 async function adminGraphQL(token: string, query: string, variables: Record<string, unknown> = {}) {
   const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
-  const res = await fetch(`https://${shop}/admin/api/2025-10/graphql.json`, {
+  const res = await fetch(`https://${shop}/admin/api/2025-07/graphql.json`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

@@ -28,3 +28,8 @@ dist-ssr
 *.sln
 *.sw?
 .vercel
+.env.vercel
+schema.sql
+meta.jpg
+meta2.jpg
+supabase/.temp/

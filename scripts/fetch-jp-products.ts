@@ -16,7 +16,7 @@ config({ path: join(__dirname, '..', '.env') });
 const STORE_DOMAIN = process.env.VITE_SHOPIFY_STORE_DOMAIN!;
 const CLIENT_ID = process.env.VITE_SHOPIFY_CLIENT_ID!;
 const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET!;
-const API_VERSION = '2025-10';
+const API_VERSION = '2025-07';
 
 export interface JpProduct {
   id: string;         // gid://shopify/Product/XXXX

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const SHOPIFY_API_VERSION = '2025-10';
+const SHOPIFY_API_VERSION = '2025-07';
 const METAFIELD_NAMESPACE = 'custom';
 const METAFIELD_KEY = 'wishlist';
 
