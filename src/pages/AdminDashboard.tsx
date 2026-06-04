@@ -1628,9 +1628,8 @@ function FollowerInputModal({
 }
 
 function WeeklyReviewTab({ secret }: { secret: string }) {
-  const currentYear = new Date().getFullYear();
   const todayISO = new Date().toISOString().slice(0, 10);
-  const [from, setFrom] = useState(`${currentYear}-02-01`);
+  const [from, setFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); });
   const [to, setTo] = useState(todayISO);
   const [showInput, setShowInput] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
