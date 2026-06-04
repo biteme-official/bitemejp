@@ -74,7 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const sinceMs = since.getTime();
     const untilMs = until.getTime();
 
-    const [accountRes, mediaRes, snapshotsRes] = await Promise.all([
+    const [accountRes, mediaRes, snapshotsRes, deltasRes] = await Promise.all([
       igGet(`/${igId}`, { fields: 'followers_count' }).catch(() => null),
       igGet(`/${igId}/media`, {
         fields: 'id,timestamp,like_count,comments_count,media_type',
@@ -86,20 +86,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .gte('date', sinceISO)
         .lte('date', untilISO)
         .order('date', { ascending: true }),
+      supabase
+        .from('instagram_follower_deltas')
+        .select('date, delta')
+        .gte('date', sinceISO)
+        .lte('date', untilISO)
+        .order('date', { ascending: true }),
     ]);
 
     const currentFollowers = (accountRes?.followers_count as number) ?? 0;
 
-    // Supabase 히스토리로 팔로워 맵 구성 (날짜별 누적 수)
+    // 누적 팔로워: 크론 스냅샷 기준
     const followerByDate = new Map<string, number>();
     for (const snap of snapshotsRes.data ?? []) {
       followerByDate.set(snap.date as string, snap.followers_count as number);
     }
-
-    // 오늘 날짜를 현재 팔로워 수로 보정 (크론이 아직 안 돌았거나 당일 실시간 반영)
     const todayISO = new Date().toISOString().slice(0, 10);
     if (currentFollowers > 0) {
       followerByDate.set(todayISO, currentFollowers);
+    }
+
+    // 팔로우 증감: 수기 입력 delta 우선, 없으면 연속 스냅샷 차이로 계산
+    const manualDeltaByDate = new Map<string, number>();
+    for (const d of deltasRes.data ?? []) {
+      manualDeltaByDate.set(d.date as string, d.delta as number);
     }
 
     // 게시글 인사이트
@@ -153,7 +163,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let prevFollowers: number | null = null;
     const daily = dates.map((date) => {
       const followers = followerByDate.get(date) ?? null;
-      const delta = prevFollowers !== null && followers !== null ? followers - prevFollowers : null;
+      const calcDelta = prevFollowers !== null && followers !== null ? followers - prevFollowers : null;
+      const delta = manualDeltaByDate.has(date) ? manualDeltaByDate.get(date)! : calcDelta;
       if (followers !== null) prevFollowers = followers;
       const posts = postByDate.get(date) ?? { count: 0, reach: 0, engagement: 0 };
       return {
