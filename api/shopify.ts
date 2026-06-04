@@ -57,13 +57,8 @@ async function getStorefrontToken(shop: string): Promise<string> {
           delegateAccessScope: [
             "unauthenticated_read_product_listings",
             "unauthenticated_read_product_inventory",
-            "unauthenticated_read_product_tags",
             "unauthenticated_write_checkouts",
-            "unauthenticated_read_checkouts",
-            "unauthenticated_read_customer_tags",
-            "unauthenticated_read_selling_plans",
-            "unauthenticated_read_content",
-            "unauthenticated_read_metaobjects"
+            "unauthenticated_read_checkouts"
           ]
           expiresIn: 3600
         }) {
