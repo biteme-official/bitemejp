@@ -1630,7 +1630,6 @@ function WeeklyReviewTab({
   instagram: InstagramData | null | undefined;
   secret: string;
 }) {
-  const [viewTab, setViewTab] = useState<"daily" | "weekly" | "monthly">("daily");
   const [showInput, setShowInput] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
 
@@ -1695,10 +1694,7 @@ function WeeklyReviewTab({
       groups.get(key)!.push(row);
     }
     const raw = [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, days]) => ({
-        label: `${parseInt(key.slice(5, 7))}월`,
-        ...buildAgg(days),
-      }));
+      .map(([key, days]) => ({ label: `${parseInt(key.slice(5, 7))}월`, ...buildAgg(days) }));
     return raw.map((row, i) => ({
       ...row,
       dauPct: pctChange(row.dau, raw[i - 1]?.dau),
@@ -1708,9 +1704,8 @@ function WeeklyReviewTab({
     }));
   }, [sorted, igByDate]);
 
-  // TSV helpers
   const COL_HEADERS = ["기간", "DAU", "매출(¥)", "주문수", "상품조회", "객단가(¥)", "CVR", "팔로우 증감", "누적 팔로워", "게시글 수", "게시글 도달", "게시글당 도달", "게시글 인게이지", "인게이지율"];
-  function rowToTsv(r: { label: string; dau: number; revenue: number; orders: number; itemViews: number; sessions: number; followerDelta: number | null; cumulativeFollowers: number | null; postsPublished: number; postReach: number; postEngagement: number }) {
+  function rowToTsv(r: typeof dailyRows[0] & { dauPct?: number | null; revenuePct?: number | null; ordersPct?: number | null; postReachPct?: number | null }) {
     const aov = r.orders > 0 ? Math.round(r.revenue / r.orders) : 0;
     const cvr = r.sessions > 0 ? (r.orders / r.sessions) * 100 : 0;
     const rpp = r.postsPublished > 0 ? Math.round(r.postReach / r.postsPublished) : 0;
@@ -1719,67 +1714,78 @@ function WeeklyReviewTab({
       cvr > 0 ? cvr.toFixed(2) + "%" : "", r.followerDelta ?? "", r.cumulativeFollowers ?? "",
       r.postsPublished || "", r.postReach || "", rpp || "", r.postEngagement || "", er > 0 ? er.toFixed(2) + "%" : ""].join("\t");
   }
-  function tsvData() {
-    const rows = viewTab === "daily" ? dailyRows : viewTab === "weekly" ? weeklyRows : monthlyRows;
-    return [COL_HEADERS.join("\t"), ...rows.map(rowToTsv)].join("\n");
-  }
 
-  // Shared table header
-  const changeLabel = viewTab === "weekly" ? "WoW" : "MoM";
-  const THead = ({ showChange }: { showChange: boolean }) => (
-    <thead className="sticky top-0 z-20 bg-background border-b">
-      <tr>
-        <th className="sticky left-0 z-30 bg-background text-left px-3 py-2 font-medium text-muted-foreground min-w-[100px]">기간</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground">DAU{showChange && <span className="block text-[9px] text-muted-foreground/60">{changeLabel}</span>}</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground">매출{showChange && <span className="block text-[9px] text-muted-foreground/60">{changeLabel}</span>}</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground">주문수{showChange && <span className="block text-[9px] text-muted-foreground/60">{changeLabel}</span>}</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground">상품조회</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground">객단가</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground">CVR</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">팔로우 증감</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground">누적 팔로워</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">게시글 수</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글 도달{showChange && <span className="block text-[9px] text-muted-foreground/60">{changeLabel}</span>}</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글당 도달</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground">인게이지</th>
-        <th className="text-right px-3 py-2 font-medium text-muted-foreground">인게이지율</th>
-      </tr>
-    </thead>
-  );
-
-  function TRow({ r, highlight }: { r: typeof dailyRows[0] & { dauPct?: number | null; revenuePct?: number | null; ordersPct?: number | null; postReachPct?: number | null }; highlight?: boolean }) {
-    const aov = r.orders > 0 ? Math.round(r.revenue / r.orders) : 0;
-    const cvr = r.sessions > 0 ? (r.orders / r.sessions) * 100 : 0;
-    const rpp = r.postsPublished > 0 ? Math.round(r.postReach / r.postsPublished) : 0;
-    const er = r.postReach > 0 ? (r.postEngagement / r.postReach) * 100 : 0;
-    const cls = highlight ? "bg-orange-50 font-semibold border-t-2 border-orange-200" : "border-b hover:bg-muted/30 transition-colors";
-    const stickyBg = highlight ? "bg-orange-50" : "bg-background";
+  function ReviewTable({
+    rows,
+    changeLabel,
+    maxH = "280px",
+  }: {
+    rows: (typeof dailyRows[0] & { dauPct?: number | null; revenuePct?: number | null; ordersPct?: number | null; postReachPct?: number | null })[];
+    changeLabel?: string;
+    maxH?: string;
+  }) {
+    const showChange = !!changeLabel;
     return (
-      <tr className={cls}>
-        <td className={`sticky left-0 z-10 px-3 py-2 font-mono ${stickyBg} ${highlight ? "text-orange-700" : ""}`}>{r.label}</td>
-        <td className="px-3 py-2 text-right">{r.dau > 0 ? r.dau.toLocaleString() : "—"}<PctBadge v={r.dauPct} /></td>
-        <td className="px-3 py-2 text-right">{r.revenue > 0 ? formatRevenue(r.revenue) : "—"}<PctBadge v={r.revenuePct} /></td>
-        <td className="px-3 py-2 text-right">{r.orders > 0 ? r.orders.toLocaleString() : "—"}<PctBadge v={r.ordersPct} /></td>
-        <td className="px-3 py-2 text-right">{r.itemViews > 0 ? r.itemViews.toLocaleString() : "—"}</td>
-        <td className="px-3 py-2 text-right">{aov > 0 ? formatRevenue(aov) : "—"}</td>
-        <td className="px-3 py-2 text-right">{cvr > 0 ? `${cvr.toFixed(2)}%` : "—"}</td>
-        <td className="px-3 py-2 text-right border-l border-muted">
-          {r.followerDelta !== null
-            ? <span className={r.followerDelta >= 0 ? "text-green-600" : "text-red-500"}>{r.followerDelta >= 0 ? "+" : ""}{r.followerDelta.toLocaleString()}</span>
-            : "—"}
-        </td>
-        <td className="px-3 py-2 text-right">{r.cumulativeFollowers !== null ? r.cumulativeFollowers.toLocaleString() : "—"}</td>
-        <td className="px-3 py-2 text-right border-l border-muted">{r.postsPublished > 0 ? r.postsPublished : "—"}</td>
-        <td className="px-3 py-2 text-right">{r.postReach > 0 ? r.postReach.toLocaleString() : "—"}<PctBadge v={r.postReachPct} /></td>
-        <td className="px-3 py-2 text-right">{rpp > 0 ? rpp.toLocaleString() : "—"}</td>
-        <td className="px-3 py-2 text-right">{r.postEngagement > 0 ? r.postEngagement.toLocaleString() : "—"}</td>
-        <td className="px-3 py-2 text-right">{er > 0 ? `${er.toFixed(2)}%` : "—"}</td>
-      </tr>
+      <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: maxH }}>
+        <table className="text-xs whitespace-nowrap border-collapse w-full">
+          <thead className="sticky top-0 z-20 bg-background border-b">
+            <tr>
+              <th className="sticky left-0 z-30 bg-background text-left px-3 py-2 font-medium text-muted-foreground min-w-[100px]">기간</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">DAU{showChange && <span className="block text-[9px] text-muted-foreground/60">{changeLabel}</span>}</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">매출{showChange && <span className="block text-[9px] text-muted-foreground/60">{changeLabel}</span>}</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">주문수{showChange && <span className="block text-[9px] text-muted-foreground/60">{changeLabel}</span>}</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">상품조회</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">객단가</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">CVR</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">팔로우 증감</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">누적 팔로워</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">게시글 수</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글 도달{showChange && <span className="block text-[9px] text-muted-foreground/60">{changeLabel}</span>}</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글당 도달</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">인게이지</th>
+              <th className="text-right px-3 py-2 font-medium text-muted-foreground">인게이지율</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const aov = r.orders > 0 ? Math.round(r.revenue / r.orders) : 0;
+              const cvr = r.sessions > 0 ? (r.orders / r.sessions) * 100 : 0;
+              const rpp = r.postsPublished > 0 ? Math.round(r.postReach / r.postsPublished) : 0;
+              const er = r.postReach > 0 ? (r.postEngagement / r.postReach) * 100 : 0;
+              const isAgg = showChange;
+              const cls = isAgg ? "bg-orange-50 font-semibold border-b border-orange-100" : "border-b hover:bg-muted/30 transition-colors";
+              const bg = isAgg ? "bg-orange-50" : "bg-background";
+              return (
+                <tr key={i} className={cls}>
+                  <td className={`sticky left-0 z-10 px-3 py-2 font-mono ${bg} ${isAgg ? "text-orange-700" : ""}`}>{r.label}</td>
+                  <td className="px-3 py-2 text-right">{r.dau > 0 ? r.dau.toLocaleString() : "—"}<PctBadge v={r.dauPct} /></td>
+                  <td className="px-3 py-2 text-right">{r.revenue > 0 ? formatRevenue(r.revenue) : "—"}<PctBadge v={r.revenuePct} /></td>
+                  <td className="px-3 py-2 text-right">{r.orders > 0 ? r.orders.toLocaleString() : "—"}<PctBadge v={r.ordersPct} /></td>
+                  <td className="px-3 py-2 text-right">{r.itemViews > 0 ? r.itemViews.toLocaleString() : "—"}</td>
+                  <td className="px-3 py-2 text-right">{aov > 0 ? formatRevenue(aov) : "—"}</td>
+                  <td className="px-3 py-2 text-right">{cvr > 0 ? `${cvr.toFixed(2)}%` : "—"}</td>
+                  <td className="px-3 py-2 text-right border-l border-muted">
+                    {r.followerDelta !== null
+                      ? <span className={r.followerDelta >= 0 ? "text-green-600" : "text-red-500"}>{r.followerDelta >= 0 ? "+" : ""}{r.followerDelta.toLocaleString()}</span>
+                      : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right">{r.cumulativeFollowers !== null ? r.cumulativeFollowers.toLocaleString() : "—"}</td>
+                  <td className="px-3 py-2 text-right border-l border-muted">{r.postsPublished > 0 ? r.postsPublished : "—"}</td>
+                  <td className="px-3 py-2 text-right">{r.postReach > 0 ? r.postReach.toLocaleString() : "—"}<PctBadge v={r.postReachPct} /></td>
+                  <td className="px-3 py-2 text-right">{rpp > 0 ? rpp.toLocaleString() : "—"}</td>
+                  <td className="px-3 py-2 text-right">{r.postEngagement > 0 ? r.postEngagement.toLocaleString() : "—"}</td>
+                  <td className="px-3 py-2 text-right">{er > 0 ? `${er.toFixed(2)}%` : "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {showInput && (
         <FollowerInputModal
           onClose={() => setShowInput(false)}
@@ -1796,56 +1802,50 @@ function WeeklyReviewTab({
           Instagram 미연동 — <code className="font-mono bg-amber-100 px-1 rounded">INSTAGRAM_ACCESS_TOKEN</code> / <code className="font-mono bg-amber-100 px-1 rounded">INSTAGRAM_ACCOUNT_ID</code> 환경 변수가 필요합니다.
         </div>
       )}
-      {saveMsg && (
-        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-xs text-green-700">{saveMsg}</div>
-      )}
+      {saveMsg && <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-xs text-green-700">{saveMsg}</div>}
+
+      {/* 일간 */}
       <Card>
         <CardHeader className="pb-2">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-sm font-semibold">주간회고 데이터</CardTitle>
-              <div className="flex rounded-md border overflow-hidden text-xs">
-                {(["daily", "weekly", "monthly"] as const).map((t) => (
-                  <button key={t} onClick={() => setViewTab(t)}
-                    className={`px-3 py-1 transition-colors ${viewTab === t ? "text-white font-medium" : "text-muted-foreground hover:bg-muted"}`}
-                    style={viewTab === t ? { backgroundColor: BRAND } : {}}>
-                    {t === "daily" ? "일간" : t === "weekly" ? "주간" : "월간"}
-                  </button>
-                ))}
-              </div>
-            </div>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold">일간 데이터</CardTitle>
             <div className="flex items-center gap-2">
               <button onClick={() => setShowInput(true)}
                 className="text-xs px-2 py-1 rounded border hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
                 팔로워 수기 입력
               </button>
-              <CopyButton getData={tsvData} />
+              <CopyButton getData={() => [COL_HEADERS.join("\t"), ...dailyRows.map(rowToTsv)].join("\n")} />
             </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: "calc(100vh - 220px)" }}>
-            <table className="text-xs whitespace-nowrap border-collapse w-full">
-              {viewTab === "daily" && (
-                <>
-                  <THead showChange={false} />
-                  <tbody>{dailyRows.map((r, i) => <TRow key={i} r={r} />)}</tbody>
-                </>
-              )}
-              {viewTab === "weekly" && (
-                <>
-                  <THead showChange={true} />
-                  <tbody>{weeklyRows.map((r, i) => <TRow key={i} r={r} highlight />)}</tbody>
-                </>
-              )}
-              {viewTab === "monthly" && (
-                <>
-                  <THead showChange={true} />
-                  <tbody>{monthlyRows.map((r, i) => <TRow key={i} r={r} highlight />)}</tbody>
-                </>
-              )}
-            </table>
+          <ReviewTable rows={dailyRows} maxH="320px" />
+        </CardContent>
+      </Card>
+
+      {/* 주간 */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold">주간 데이터 <span className="text-xs font-normal text-muted-foreground ml-1">WoW</span></CardTitle>
+            <CopyButton getData={() => [COL_HEADERS.join("\t"), ...weeklyRows.map(rowToTsv)].join("\n")} />
           </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <ReviewTable rows={weeklyRows} changeLabel="WoW" />
+        </CardContent>
+      </Card>
+
+      {/* 월간 */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold">월간 데이터 <span className="text-xs font-normal text-muted-foreground ml-1">MoM</span></CardTitle>
+            <CopyButton getData={() => [COL_HEADERS.join("\t"), ...monthlyRows.map(rowToTsv)].join("\n")} />
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <ReviewTable rows={monthlyRows} changeLabel="MoM" />
         </CardContent>
       </Card>
     </div>
