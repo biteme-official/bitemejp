@@ -70,7 +70,6 @@ interface AnalyticsData {
 
 interface InstagramDay {
   date: string;
-  profileViews: number;
   followerDelta: number | null;
   cumulativeFollowers: number | null;
   postsPublished: number;
@@ -1531,7 +1530,6 @@ interface ReviewRow {
   orders: number;
   itemViews: number;
   sessions: number;
-  profileViews: number;
   followerDelta: number | null;
   cumulativeFollowers: number | null;
   postsPublished: number;
@@ -1569,7 +1567,6 @@ function WeeklyReviewTab({
         orders: day.orders,
         itemViews: day.itemViews,
         sessions: day.sessions,
-        profileViews: ig?.profileViews ?? 0,
         followerDelta: ig?.followerDelta ?? null,
         cumulativeFollowers: ig?.cumulativeFollowers ?? null,
         postsPublished: ig?.postsPublished ?? 0,
@@ -1589,7 +1586,6 @@ function WeeklyReviewTab({
       orders: days.reduce((s, d) => s + d.orders, 0),
       itemViews: days.reduce((s, d) => s + d.itemViews, 0),
       sessions: days.reduce((s, d) => s + d.sessions, 0),
-      profileViews: igDays.reduce((s, d) => s + d.profileViews, 0),
       followerDelta: igDays.some((d) => d.followerDelta !== null)
         ? igDays.reduce((s, d) => s + (d.followerDelta ?? 0), 0)
         : null,
@@ -1605,13 +1601,12 @@ function WeeklyReviewTab({
   function tsvData() {
     const header = [
       "일자", "DAU", "매출(¥)", "주문수", "상품조회수", "객단가(¥)", "CVR",
-      "프로필 유입", "프로필 유입비중", "팔로우 증감", "누적 팔로워",
+      "팔로우 증감", "누적 팔로워",
       "게시글 수", "게시글 도달", "게시글당 도달", "게시글 인게이지", "게시글당 인게이지", "인게이지율",
     ].join("\t");
     const lines = displayRows.map((r) => {
       const aov = r.orders > 0 ? Math.round(r.revenue / r.orders) : 0;
       const cvr = r.sessions > 0 ? (r.orders / r.sessions) * 100 : 0;
-      const pRatio = r.dau > 0 && r.profileViews > 0 ? (r.profileViews / r.dau) * 100 : 0;
       const rpp = r.postsPublished > 0 ? Math.round(r.postReach / r.postsPublished) : 0;
       const epp = r.postsPublished > 0 ? Math.round(r.postEngagement / r.postsPublished) : 0;
       const er = r.postReach > 0 ? (r.postEngagement / r.postReach) * 100 : 0;
@@ -1623,8 +1618,6 @@ function WeeklyReviewTab({
         r.itemViews || "",
         aov || "",
         cvr > 0 ? cvr.toFixed(2) + "%" : "",
-        r.profileViews || "",
-        pRatio > 0 ? pRatio.toFixed(2) + "%" : "",
         r.followerDelta !== null ? r.followerDelta : "",
         r.cumulativeFollowers !== null ? r.cumulativeFollowers : "",
         r.postsPublished || "",
@@ -1664,9 +1657,7 @@ function WeeklyReviewTab({
                   <th className="text-right px-3 py-2 font-medium text-muted-foreground">상품조회</th>
                   <th className="text-right px-3 py-2 font-medium text-muted-foreground">객단가</th>
                   <th className="text-right px-3 py-2 font-medium text-muted-foreground">CVR</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">프로필 유입</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">유입비중</th>
-                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">팔로우 증감</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">팔로우 증감</th>
                   <th className="text-right px-3 py-2 font-medium text-muted-foreground">누적 팔로워</th>
                   <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">게시글 수</th>
                   <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글 도달</th>
@@ -1681,7 +1672,6 @@ function WeeklyReviewTab({
                   const isWeek = row.type === "week";
                   const aov = row.orders > 0 ? Math.round(row.revenue / row.orders) : 0;
                   const cvr = row.sessions > 0 ? (row.orders / row.sessions) * 100 : 0;
-                  const pRatio = row.dau > 0 && row.profileViews > 0 ? (row.profileViews / row.dau) * 100 : 0;
                   const rpp = row.postsPublished > 0 ? Math.round(row.postReach / row.postsPublished) : 0;
                   const epp = row.postsPublished > 0 ? Math.round(row.postEngagement / row.postsPublished) : 0;
                   const er = row.postReach > 0 ? (row.postEngagement / row.postReach) * 100 : 0;
@@ -1700,9 +1690,7 @@ function WeeklyReviewTab({
                       <td className="px-3 py-2 text-right">{row.itemViews > 0 ? row.itemViews.toLocaleString() : "—"}</td>
                       <td className="px-3 py-2 text-right">{aov > 0 ? formatRevenue(aov) : "—"}</td>
                       <td className="px-3 py-2 text-right">{cvr > 0 ? `${cvr.toFixed(2)}%` : "—"}</td>
-                      <td className="px-3 py-2 text-right border-l border-muted">{row.profileViews > 0 ? row.profileViews.toLocaleString() : "—"}</td>
-                      <td className="px-3 py-2 text-right">{pRatio > 0 ? `${pRatio.toFixed(2)}%` : "—"}</td>
-                      <td className="px-3 py-2 text-right">
+                      <td className="px-3 py-2 text-right border-l border-muted">
                         {row.followerDelta !== null
                           ? <span className={row.followerDelta >= 0 ? "text-green-600" : "text-red-500"}>{row.followerDelta >= 0 ? "+" : ""}{row.followerDelta.toLocaleString()}</span>
                           : "—"}
