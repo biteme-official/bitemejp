@@ -81,7 +81,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Shopify-Storefront-Private-Token': token,
+          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify(req.body),
       }
