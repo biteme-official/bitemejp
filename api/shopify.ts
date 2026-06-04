@@ -137,6 +137,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     );
 
     const data = await shopifyResponse.text();
+    if (!shopifyResponse.ok) {
+      console.error(`[Shopify] ${shopifyResponse.status} from Storefront API:`, data.substring(0, 300));
+    }
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', corsOrigin);
     return res.status(shopifyResponse.status).send(data);
