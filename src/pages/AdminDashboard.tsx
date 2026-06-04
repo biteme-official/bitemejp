@@ -68,6 +68,22 @@ interface AnalyticsData {
   newVsReturning: { newVsReturning: string; activeUsers: number; sessions: number }[];
 }
 
+interface InstagramDay {
+  date: string;
+  profileViews: number;
+  followerDelta: number | null;
+  cumulativeFollowers: number | null;
+  postsPublished: number;
+  postReach: number;
+  postEngagement: number;
+}
+
+interface InstagramData {
+  daily: InstagramDay[];
+  currentFollowers: number;
+  configured: boolean;
+}
+
 interface CustomerData {
   totalCustomers: number;
   newCustomersCount: number;
@@ -94,6 +110,15 @@ function ga4DateToISO(raw: string) {
 }
 function isoToLabel(iso: string) {
   return `${iso.slice(5, 7)}/${iso.slice(8, 10)}`;
+}
+function getWeekLabel(mondayISO: string): string {
+  const sunday = new Date(mondayISO + "T00:00:00");
+  sunday.setDate(sunday.getDate() + 6);
+  const month = sunday.getMonth() + 1;
+  const monthStart = new Date(sunday.getFullYear(), sunday.getMonth(), 1);
+  const monthStartDow = (monthStart.getDay() + 6) % 7;
+  const weekNum = Math.ceil((sunday.getDate() + monthStartDow) / 7);
+  return `${month}월 ${weekNum}주차`;
 }
 
 // GA4 sessions/activeUsers + Shopify orders/revenue를 날짜 기준으로 합침
@@ -150,6 +175,15 @@ async function fetchBehavior(range: Range, secret: string): Promise<BehaviorData
   const res = await fetch(`/api/behavior-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "행동 데이터 오류"); }
+  return res.json();
+}
+
+async function fetchInstagram(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<InstagramData> {
+  const params = new URLSearchParams({ range });
+  if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
+  const res = await fetch(`/api/instagram-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "Instagram 오류"); }
   return res.json();
 }
 
@@ -1487,6 +1521,211 @@ function RankingTable({ title, data }: { title: string; data: { label: string; c
   );
 }
 
+// ─── 주간회고 탭 ──────────────────────────────────────────────────────────────
+
+interface ReviewRow {
+  type: "day" | "week";
+  label: string;
+  dau: number;
+  revenue: number;
+  orders: number;
+  itemViews: number;
+  sessions: number;
+  profileViews: number;
+  followerDelta: number | null;
+  cumulativeFollowers: number | null;
+  postsPublished: number;
+  postReach: number;
+  postEngagement: number;
+}
+
+function WeeklyReviewTab({
+  timeline,
+  instagram,
+}: {
+  timeline: ReturnType<typeof buildTimeline>;
+  instagram: InstagramData | null | undefined;
+}) {
+  const igByDate = new Map((instagram?.daily ?? []).map((d) => [d.date, d]));
+  const sorted = [...timeline].sort((a, b) => a.isoDate.localeCompare(b.isoDate));
+
+  const weekGroups = new Map<string, typeof sorted>();
+  for (const row of sorted) {
+    const key = getMondayISO(row.isoDate);
+    if (!weekGroups.has(key)) weekGroups.set(key, []);
+    weekGroups.get(key)!.push(row);
+  }
+
+  const displayRows: ReviewRow[] = [];
+  for (const [mondayISO, days] of [...weekGroups.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    // 일별 행 추가
+    for (const day of days) {
+      const ig = igByDate.get(day.isoDate);
+      displayRows.push({
+        type: "day",
+        label: day.isoDate,
+        dau: day.activeUsers,
+        revenue: day.revenue,
+        orders: day.orders,
+        itemViews: day.itemViews,
+        sessions: day.sessions,
+        profileViews: ig?.profileViews ?? 0,
+        followerDelta: ig?.followerDelta ?? null,
+        cumulativeFollowers: ig?.cumulativeFollowers ?? null,
+        postsPublished: ig?.postsPublished ?? 0,
+        postReach: ig?.postReach ?? 0,
+        postEngagement: ig?.postEngagement ?? 0,
+      });
+    }
+
+    // 주간 합계 행 추가
+    const igDays = days.map((d) => igByDate.get(d.isoDate)).filter(Boolean) as InstagramDay[];
+    const lastIg = igDays[igDays.length - 1];
+    displayRows.push({
+      type: "week",
+      label: getWeekLabel(mondayISO),
+      dau: days.reduce((s, d) => s + d.activeUsers, 0),
+      revenue: days.reduce((s, d) => s + d.revenue, 0),
+      orders: days.reduce((s, d) => s + d.orders, 0),
+      itemViews: days.reduce((s, d) => s + d.itemViews, 0),
+      sessions: days.reduce((s, d) => s + d.sessions, 0),
+      profileViews: igDays.reduce((s, d) => s + d.profileViews, 0),
+      followerDelta: igDays.some((d) => d.followerDelta !== null)
+        ? igDays.reduce((s, d) => s + (d.followerDelta ?? 0), 0)
+        : null,
+      cumulativeFollowers: lastIg?.cumulativeFollowers ?? null,
+      postsPublished: igDays.reduce((s, d) => s + d.postsPublished, 0),
+      postReach: igDays.reduce((s, d) => s + d.postReach, 0),
+      postEngagement: igDays.reduce((s, d) => s + d.postEngagement, 0),
+    });
+  }
+
+  const igNotConfigured = instagram && !instagram.configured;
+
+  function tsvData() {
+    const header = [
+      "일자", "DAU", "매출(¥)", "주문수", "상품조회수", "객단가(¥)", "CVR",
+      "프로필 유입", "프로필 유입비중", "팔로우 증감", "누적 팔로워",
+      "게시글 수", "게시글 도달", "게시글당 도달", "게시글 인게이지", "게시글당 인게이지", "인게이지율",
+    ].join("\t");
+    const lines = displayRows.map((r) => {
+      const aov = r.orders > 0 ? Math.round(r.revenue / r.orders) : 0;
+      const cvr = r.sessions > 0 ? (r.orders / r.sessions) * 100 : 0;
+      const pRatio = r.dau > 0 && r.profileViews > 0 ? (r.profileViews / r.dau) * 100 : 0;
+      const rpp = r.postsPublished > 0 ? Math.round(r.postReach / r.postsPublished) : 0;
+      const epp = r.postsPublished > 0 ? Math.round(r.postEngagement / r.postsPublished) : 0;
+      const er = r.postReach > 0 ? (r.postEngagement / r.postReach) * 100 : 0;
+      return [
+        r.label,
+        r.dau || "",
+        r.revenue || "",
+        r.orders || "",
+        r.itemViews || "",
+        aov || "",
+        cvr > 0 ? cvr.toFixed(2) + "%" : "",
+        r.profileViews || "",
+        pRatio > 0 ? pRatio.toFixed(2) + "%" : "",
+        r.followerDelta !== null ? r.followerDelta : "",
+        r.cumulativeFollowers !== null ? r.cumulativeFollowers : "",
+        r.postsPublished || "",
+        r.postReach || "",
+        rpp || "",
+        r.postEngagement || "",
+        epp || "",
+        er > 0 ? er.toFixed(2) + "%" : "",
+      ].join("\t");
+    });
+    return [header, ...lines].join("\n");
+  }
+
+  return (
+    <div className="space-y-3">
+      {igNotConfigured && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
+          Instagram 미연동 — Vercel 환경 변수에 <code className="font-mono bg-amber-100 px-1 rounded">INSTAGRAM_ACCESS_TOKEN</code> / <code className="font-mono bg-amber-100 px-1 rounded">INSTAGRAM_ACCOUNT_ID</code> 가 필요합니다. Shopify·GA4 지표는 정상 표시됩니다.
+        </div>
+      )}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold">주간회고 데이터</CardTitle>
+            <CopyButton getData={tsvData} />
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: "calc(100vh - 220px)" }}>
+            <table className="text-xs whitespace-nowrap border-collapse w-full">
+              <thead className="sticky top-0 z-20 bg-background border-b">
+                <tr>
+                  <th className="sticky left-0 z-30 bg-background text-left px-3 py-2 font-medium text-muted-foreground">일자</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">DAU</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">매출</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">주문수</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">상품조회</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">객단가</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">CVR</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">프로필 유입</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">유입비중</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">팔로우 증감</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">누적 팔로워</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground border-l border-muted">게시글 수</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글 도달</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글당 도달</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글 인게이지</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">게시글당 인게이지</th>
+                  <th className="text-right px-3 py-2 font-medium text-muted-foreground">인게이지율</th>
+                </tr>
+              </thead>
+              <tbody>
+                {displayRows.map((row, i) => {
+                  const isWeek = row.type === "week";
+                  const aov = row.orders > 0 ? Math.round(row.revenue / row.orders) : 0;
+                  const cvr = row.sessions > 0 ? (row.orders / row.sessions) * 100 : 0;
+                  const pRatio = row.dau > 0 && row.profileViews > 0 ? (row.profileViews / row.dau) * 100 : 0;
+                  const rpp = row.postsPublished > 0 ? Math.round(row.postReach / row.postsPublished) : 0;
+                  const epp = row.postsPublished > 0 ? Math.round(row.postEngagement / row.postsPublished) : 0;
+                  const er = row.postReach > 0 ? (row.postEngagement / row.postReach) * 100 : 0;
+                  const rowCls = isWeek
+                    ? "bg-orange-50 border-t-2 border-orange-200 font-semibold"
+                    : "border-b hover:bg-muted/30 transition-colors";
+                  const cellBase = isWeek ? "bg-orange-50" : "bg-background";
+                  return (
+                    <tr key={i} className={rowCls}>
+                      <td className={`sticky left-0 z-10 px-3 py-2 font-mono ${cellBase} ${isWeek ? "text-orange-700" : ""}`}>
+                        {row.label}
+                      </td>
+                      <td className="px-3 py-2 text-right">{row.dau > 0 ? row.dau.toLocaleString() : "—"}</td>
+                      <td className="px-3 py-2 text-right">{row.revenue > 0 ? formatRevenue(row.revenue) : "—"}</td>
+                      <td className="px-3 py-2 text-right">{row.orders > 0 ? row.orders.toLocaleString() : "—"}</td>
+                      <td className="px-3 py-2 text-right">{row.itemViews > 0 ? row.itemViews.toLocaleString() : "—"}</td>
+                      <td className="px-3 py-2 text-right">{aov > 0 ? formatRevenue(aov) : "—"}</td>
+                      <td className="px-3 py-2 text-right">{cvr > 0 ? `${cvr.toFixed(2)}%` : "—"}</td>
+                      <td className="px-3 py-2 text-right border-l border-muted">{row.profileViews > 0 ? row.profileViews.toLocaleString() : "—"}</td>
+                      <td className="px-3 py-2 text-right">{pRatio > 0 ? `${pRatio.toFixed(2)}%` : "—"}</td>
+                      <td className="px-3 py-2 text-right">
+                        {row.followerDelta !== null
+                          ? <span className={row.followerDelta >= 0 ? "text-green-600" : "text-red-500"}>{row.followerDelta >= 0 ? "+" : ""}{row.followerDelta.toLocaleString()}</span>
+                          : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right">{row.cumulativeFollowers !== null ? row.cumulativeFollowers.toLocaleString() : "—"}</td>
+                      <td className="px-3 py-2 text-right border-l border-muted">{row.postsPublished > 0 ? row.postsPublished : "—"}</td>
+                      <td className="px-3 py-2 text-right">{row.postReach > 0 ? row.postReach.toLocaleString() : "—"}</td>
+                      <td className="px-3 py-2 text-right">{rpp > 0 ? rpp.toLocaleString() : "—"}</td>
+                      <td className="px-3 py-2 text-right">{row.postEngagement > 0 ? row.postEngagement.toLocaleString() : "—"}</td>
+                      <td className="px-3 py-2 text-right">{epp > 0 ? epp.toLocaleString() : "—"}</td>
+                      <td className="px-3 py-2 text-right">{er > 0 ? `${er.toFixed(2)}%` : "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ─── 비밀번호 게이트 ───────────────────────────────────────────────────────────
 
 function PasswordGate({ onAuth }: { onAuth: (s: string) => void }) {
@@ -1568,6 +1807,14 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
     queryKey: ["behavior-analytics", range, secret],
     queryFn: () => fetchBehavior(range, secret),
     staleTime: 3 * 60 * 1000,
+    enabled: canQuery,
+    retry,
+  });
+
+  const { data: instagram } = useQuery({
+    queryKey: ["instagram-analytics", range, secret, customFrom, customTo],
+    queryFn: () => fetchInstagram(range, secret, customFrom, customTo),
+    staleTime: 10 * 60 * 1000,
     enabled: canQuery,
     retry,
   });
@@ -1694,6 +1941,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               <TabsTrigger value="funnel" className="text-xs px-4">퍼널 분석</TabsTrigger>
               <TabsTrigger value="behavior" className="text-xs px-4">행동 분석</TabsTrigger>
               <TabsTrigger value="members" className="text-xs px-4">회원 분석</TabsTrigger>
+              <TabsTrigger value="weekly" className="text-xs px-4">주간회고</TabsTrigger>
             </TabsList>
 
             {/* ══ 대시보드 탭 ══ */}
@@ -1895,6 +2143,19 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
                   </p>
                 </>
               )}
+            </TabsContent>
+            {/* ══ 주간회고 탭 ══ */}
+            <TabsContent value="weekly" className="space-y-5 mt-0">
+              {timeline.length > 0 ? (
+                <WeeklyReviewTab timeline={timeline} instagram={instagram} />
+              ) : (
+                <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+                  데이터를 불러오는 중...
+                </div>
+              )}
+              <p className="text-center text-xs text-muted-foreground pb-4">
+                GA4 + Shopify + Instagram · {RANGE_LABELS[range]} 데이터
+              </p>
             </TabsContent>
           </Tabs>
         )}
