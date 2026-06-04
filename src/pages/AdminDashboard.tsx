@@ -186,7 +186,7 @@ async function fetchInstagram(range: Range, secret: string, customFrom?: string,
   return res.json();
 }
 
-async function postFollowerData(rows: { date: string; followers_count: number }[], secret: string): Promise<void> {
+async function postFollowerData(rows: { date: string; delta: number }[], secret: string): Promise<void> {
   const res = await fetch("/api/instagram-follower-input", {
     method: "POST",
     headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
@@ -1547,19 +1547,20 @@ function FollowerInputModal({
   onSave,
 }: {
   onClose: () => void;
-  onSave: (rows: { date: string; followers_count: number }[]) => Promise<void>;
+  onSave: (rows: { date: string; delta: number }[]) => Promise<void>;
 }) {
   const [text, setText] = useState("");
-  const [preview, setPreview] = useState<{ date: string; followers_count: number }[]>([]);
+  const [preview, setPreview] = useState<{ date: string; delta: number }[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   function parseText() {
     const rows = text.trim().split("\n").map((line) => {
       const [d, c] = line.trim().split(/[\t,]/);
-      const count = parseInt((c ?? "").replace(/[^0-9]/g, ""), 10);
-      return { date: (d ?? "").trim(), followers_count: count };
-    }).filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && r.followers_count > 0);
+      const raw = (c ?? "").trim().replace(/[^0-9\-+]/g, "");
+      const delta = parseInt(raw, 10);
+      return { date: (d ?? "").trim(), delta };
+    }).filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && !isNaN(r.delta));
     setPreview(rows);
   }
 
@@ -1573,20 +1574,20 @@ function FollowerInputModal({
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-background rounded-xl border shadow-xl w-full max-w-lg space-y-4 p-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">팔로워 수 수기 입력</h2>
+          <h2 className="text-sm font-semibold">팔로우 증감 수기 입력</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground">✕</button>
         </div>
-        <p className="text-xs text-muted-foreground">날짜(YYYY-MM-DD)와 팔로워 수를 탭 또는 쉼표로 구분해서 붙여넣으세요. 스프레드시트에서 복사해서 붙여넣기 가능합니다.</p>
+        <p className="text-xs text-muted-foreground">날짜(YYYY-MM-DD)와 <strong>팔로우 증감 수</strong>(+증가/-감소)를 탭 또는 쉼표로 구분해서 붙여넣으세요.</p>
         <div className="bg-muted rounded p-2 text-[11px] font-mono text-muted-foreground leading-5">
-          2025-12-01&nbsp;&nbsp;&nbsp;24000<br />
-          2025-12-08&nbsp;&nbsp;&nbsp;24150<br />
-          2025-12-15&nbsp;&nbsp;&nbsp;24320
+          2025-12-01&nbsp;&nbsp;&nbsp;142<br />
+          2025-12-08&nbsp;&nbsp;&nbsp;-23<br />
+          2025-12-15&nbsp;&nbsp;&nbsp;89
         </div>
         <textarea
           value={text}
           onChange={(e) => { setText(e.target.value); setPreview([]); }}
           className="w-full h-36 border rounded-lg px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-ring/30"
-          placeholder={"2025-12-01\t24000\n2025-12-08\t24150"}
+          placeholder={"2025-12-01\t142\n2025-12-08\t-23"}
         />
         <div className="flex items-center gap-2">
           <button onClick={parseText} className="px-3 py-1.5 text-xs rounded border hover:bg-muted transition-colors">파싱 미리보기</button>
@@ -1596,11 +1597,16 @@ function FollowerInputModal({
           <div className="max-h-32 overflow-y-auto border rounded text-xs">
             <table className="w-full">
               <thead className="sticky top-0 bg-muted">
-                <tr><th className="text-left px-2 py-1 font-medium">날짜</th><th className="text-right px-2 py-1 font-medium">팔로워</th></tr>
+                <tr><th className="text-left px-2 py-1 font-medium">날짜</th><th className="text-right px-2 py-1 font-medium">증감</th></tr>
               </thead>
               <tbody>
                 {preview.slice(0, 10).map((r, i) => (
-                  <tr key={i} className="border-t"><td className="px-2 py-1 font-mono">{r.date}</td><td className="px-2 py-1 text-right">{r.followers_count.toLocaleString()}</td></tr>
+                  <tr key={i} className="border-t">
+                    <td className="px-2 py-1 font-mono">{r.date}</td>
+                    <td className={`px-2 py-1 text-right font-medium ${r.delta >= 0 ? "text-green-600" : "text-red-500"}`}>
+                      {r.delta >= 0 ? "+" : ""}{r.delta.toLocaleString()}
+                    </td>
+                  </tr>
                 ))}
                 {preview.length > 10 && <tr><td colSpan={2} className="px-2 py-1 text-center text-muted-foreground">외 {preview.length - 10}개</td></tr>}
               </tbody>

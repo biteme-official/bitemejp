@@ -9,20 +9,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ message: 'UNAUTHORIZED' });
   }
 
-  const { rows } = req.body as { rows?: { date: string; followers_count: number }[] };
+  const { rows } = req.body as { rows?: { date: string; delta: number }[] };
   if (!Array.isArray(rows) || rows.length === 0) {
     return res.status(400).json({ message: 'rows 배열이 필요합니다' });
   }
 
   const valid = rows.filter(
-    (r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && typeof r.followers_count === 'number' && r.followers_count > 0
+    (r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && typeof r.delta === 'number' && !isNaN(r.delta)
   );
   if (!valid.length) return res.status(400).json({ message: '유효한 행이 없습니다' });
 
   const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
   const { error } = await supabase
-    .from('instagram_follower_snapshots')
-    .upsert(valid, { onConflict: 'date' });
+    .from('instagram_follower_deltas')
+    .upsert(valid.map((r) => ({ date: r.date, delta: r.delta })), { onConflict: 'date' });
 
   if (error) {
     console.error('[instagram-follower-input]', error);
