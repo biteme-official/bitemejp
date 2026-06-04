@@ -81,7 +81,7 @@ async function getStorefrontToken(shop: string): Promise<string> {
     throw new Error('No delegate storefront token returned');
   }
 
-  console.log('[Shopify] Storefront delegate token created');
+  console.log('[Shopify] Storefront delegate token created, prefix:', token.substring(0, 10));
   cachedStorefrontToken = token;
   storefrontTokenExpiresAt = now + 3600 * 1000;
   return token;
