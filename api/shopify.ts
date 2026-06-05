@@ -79,7 +79,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const data = await shopifyResponse.text();
     if (!shopifyResponse.ok) {
+      const hdrs: Record<string, string> = {};
+      shopifyResponse.headers.forEach((v, k) => { hdrs[k] = v; });
       console.error(`[Shopify] ${shopifyResponse.status} (${apiVersion}):`, data.substring(0, 200));
+      console.error(`[Shopify] response headers:`, JSON.stringify(hdrs));
     }
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', corsOrigin);
