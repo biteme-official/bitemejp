@@ -50,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 환경변수로 API 버전을 제어 — staging: 2026-04, production: 2025-10
   const apiVersion = process.env.SHOPIFY_API_VERSION || '2026-04';
 
-  console.log(`[Shopify Proxy] shop=${shop} version=${apiVersion} token_prefix=${token ? token.substring(0, 12) : 'MISSING'} token_len=${token?.length ?? 0}`);
+  console.log(`[Shopify Proxy] shop=${shop} version=${apiVersion} token_len=${token?.length ?? 0} token_suffix=${token ? token.slice(-6) : 'MISSING'}`);
 
   if (!token) {
     console.error('[Shopify Proxy] Missing SHOPIFY_STOREFRONT_TOKEN');
