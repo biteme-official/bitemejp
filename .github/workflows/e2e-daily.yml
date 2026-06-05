@@ -1,9 +1,9 @@
-name: Daily E2E Purchase Flow Test
+name: E2E Purchase Flow Test (Every 3h)
 
 on:
   schedule:
-    # Every day at 09:00 JST (00:00 UTC)
-    - cron: '0 0 * * *'
+    # Every 3 hours
+    - cron: '0 */3 * * *'
   workflow_dispatch: # Manual trigger
 
 jobs:
@@ -42,33 +42,46 @@ jobs:
             test-results/
           retention-days: 14
 
-      - name: Send email notification
+      - name: Send Slack notification
         if: always()
-        uses: dawidd6/action-send-mail@v3
-        with:
-          server_address: smtp.gmail.com
-          server_port: 465
-          secure: true
-          username: ${{ secrets.GMAIL_USER }}
-          password: ${{ secrets.GMAIL_APP_PASSWORD }}
-          subject: >-
-            [BITEME JP] E2E Test ${{ steps.e2e.outcome == 'success' && 'PASSED' || 'FAILED' }} - ${{ github.run_number }}
-          to: ${{ secrets.NOTIFICATION_EMAIL }}
-          from: BITEME Japan E2E <${{ secrets.GMAIL_USER }}>
-          body: |
-            BITEME JAPAN (biteme.co.jp) Daily E2E Test Report
-            ================================================
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+        run: |
+          STATUS="${{ steps.e2e.outcome }}"
+          if [ "$STATUS" = "success" ]; then
+            ICON="✅"
+            TITLE="E2E PASSED"
+            COLOR="#36a64f"
+          else
+            ICON="❌"
+            TITLE="E2E FAILED"
+            COLOR="#e01e5a"
+          fi
 
-            Result: ${{ steps.e2e.outcome == 'success' && 'ALL TESTS PASSED' || 'SOME TESTS FAILED' }}
-            Date: ${{ github.event.repository.updated_at || github.event.head_commit.timestamp }}
-            Run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PAYLOAD=$(cat <<EOF
+          {
+            "blocks": [
+              {
+                "type": "header",
+                "text": { "type": "plain_text", "text": "${ICON} [BITEME JP] ${TITLE} — Run #${{ github.run_number }}" }
+              },
+              { "type": "divider" },
+              {
+                "type": "section",
+                "fields": [
+                  { "type": "mrkdwn", "text": "*테스트 항목:*\n• 홈 상품 로드\n• 상품 상세 페이지\n• 홈→상품→장바구니→결제 진입" },
+                  { "type": "mrkdwn", "text": "*사이트:*\n<https://biteme.co.jp|biteme.co.jp>" }
+                ]
+              },
+              {
+                "type": "context",
+                "elements": [
+                  { "type": "mrkdwn", "text": "<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|결과 상세 보기>" }
+                ]
+              }
+            ]
+          }
+          EOF
+          )
 
-            Tests executed:
-            - Homepage loads with products
-            - Product detail page renders correctly
-            - Home → Product → Cart → Checkout entry (full purchase flow)
-
-            ${{ steps.e2e.outcome != 'success' && 'ACTION REQUIRED: Please check the test report for details.' || 'No issues found.' }}
-
-            --
-            Automated by GitHub Actions
+          curl -s -X POST -H 'Content-Type: application/json' -d "$PAYLOAD" "$SLACK_WEBHOOK_URL"
