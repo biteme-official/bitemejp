@@ -48,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = process.env.SHOPIFY_STOREFRONT_TOKEN;
   const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
   // 환경변수로 API 버전을 제어 — staging: 2026-04, production: 2025-10
-  const apiVersion = process.env.SHOPIFY_API_VERSION || '2025-10';
+  const apiVersion = process.env.SHOPIFY_API_VERSION || '2026-04';
 
   console.log(`[Shopify Proxy] shop=${shop} version=${apiVersion} token_prefix=${token ? token.substring(0, 12) : 'MISSING'} body_type=${typeof req.body} body_keys=${req.body ? Object.keys(req.body).join(',') : 'null'}`);
 
