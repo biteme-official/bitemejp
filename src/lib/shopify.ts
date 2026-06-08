@@ -1333,17 +1333,27 @@ export interface ShippingRate {
   currencyCode: string;
 }
 
-export async function fetchShippingRates(countryCode: string = "JP"): Promise<ShippingRate[]> {
-  // Step 1: Get a product variant to create a temporary cart
-  const productsData = await storefrontApiRequest(GET_PRODUCTS_QUERY, { first: 1 });
-  if (!productsData) return [];
+export async function fetchShippingRates(
+  countryCode: string = "JP",
+  lineItems?: Array<{ variantId: string; quantity: number }>
+): Promise<ShippingRate[]> {
+  let cartLines: Array<{ quantity: number; merchandiseId: string }>;
 
-  const variant = productsData.data?.products?.edges?.[0]?.node?.variants?.edges?.[0]?.node;
-  if (!variant) return [];
+  if (lineItems && lineItems.length > 0) {
+    // Use actual cart items so shipping rate reflects the real products
+    cartLines = lineItems.map((item) => ({ quantity: item.quantity, merchandiseId: item.variantId }));
+  } else {
+    // Fallback: use the first available product variant
+    const productsData = await storefrontApiRequest(GET_PRODUCTS_QUERY, { first: 1 });
+    if (!productsData) return [];
+    const variant = productsData.data?.products?.edges?.[0]?.node?.variants?.edges?.[0]?.node;
+    if (!variant) return [];
+    cartLines = [{ quantity: 1, merchandiseId: variant.id }];
+  }
 
-  // Step 2: Create cart with the variant
+  // Create cart with the resolved line items
   const cartData = await storefrontApiRequest(CART_CREATE_MUTATION, {
-    input: { lines: [{ quantity: 1, merchandiseId: variant.id }] },
+    input: { lines: cartLines },
   });
   if (!cartData) return [];
 
