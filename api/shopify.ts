@@ -49,7 +49,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         headers: {
           'Content-Type': 'application/json',
           'Shopify-Storefront-Private-Token': token,
-          'Origin': `https://${req.headers.host || 'biteme.co.jp'}`,
+          'Origin': 'https://biteme.co.jp',
         },
         body: JSON.stringify(req.body),
       }
