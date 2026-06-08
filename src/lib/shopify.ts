@@ -2,7 +2,7 @@ import { toast } from "sonner";
 import { getGA4ClientId, getGA4SessionId } from './ga4-ecommerce';
 
 // Shopify API - requests go through the server proxy which handles authentication
-const SHOPIFY_PROXY_URL = '/api/shopify';
+const SHOPIFY_PROXY_URL = import.meta.env.VITE_SHOPIFY_PROXY_URL || '/api/shopify';
 
 export interface ShopifyProduct {
   node: {

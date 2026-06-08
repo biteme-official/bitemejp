@@ -9,6 +9,7 @@ const ALLOWED_ORIGINS = [
 function isAllowedOrigin(origin: string): boolean {
   if (ALLOWED_ORIGINS.includes(origin)) return true;
   if (/^https:\/\/smart-paw-finder[a-z0-9-]*\.vercel\.app$/.test(origin)) return true;
+  if (/^https:\/\/bitemejp[a-z0-9-]*\.vercel\.app$/.test(origin)) return true;
   return false;
 }
 
@@ -38,7 +39,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('[Shopify Proxy] Missing SHOPIFY_STOREFRONT_TOKEN');
     return res.status(500).json({ error: 'Missing token configuration' });
   }
-  console.log('[Shopify Proxy] token prefix:', token.substring(0, 12), 'shop:', shop);
 
   try {
     const apiVersion = '2025-10';
@@ -49,7 +49,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         headers: {
           'Content-Type': 'application/json',
           'Shopify-Storefront-Private-Token': token,
-          'Origin': 'https://biteme.co.jp',
         },
         body: JSON.stringify(req.body),
       }
@@ -58,7 +57,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const data = await shopifyResponse.text();
     if (!shopifyResponse.ok) {
       console.error(`[Shopify] ${shopifyResponse.status}:`, data.substring(0, 200));
-      console.error(`[Shopify] body sent:`, JSON.stringify(req.body).substring(0, 100));
     }
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', corsOrigin);
