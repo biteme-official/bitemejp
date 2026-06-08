@@ -57,6 +57,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const data = await shopifyResponse.text();
     if (!shopifyResponse.ok) {
       console.error(`[Shopify] ${shopifyResponse.status}:`, data.substring(0, 200));
+      console.error(`[Shopify] body sent:`, JSON.stringify(req.body).substring(0, 100));
     }
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', corsOrigin);
