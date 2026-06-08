@@ -63,12 +63,17 @@ export default function Checkout() {
     }
   });
 
-  // Fetch shipping rate
+  // Fetch shipping rate using actual cart items for accurate estimation
   useEffect(() => {
-    fetchShippingRates('JP')
-      .then((rates) => { if (rates.length > 0) setShippingRate(rates[0]); })
+    if (items.length === 0) return;
+    const lineItems = items.map((i) => ({ variantId: i.variantId, quantity: i.quantity }));
+    fetchShippingRates('JP', lineItems)
+      .then((rates) => {
+        const nonFreeRate = rates.find((r) => parseFloat(r.amount) > 0);
+        if (nonFreeRate) setShippingRate(nonFreeRate);
+      })
       .catch(console.error);
-  }, []);
+  }, [items]);
 
   // Shopify Cart API로 자동할인 금액 조회
   useEffect(() => {
@@ -303,7 +308,7 @@ export default function Checkout() {
               <span className="text-muted-foreground flex items-center gap-1">
                 <Truck className="h-3.5 w-3.5" />送料
               </span>
-              <span translate="no">{shipping > 0 ? formatPrice(shipping.toString(), currencyCode) : '無料'}</span>
+              <span translate="no">{!shippingRate ? '計算中...' : formatPrice(shipping.toString(), currencyCode)}</span>
             </div>
             <div className="flex justify-between text-base font-bold pt-1 border-t border-border">
               <span>合計</span>
