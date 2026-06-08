@@ -63,9 +63,10 @@ export default function Checkout() {
     }
   });
 
-  // Fetch shipping rate
+  // Fetch shipping rate using actual cart items for accurate estimation
   useEffect(() => {
-    fetchShippingRates('JP')
+    const lineItems = items.map((i) => ({ variantId: i.variantId, quantity: i.quantity }));
+    fetchShippingRates('JP', lineItems)
       .then((rates) => { if (rates.length > 0) setShippingRate(rates[0]); })
       .catch(console.error);
   }, []);

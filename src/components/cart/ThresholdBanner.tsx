@@ -10,7 +10,8 @@ export function ThresholdBanner() {
   const { formatPrice } = useTranslation();
 
   useEffect(() => {
-    fetchShippingRates("JP")
+    const lineItems = items.map((i) => ({ variantId: i.variantId, quantity: i.quantity }));
+    fetchShippingRates("JP", lineItems)
       .then((rates) => {
         if (rates.length > 0) {
           setShippingRate(rates[0]);
