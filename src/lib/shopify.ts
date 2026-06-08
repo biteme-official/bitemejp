@@ -1388,7 +1388,14 @@ export async function fetchShippingRates(
     cartId,
     buyerIdentity: {
       countryCode,
-      deliveryAddressPreferences: [{ deliveryAddress: { country: countryCode } }],
+      deliveryAddressPreferences: [{
+        deliveryAddress: {
+          country: countryCode,
+          zip: '100-0001',
+          city: '千代田区',
+          province: '東京都',
+        },
+      }],
     },
   });
 
