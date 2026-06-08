@@ -308,7 +308,7 @@ export default function Checkout() {
               <span className="text-muted-foreground flex items-center gap-1">
                 <Truck className="h-3.5 w-3.5" />送料
               </span>
-              <span translate="no">{shipping > 0 ? formatPrice(shipping.toString(), currencyCode) : '無料'}</span>
+              <span translate="no">{!shippingRate ? '計算中...' : formatPrice(shipping.toString(), currencyCode)}</span>
             </div>
             <div className="flex justify-between text-base font-bold pt-1 border-t border-border">
               <span>合計</span>
