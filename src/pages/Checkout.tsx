@@ -65,11 +65,15 @@ export default function Checkout() {
 
   // Fetch shipping rate using actual cart items for accurate estimation
   useEffect(() => {
+    if (items.length === 0) return;
     const lineItems = items.map((i) => ({ variantId: i.variantId, quantity: i.quantity }));
     fetchShippingRates('JP', lineItems)
-      .then((rates) => { if (rates.length > 0) setShippingRate(rates[0]); })
+      .then((rates) => {
+        const nonFreeRate = rates.find((r) => parseFloat(r.amount) > 0);
+        if (nonFreeRate) setShippingRate(nonFreeRate);
+      })
       .catch(console.error);
-  }, []);
+  }, [items]);
 
   // Shopify Cart API로 자동할인 금액 조회
   useEffect(() => {
