@@ -38,6 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('[Shopify Proxy] Missing SHOPIFY_STOREFRONT_TOKEN');
     return res.status(500).json({ error: 'Missing token configuration' });
   }
+  console.log('[Shopify Proxy] token prefix:', token.substring(0, 12), 'shop:', shop);
 
   try {
     const apiVersion = '2025-10';
