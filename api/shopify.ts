@@ -32,6 +32,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  // In staging, forward server-side to production proxy to bypass Shopify IP restrictions
+  const upstreamUrl = process.env.SHOPIFY_PROXY_UPSTREAM_URL;
+  if (upstreamUrl) {
+    try {
+      const upstreamResponse = await fetch(upstreamUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req.body),
+      });
+      const data = await upstreamResponse.text();
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+      return res.status(upstreamResponse.status).send(data);
+    } catch (error) {
+      console.error('[Shopify Proxy] Upstream error:', error);
+      return res.status(500).json({ error: String(error) });
+    }
+  }
+
   const token = process.env.SHOPIFY_STOREFRONT_TOKEN;
   const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
 
