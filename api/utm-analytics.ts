@@ -90,13 +90,15 @@ interface OrderNode {
   noteAttributes: { key: string; value: string }[];
 }
 
-async function fetchAllOrders(token: string, rangeStart: string): Promise<OrderNode[]> {
+async function fetchAllOrders(token: string, rangeStart: string): Promise<{ orders: OrderNode[]; gqlErrors?: unknown }> {
   const filterQuery = `created_at:>='${rangeStart}' AND financial_status:paid`;
   const all: OrderNode[] = [];
   let cursor: string | null = null;
+  let lastErrors: unknown;
 
   do {
     const data = await adminGraphQL(token, ORDERS_QUERY, { query: filterQuery, cursor });
+    if (data.errors) lastErrors = data.errors;
     const edges: { node: OrderNode }[] = data.data?.orders?.edges || [];
     all.push(...edges.map((e) => e.node));
     cursor = data.data?.orders?.pageInfo?.hasNextPage
@@ -104,7 +106,7 @@ async function fetchAllOrders(token: string, rangeStart: string): Promise<OrderN
       : null;
   } while (cursor && all.length < 2000);
 
-  return all;
+  return { orders: all, gqlErrors: lastErrors };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -136,7 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       new Date(new Date(`${dateStr}T00:00:00+09:00`).getTime()).toISOString();
     const rangeStart = isCustom ? jstMidnightUTC(fromParam!) : getRangeStart(range);
 
-    const orders = await fetchAllOrders(token, rangeStart);
+    const { orders, gqlErrors } = await fetchAllOrders(token, rangeStart);
 
     // utm_source별 집계
     const sourceMap = new Map<string, { orders: number; revenue: number }>();
@@ -219,6 +221,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sources,
       daily,
       sourceKeys,
+      ...(gqlErrors ? { _debug_gqlErrors: gqlErrors } : {}),
     });
   } catch (error) {
     console.error('[UTM Analytics]', error);
