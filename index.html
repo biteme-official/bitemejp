@@ -127,6 +127,8 @@
                   src = 'line'; med = 'social';
                 } else if (ref && ref.indexOf('instagram.com') !== -1) {
                   src = 'instagram'; med = 'social';
+                } else if (ref && (ref.indexOf('facebook.com') !== -1 || ref.indexOf('fb.com') !== -1)) {
+                  src = 'facebook'; med = 'social';
                 } else if (ref && (ref.indexOf('twitter.com') !== -1 || ref.indexOf('t.co') !== -1 || ref.indexOf('x.com') !== -1)) {
                   src = 'twitter'; med = 'social';
                 } else if (ref) {
