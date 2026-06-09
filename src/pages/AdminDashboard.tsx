@@ -1621,6 +1621,170 @@ function UtmDailyTable({ data }: { data: UtmData }) {
   );
 }
 
+// ─── GA4 × Shopify UTM 전환율 컴포넌트 ──────────────────────────────────────────
+
+function UtmConversionTable({ utm, ga4Sources }: {
+  utm: UtmData;
+  ga4Sources: AnalyticsData["trafficSources"];
+}) {
+  const ga4Map = useMemo(() => {
+    const m = new Map<string, { sessions: number; activeUsers: number }>();
+    for (const row of ga4Sources) {
+      const src = row.sessionSource as string;
+      const ex = m.get(src) ?? { sessions: 0, activeUsers: 0 };
+      ex.sessions += row.sessions as number;
+      ex.activeUsers += (row.activeUsers as number) ?? 0;
+      m.set(src, ex);
+    }
+    return m;
+  }, [ga4Sources]);
+
+  const rows = useMemo(() => {
+    return utm.sources
+      .filter(s => s.source !== "(없음)")
+      .map(s => {
+        const ga4 = ga4Map.get(s.source) ?? { sessions: 0, activeUsers: 0 };
+        const cvr = ga4.sessions > 0 ? (s.orders / ga4.sessions) * 100 : 0;
+        return { ...s, sessions: ga4.sessions, activeUsers: ga4.activeUsers, cvr };
+      })
+      .sort((a, b) => b.revenue - a.revenue);
+  }, [utm.sources, ga4Map]);
+
+  if (rows.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="text-sm font-semibold">소스별 전환율 (GA4 × Shopify)</CardTitle>
+            <p className="text-xs text-muted-foreground">GA4 세션 수 대비 Shopify 실구매 전환율</p>
+          </div>
+          <CopyButton getData={() => {
+            const header = "utm_source\tGA4 세션\tGA4 유저\t주문 수\t전환율\t매출(¥)";
+            const lines = rows.map(r =>
+              `${r.source}\t${r.sessions}\t${r.activeUsers}\t${r.orders}\t${r.cvr > 0 ? r.cvr.toFixed(2) + "%" : "—"}\t${r.revenue}`
+            );
+            return [header, ...lines].join("\n");
+          }} />
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left px-4 py-2 font-medium text-muted-foreground">utm_source</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">GA4 세션</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">GA4 유저</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">주문 수</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">전환율</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                <td className="px-4 py-2.5 font-mono">{row.source}</td>
+                <td className="px-4 py-2.5 text-right">{row.sessions > 0 ? row.sessions.toLocaleString() : <span className="text-muted-foreground/40">—</span>}</td>
+                <td className="px-4 py-2.5 text-right">{row.activeUsers > 0 ? row.activeUsers.toLocaleString() : <span className="text-muted-foreground/40">—</span>}</td>
+                <td className="px-4 py-2.5 text-right">{row.orders}건</td>
+                <td className="px-4 py-2.5 text-right">
+                  {row.cvr > 0 ? (
+                    <span className={row.cvr >= 2 ? "text-green-600 font-semibold" : row.cvr >= 1 ? "text-orange-500" : ""}>
+                      {row.cvr.toFixed(2)}%
+                    </span>
+                  ) : <span className="text-muted-foreground/40">—</span>}
+                </td>
+                <td className="px-4 py-2.5 text-right font-medium">{formatRevenue(row.revenue)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
+function UtmDailyConversionChart({ utm, ga4OverTime }: {
+  utm: UtmData;
+  ga4OverTime: AnalyticsData["trafficSourcesOverTime"];
+}) {
+  const sources = utm.sources.filter(s => s.source !== "(없음)");
+  const [selectedSource, setSelectedSource] = useState<string>(() => sources[0]?.source || "");
+  const activeSource = selectedSource || sources[0]?.source || "";
+
+  const ga4Daily = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const row of ga4OverTime) {
+      if (row.sessionSource !== activeSource) continue;
+      const iso = ga4DateToISO(row.date);
+      m.set(iso, (m.get(iso) ?? 0) + (row.sessions as number));
+    }
+    return m;
+  }, [ga4OverTime, activeSource]);
+
+  const chartData = useMemo(() => {
+    return utm.daily.map(row => {
+      const date = row.date as string;
+      return {
+        date: isoToLabel(date),
+        sessions: ga4Daily.get(date) ?? 0,
+        orders: (row[`${activeSource}__orders`] as number) ?? 0,
+      };
+    });
+  }, [utm.daily, activeSource, ga4Daily]);
+
+  if (sources.length === 0) return null;
+
+  const hasAnyData = chartData.some(r => r.sessions > 0 || r.orders > 0);
+  const interval = Math.max(0, Math.ceil(chartData.length / 10) - 1);
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <CardTitle className="text-sm font-semibold">일자별 세션 vs 주문</CardTitle>
+            <p className="text-xs text-muted-foreground">GA4 세션(막대) / Shopify 주문(선)</p>
+          </div>
+          <div className="flex rounded-md border overflow-hidden text-xs">
+            {sources.map(s => (
+              <button
+                key={s.source}
+                onClick={() => setSelectedSource(s.source)}
+                className={`px-3 py-1.5 transition-colors ${activeSource === s.source ? "bg-orange-500 text-white font-medium" : "text-muted-foreground hover:bg-muted"}`}
+              >
+                {s.source}
+              </button>
+            ))}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {!hasAnyData ? (
+          <p className="text-xs text-muted-foreground text-center py-8">GA4 소스 데이터 없음 (소스명이 GA4와 일치하지 않을 수 있음)</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={220}>
+            <ComposedChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} interval={interval} />
+              <YAxis yAxisId="sess" tick={{ fontSize: 10 }} width={40} />
+              <YAxis yAxisId="ord" orientation="right" tick={{ fontSize: 10 }} width={30} allowDecimals={false} />
+              <Tooltip formatter={(value: number, name: string) => [
+                name === "sessions" ? `${value.toLocaleString()}세션` : `${value}건`,
+                name === "sessions" ? "GA4 세션" : "주문 수",
+              ]} />
+              <Legend formatter={(v) => v === "sessions" ? "GA4 세션" : "주문 수"} wrapperStyle={{ fontSize: 11 }} />
+              <Bar yAxisId="sess" dataKey="sessions" fill={BRAND} opacity={0.25} radius={[2, 2, 0, 0]} />
+              <Line yAxisId="ord" type="monotone" dataKey="orders" stroke={BRAND} strokeWidth={2.5} dot={{ r: 3 }} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── 행동 분석 컴포넌트 ────────────────────────────────────────────────────────
 
 const BEHAVIOR_FUNNEL_COLORS = ["#f85a24", "#fb8c5a", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6"];
@@ -2565,11 +2729,21 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
                   <SectionLabel>소스별 집계</SectionLabel>
                   <UtmSourceTable data={utm} />
 
+                  {data && (
+                    <>
+                      <SectionLabel>소스별 전환율</SectionLabel>
+                      <UtmConversionTable utm={utm} ga4Sources={data.trafficSources} />
+
+                      <SectionLabel>일자별 세션 vs 주문</SectionLabel>
+                      <UtmDailyConversionChart utm={utm} ga4OverTime={data.trafficSourcesOverTime} />
+                    </>
+                  )}
+
                   <SectionLabel>일자별 상세</SectionLabel>
                   <UtmDailyTable data={utm} />
 
                   <p className="text-center text-xs text-muted-foreground pb-4">
-                    Shopify 주문 note_attributes.utm_source 기준 · {RANGE_LABELS[range]} 데이터
+                    Shopify 주문 note_attributes.utm_source 기준 · GA4: G-WLTZH90W2L · {RANGE_LABELS[range]} 데이터
                   </p>
                 </>
               ) : (
