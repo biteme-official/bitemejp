@@ -462,6 +462,18 @@ export default function ProductDetail() {
       selectedOptions: variant.selectedOptions,
     });
 
+    // Meta Pixel: AddToCart (바로구매도 장바구니 담기 포함)
+    const fbq = (window as Window & { fbq?: (...args: unknown[]) => void }).fbq;
+    if (fbq) {
+      fbq('track', 'AddToCart', {
+        value: parseFloat(variant.price.amount) * quantity,
+        currency: variant.price.currencyCode,
+        content_ids: [variant.id],
+        content_type: 'product',
+        contents: [{ id: variant.id, quantity }],
+      });
+    }
+
     navigate('/checkout');
   };
 
