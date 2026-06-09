@@ -96,6 +96,19 @@ interface CustomerData {
   dailyNewCustomers: { date: string; count: number }[];
 }
 
+interface UtmSource {
+  source: string;
+  orders: number;
+  revenue: number;
+}
+
+interface UtmData {
+  summary: { totalOrders: number; totalRevenue: number };
+  sources: UtmSource[];
+  daily: Record<string, number | string>[];
+  sourceKeys: string[];
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const BRAND = "#f85a24";
@@ -204,6 +217,15 @@ async function fetchCustomers(range: Range, secret: string, customFrom?: string,
   const res = await fetch(`${ADMIN_API_BASE}/api/customer-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "회원 데이터 오류"); }
+  return res.json();
+}
+
+async function fetchUtm(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<UtmData> {
+  const params = new URLSearchParams({ range });
+  if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
+  const res = await fetch(`${ADMIN_API_BASE}/api/utm-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  if (res.status === 401) throw new Error("UNAUTHORIZED");
+  if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "UTM 데이터 오류"); }
   return res.json();
 }
 
@@ -1428,6 +1450,177 @@ function NewVsReturningChart({ data }: { data: AnalyticsData["newVsReturning"] }
   );
 }
 
+// ─── UTM 분석 컴포넌트 ────────────────────────────────────────────────────────
+
+function UtmSourceTable({ data }: { data: UtmData }) {
+  const { sources, summary } = data;
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold">UTM 소스별 요약</CardTitle>
+          <CopyButton getData={() => {
+            const header = "utm_source\t주문 수\t매출(¥)\t주문 비율\t매출 비율";
+            const lines = sources.map(r => {
+              const oPct = summary.totalOrders > 0 ? ((r.orders / summary.totalOrders) * 100).toFixed(1) : "0.0";
+              const rPct = summary.totalRevenue > 0 ? ((r.revenue / summary.totalRevenue) * 100).toFixed(1) : "0.0";
+              return `${r.source}\t${r.orders}\t${r.revenue}\t${oPct}%\t${rPct}%`;
+            });
+            return [header, ...lines].join("\n");
+          }} />
+        </div>
+        <p className="text-xs text-muted-foreground">Shopify 주문의 추가 세부 정보(note_attributes)에 기록된 utm_source 기준</p>
+      </CardHeader>
+      <CardContent className="p-0">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b">
+              <th className="text-left px-4 py-2 font-medium text-muted-foreground">utm_source</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">주문 수</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출 비율</th>
+              <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sources.map((row, i) => {
+              const revPct = summary.totalRevenue > 0 ? (row.revenue / summary.totalRevenue) * 100 : 0;
+              return (
+                <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 w-16 shrink-0 rounded-full bg-muted overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${revPct}%`, backgroundColor: PALETTE[i % PALETTE.length] }} />
+                      </div>
+                      <span className="font-mono">{row.source}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5 text-right">{row.orders}건</td>
+                  <td className="px-4 py-2.5 text-right text-muted-foreground">{revPct.toFixed(1)}%</td>
+                  <td className="px-4 py-2.5 text-right font-medium">{formatRevenue(row.revenue)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot className="border-t bg-muted/20">
+            <tr>
+              <td className="px-4 py-2 font-semibold">합계</td>
+              <td className="px-4 py-2 text-right font-semibold">{summary.totalOrders}건</td>
+              <td className="px-4 py-2 text-right text-muted-foreground">100%</td>
+              <td className="px-4 py-2 text-right font-semibold">{formatRevenue(summary.totalRevenue)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </CardContent>
+    </Card>
+  );
+}
+
+function UtmDailyTable({ data }: { data: UtmData }) {
+  const { daily, sourceKeys } = data;
+  const [viewMode, setViewMode] = useState<"orders" | "revenue">("orders");
+
+  const totals = useMemo(() => {
+    const t: Record<string, number> = {};
+    for (const src of sourceKeys) {
+      t[src] = daily.reduce((s, row) => s + ((row[`${src}__${viewMode}`] as number) ?? 0), 0);
+    }
+    return t;
+  }, [daily, sourceKeys, viewMode]);
+
+  if (sourceKeys.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-xs text-muted-foreground">
+          기간 내 utm_source 데이터가 없습니다.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold">일자별 UTM 소스 상세</CardTitle>
+          <div className="flex items-center gap-2">
+            <CopyButton getData={() => {
+              const header = ["날짜", ...sourceKeys].join("\t");
+              const lines = daily.map(row => {
+                const vals = sourceKeys.map(src => row[`${src}__${viewMode}`] ?? 0);
+                return [row.date as string, ...vals].join("\t");
+              });
+              return [header, ...lines].join("\n");
+            }} />
+            <div className="flex rounded-md border overflow-hidden text-xs">
+              <button
+                onClick={() => setViewMode("orders")}
+                className={`px-3 py-1 transition-colors ${viewMode === "orders" ? "bg-orange-500 text-white font-medium" : "text-muted-foreground hover:bg-muted"}`}
+              >
+                주문 수
+              </button>
+              <button
+                onClick={() => setViewMode("revenue")}
+                className={`px-3 py-1 transition-colors ${viewMode === "revenue" ? "bg-orange-500 text-white font-medium" : "text-muted-foreground hover:bg-muted"}`}
+              >
+                매출
+              </button>
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto max-h-96 overflow-y-auto">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-background border-b z-10">
+              <tr>
+                <th className="text-left px-4 py-2 font-medium text-muted-foreground sticky left-0 bg-background">날짜</th>
+                {sourceKeys.map((src) => (
+                  <th key={src} className="text-right px-4 py-2 font-medium text-muted-foreground whitespace-nowrap">{src}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {daily.map((row, i) => (
+                <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-2 font-mono sticky left-0 bg-background">{row.date as string}</td>
+                  {sourceKeys.map((src) => {
+                    const val = (row[`${src}__${viewMode}`] as number) ?? 0;
+                    return (
+                      <td key={src} className="px-4 py-2 text-right">
+                        {val > 0
+                          ? viewMode === "revenue"
+                            ? formatRevenue(val)
+                            : `${val}건`
+                          : <span className="text-muted-foreground/40">—</span>
+                        }
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot className="sticky bottom-0 bg-background border-t">
+              <tr>
+                <td className="px-4 py-2 font-semibold sticky left-0 bg-background">합계</td>
+                {sourceKeys.map((src) => (
+                  <td key={src} className="px-4 py-2 text-right font-semibold">
+                    {totals[src] > 0
+                      ? viewMode === "revenue"
+                        ? formatRevenue(totals[src])
+                        : `${totals[src]}건`
+                      : "—"
+                    }
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── 행동 분석 컴포넌트 ────────────────────────────────────────────────────────
 
 const BEHAVIOR_FUNNEL_COLORS = ["#f85a24", "#fb8c5a", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6"];
@@ -2004,6 +2197,14 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
     retry,
   });
 
+  const { data: utm, isLoading: utmLoading } = useQuery({
+    queryKey: ["utm-analytics", range, secret, customFrom, customTo],
+    queryFn: () => fetchUtm(range, secret, customFrom, customTo),
+    staleTime: 5 * 60 * 1000,
+    enabled: canQuery,
+    retry,
+  });
+
   const { data: behavior } = useQuery({
     queryKey: ["behavior-analytics", range, secret],
     queryFn: () => fetchBehavior(range, secret),
@@ -2141,6 +2342,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               <TabsTrigger value="dashboard" className="text-xs px-4">대시보드</TabsTrigger>
               <TabsTrigger value="funnel" className="text-xs px-4">퍼널 분석</TabsTrigger>
               <TabsTrigger value="behavior" className="text-xs px-4">행동 분석</TabsTrigger>
+              <TabsTrigger value="utm" className="text-xs px-4">UTM 분석</TabsTrigger>
               <TabsTrigger value="members" className="text-xs px-4">회원 분석</TabsTrigger>
               <TabsTrigger value="weekly" className="text-xs px-4">주간회고</TabsTrigger>
             </TabsList>
@@ -2345,6 +2547,38 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
                 </>
               )}
             </TabsContent>
+            {/* ══ UTM 분석 탭 ══ */}
+            <TabsContent value="utm" className="space-y-5 mt-0">
+              {utmLoading ? (
+                <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+                  UTM 데이터를 불러오는 중...
+                </div>
+              ) : utm ? (
+                <>
+                  <SectionLabel>UTM 핵심 지표</SectionLabel>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    <KpiCard label="utm_source 보유 주문" value={`${utm.summary.totalOrders.toLocaleString()}건`} accent />
+                    <KpiCard label="utm_source 보유 매출" value={formatRevenue(utm.summary.totalRevenue)} accent />
+                    <KpiCard label="소스 종류" value={`${utm.sources.filter(s => s.source !== "(없음)").length}개`} sub="utm_source 값 종류" />
+                  </div>
+
+                  <SectionLabel>소스별 집계</SectionLabel>
+                  <UtmSourceTable data={utm} />
+
+                  <SectionLabel>일자별 상세</SectionLabel>
+                  <UtmDailyTable data={utm} />
+
+                  <p className="text-center text-xs text-muted-foreground pb-4">
+                    Shopify 주문 note_attributes.utm_source 기준 · {RANGE_LABELS[range]} 데이터
+                  </p>
+                </>
+              ) : (
+                <div className="flex items-center justify-center h-64 text-sm text-muted-foreground">
+                  UTM 데이터를 불러올 수 없습니다.
+                </div>
+              )}
+            </TabsContent>
+
             {/* ══ 주간회고 탭 ══ */}
             <TabsContent value="weekly" className="space-y-5 mt-0">
               <WeeklyReviewTab secret={secret} isActive={activeTab === "weekly"} />
