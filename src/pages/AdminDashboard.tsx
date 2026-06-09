@@ -1754,7 +1754,7 @@ function WeeklyReviewTab({ secret, isActive }: { secret: string; isActive: boole
     const cvr = r.sessions > 0 ? (r.orders / r.sessions) * 100 : 0;
     const rpp = r.postsPublished > 0 ? Math.round(r.postReach / r.postsPublished) : 0;
     const er = r.postReach > 0 ? (r.postEngagement / r.postReach) * 100 : 0;
-    return [r.label, r.dau || "", r.revenue || "", r.orders || "", r.itemViews || "", aov || "",
+    return [r.dau || "", r.revenue || "", r.orders || "", r.itemViews || "", aov || "",
       cvr > 0 ? cvr.toFixed(2) + "%" : "", r.followerDelta ?? "", r.cumulativeFollowers ?? "",
       r.postsPublished || "", r.postReach || "", rpp || "", r.postEngagement || "", er > 0 ? er.toFixed(2) + "%" : ""].join("\t");
   }
@@ -1889,7 +1889,7 @@ function WeeklyReviewTab({ secret, isActive }: { secret: string; isActive: boole
                 className="text-xs px-2 py-1 rounded border hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
                 팔로워 수기 입력
               </button>
-              <CopyButton getData={() => [COL_HEADERS.join("\t"), ...dailyRows.map(rowToTsv)].join("\n")} />
+              <CopyButton getData={() => dailyRows.map(rowToTsv).join("\n")} />
             </div>
           </div>
         </CardHeader>
@@ -1903,7 +1903,7 @@ function WeeklyReviewTab({ secret, isActive }: { secret: string; isActive: boole
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold">주간 데이터 <span className="text-xs font-normal text-muted-foreground ml-1">WoW</span></CardTitle>
-            <CopyButton getData={() => [COL_HEADERS.join("\t"), ...weeklyRows.map(rowToTsv)].join("\n")} />
+            <CopyButton getData={() => weeklyRows.map(rowToTsv).join("\n")} />
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -1916,7 +1916,7 @@ function WeeklyReviewTab({ secret, isActive }: { secret: string; isActive: boole
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold">월간 데이터 <span className="text-xs font-normal text-muted-foreground ml-1">MoM</span></CardTitle>
-            <CopyButton getData={() => [COL_HEADERS.join("\t"), ...monthlyRows.map(rowToTsv)].join("\n")} />
+            <CopyButton getData={() => monthlyRows.map(rowToTsv).join("\n")} />
           </div>
         </CardHeader>
         <CardContent className="p-0">
