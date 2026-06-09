@@ -41,9 +41,13 @@ function verifyHmac(rawBody: string, signature: string, secret: string): boolean
 }
 
 async function sendGA4Purchase(order: ShopifyOrder, apiSecret: string): Promise<void> {
-  // cartStore.ts에서 ga_client_id를 카트 속성으로 전달 → Shopify 주문의 note_attributes에 포함됨
-  const clientIdAttr = order.note_attributes?.find(a => a.name === 'ga_client_id');
-  const clientId = clientIdAttr?.value || `shopify.${order.id}`;
+  // cartStore.ts에서 카트 속성으로 전달 → Shopify 주문의 note_attributes에 포함됨
+  const attrs = order.note_attributes ?? [];
+  const clientId = attrs.find(a => a.name === 'ga_client_id')?.value || `shopify.${order.id}`;
+  const sessionId = attrs.find(a => a.name === 'ga_session_id')?.value;
+  const utmSource = attrs.find(a => a.name === 'utm_source')?.value;
+  const utmMedium = attrs.find(a => a.name === 'utm_medium')?.value;
+  const utmCampaign = attrs.find(a => a.name === 'utm_campaign')?.value;
 
   const shipping = order.shipping_lines.reduce(
     (sum, l) => sum + parseFloat(l.price || '0'), 0
@@ -71,6 +75,11 @@ async function sendGA4Purchase(order: ShopifyOrder, apiSecret: string): Promise<
           currency: order.currency,
           shipping,
           items,
+          // session_id가 있어야 GA4가 세션 attribution(소스/매체)을 정확히 연결함
+          ...(sessionId ? { session_id: sessionId } : {}),
+          ...(utmSource ? { campaign_source: utmSource } : {}),
+          ...(utmMedium ? { campaign_medium: utmMedium } : {}),
+          ...(utmCampaign ? { campaign_name: utmCampaign } : {}),
         },
       },
     ],
