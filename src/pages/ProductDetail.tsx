@@ -426,6 +426,18 @@ export default function ProductDetail() {
     // GA4: add_to_cart event
     trackAddToCart(shopifyToGA4Item(product, variant, quantity));
 
+    // Meta Pixel: AddToCart
+    const fbq = (window as Window & { fbq?: (...args: unknown[]) => void }).fbq;
+    if (fbq) {
+      fbq('track', 'AddToCart', {
+        value: parseFloat(variant.price.amount) * quantity,
+        currency: variant.price.currencyCode,
+        content_ids: [variant.id],
+        content_type: 'product',
+        contents: [{ id: variant.id, quantity }],
+      });
+    }
+
     toast.success(t('product.addedToCart'), {
       description: `${product.title} x ${quantity}`,
       position: 'top-center',

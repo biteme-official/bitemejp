@@ -62,6 +62,18 @@ export const ProductOptionDialog = ({ product, open, onOpenChange }: ProductOpti
       selectedOptions: variant.selectedOptions,
     });
 
+    // Meta Pixel: AddToCart
+    const fbq = (window as Window & { fbq?: (...args: unknown[]) => void }).fbq;
+    if (fbq) {
+      fbq('track', 'AddToCart', {
+        value: parseFloat(variant.price.amount) * quantity,
+        currency: variant.price.currencyCode,
+        content_ids: [variant.id],
+        content_type: 'product',
+        contents: [{ id: variant.id, quantity }],
+      });
+    }
+
     toast.success('Added to cart', {
       description: `${productNode.title} x ${quantity}`,
       position: 'top-center',
