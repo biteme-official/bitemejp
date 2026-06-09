@@ -12,6 +12,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 
+// Admin API base URL — 별도 Vercel 프로젝트로 분리된 경우 해당 URL, 동일 origin이면 빈 문자열
+const ADMIN_API_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL as string) ?? '';
+
 // ─── 상품명 자동번역 (일어 → 한국어, 어드민 전용) ───────────────────────────
 // MyMemory 무료 API 사용. 실제 사이트(biteme.co.jp)에는 영향 없음.
 const translationCache = new Map<string, string>();
@@ -147,7 +150,7 @@ const FUNNEL_ORDER = ["view_item", "add_to_cart", "begin_checkout", "purchase"] 
 async function fetchAnalytics(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<AnalyticsData> {
   const params = new URLSearchParams({ range });
   if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
-  const res = await fetch(`/api/analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  const res = await fetch(`${ADMIN_API_BASE}/api/analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "GA4 오류"); }
   return res.json();
@@ -156,7 +159,7 @@ async function fetchAnalytics(range: Range, secret: string, customFrom?: string,
 async function fetchShopify(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<ShopifyData> {
   const params = new URLSearchParams({ range });
   if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
-  const res = await fetch(`/api/shopify-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  const res = await fetch(`${ADMIN_API_BASE}/api/shopify-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "Shopify 오류"); }
   return res.json();
@@ -171,7 +174,7 @@ interface BehaviorData {
 
 async function fetchBehavior(range: Range, secret: string): Promise<BehaviorData> {
   const params = new URLSearchParams({ range });
-  const res = await fetch(`/api/behavior-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  const res = await fetch(`${ADMIN_API_BASE}/api/behavior-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "행동 데이터 오류"); }
   return res.json();
@@ -180,14 +183,14 @@ async function fetchBehavior(range: Range, secret: string): Promise<BehaviorData
 async function fetchInstagram(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<InstagramData> {
   const params = new URLSearchParams({ range });
   if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
-  const res = await fetch(`/api/instagram-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  const res = await fetch(`${ADMIN_API_BASE}/api/instagram-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "Instagram 오류"); }
   return res.json();
 }
 
 async function postFollowerData(rows: { date: string; delta: number }[], secret: string): Promise<void> {
-  const res = await fetch("/api/instagram-follower-input", {
+  const res = await fetch(`${ADMIN_API_BASE}/api/instagram-follower-input`, {
     method: "POST",
     headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
     body: JSON.stringify({ rows }),
@@ -198,7 +201,7 @@ async function postFollowerData(rows: { date: string; delta: number }[], secret:
 async function fetchCustomers(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<CustomerData> {
   const params = new URLSearchParams({ range });
   if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
-  const res = await fetch(`/api/customer-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  const res = await fetch(`${ADMIN_API_BASE}/api/customer-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "회원 데이터 오류"); }
   return res.json();
@@ -1751,7 +1754,7 @@ function WeeklyReviewTab({ secret, isActive }: { secret: string; isActive: boole
     const cvr = r.sessions > 0 ? (r.orders / r.sessions) * 100 : 0;
     const rpp = r.postsPublished > 0 ? Math.round(r.postReach / r.postsPublished) : 0;
     const er = r.postReach > 0 ? (r.postEngagement / r.postReach) * 100 : 0;
-    return [r.label, r.dau || "", r.revenue || "", r.orders || "", r.itemViews || "", aov || "",
+    return [r.dau || "", r.revenue || "", r.orders || "", r.itemViews || "", aov || "",
       cvr > 0 ? cvr.toFixed(2) + "%" : "", r.followerDelta ?? "", r.cumulativeFollowers ?? "",
       r.postsPublished || "", r.postReach || "", rpp || "", r.postEngagement || "", er > 0 ? er.toFixed(2) + "%" : ""].join("\t");
   }
@@ -1886,7 +1889,7 @@ function WeeklyReviewTab({ secret, isActive }: { secret: string; isActive: boole
                 className="text-xs px-2 py-1 rounded border hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
                 팔로워 수기 입력
               </button>
-              <CopyButton getData={() => [COL_HEADERS.join("\t"), ...dailyRows.map(rowToTsv)].join("\n")} />
+              <CopyButton getData={() => dailyRows.map(rowToTsv).join("\n")} />
             </div>
           </div>
         </CardHeader>
@@ -1900,7 +1903,7 @@ function WeeklyReviewTab({ secret, isActive }: { secret: string; isActive: boole
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold">주간 데이터 <span className="text-xs font-normal text-muted-foreground ml-1">WoW</span></CardTitle>
-            <CopyButton getData={() => [COL_HEADERS.join("\t"), ...weeklyRows.map(rowToTsv)].join("\n")} />
+            <CopyButton getData={() => weeklyRows.map(rowToTsv).join("\n")} />
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -1913,7 +1916,7 @@ function WeeklyReviewTab({ secret, isActive }: { secret: string; isActive: boole
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-sm font-semibold">월간 데이터 <span className="text-xs font-normal text-muted-foreground ml-1">MoM</span></CardTitle>
-            <CopyButton getData={() => [COL_HEADERS.join("\t"), ...monthlyRows.map(rowToTsv)].join("\n")} />
+            <CopyButton getData={() => monthlyRows.map(rowToTsv).join("\n")} />
           </div>
         </CardHeader>
         <CardContent className="p-0">

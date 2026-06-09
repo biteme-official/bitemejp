@@ -7,6 +7,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  // Admin 프로젝트에서만 실행 — 메인 프로젝트 cron 중복 방지
+  if (!process.env.CRON_ENABLED) {
+    return res.status(200).json({ ok: true, skipped: true });
+  }
+
   const igToken = process.env.INSTAGRAM_ACCESS_TOKEN;
   const igId = process.env.INSTAGRAM_ACCOUNT_ID;
   if (!igToken || !igId) {

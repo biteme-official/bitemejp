@@ -2,6 +2,12 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 
+const ALLOWED_ORIGINS = [
+  'https://biteme.co.jp',
+  'https://www.biteme.co.jp',
+  'http://localhost:5173',
+];
+
 let cachedToken: string | null = null;
 let tokenExpiresAt = 0;
 
@@ -171,11 +177,12 @@ function buildCsv(orders: OrderNode[]): string {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization');
-    return res.status(200).end();
-  }
+  const origin = req.headers.origin || '';
+  const corsOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
