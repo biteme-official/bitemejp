@@ -319,6 +319,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // Admin 프로젝트에서만 실행 — 메인 프로젝트 cron 중복 방지
+  if (!process.env.CRON_ENABLED) {
+    return res.status(200).json({ ok: true, skipped: true });
+  }
+
   try {
     const token = await getAccessToken();
     const dates = getDateRanges();

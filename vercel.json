@@ -3,7 +3,16 @@
   "installCommand": "npm install",
   "outputDirectory": "dist",
   "framework": "vite",
-  "crons": [],
+  "crons": [
+    {
+      "path": "/api/slack-report",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/instagram-follower-cron",
+      "schedule": "0 15 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
