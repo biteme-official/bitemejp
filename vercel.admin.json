@@ -22,6 +22,7 @@
     { "source": "/api/instagram-follower-input", "destination": "/api/instagram-follower-input" },
     { "source": "/api/instagram-follower-cron", "destination": "/api/instagram-follower-cron" },
     { "source": "/api/orders-export", "destination": "/api/orders-export" },
+    { "source": "/api/utm-analytics", "destination": "/api/utm-analytics" },
     { "source": "/api/slack-report", "destination": "/api/slack-report" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
