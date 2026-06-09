@@ -4,6 +4,12 @@ import { createClient } from '@supabase/supabase-js';
 const IG_BASE = 'https://graph.facebook.com/v21.0';
 const ADMIN_SECRET = process.env.ADMIN_SECRET || '';
 
+const ALLOWED_ORIGINS = [
+  'https://biteme.co.jp',
+  'https://www.biteme.co.jp',
+  'http://localhost:5173',
+];
+
 async function igGet(path: string, params: Record<string, string>) {
   const token = process.env.INSTAGRAM_ACCESS_TOKEN!;
   const url = new URL(`${IG_BASE}${path}`);
@@ -49,6 +55,13 @@ interface MediaItem {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const origin = req.headers.origin || '';
+  const corsOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
   const auth = req.headers.authorization;
   if (!ADMIN_SECRET || auth !== `Bearer ${ADMIN_SECRET}`) {
     return res.status(401).json({ message: 'UNAUTHORIZED' });

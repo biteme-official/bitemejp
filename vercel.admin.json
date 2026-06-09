@@ -1,0 +1,28 @@
+{
+  "buildCommand": "npm run build",
+  "installCommand": "npm install",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "crons": [
+    {
+      "path": "/api/slack-report",
+      "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/instagram-follower-cron",
+      "schedule": "0 15 * * *"
+    }
+  ],
+  "rewrites": [
+    { "source": "/api/analytics", "destination": "/api/analytics" },
+    { "source": "/api/shopify-analytics", "destination": "/api/shopify-analytics" },
+    { "source": "/api/behavior-analytics", "destination": "/api/behavior-analytics" },
+    { "source": "/api/customer-analytics", "destination": "/api/customer-analytics" },
+    { "source": "/api/instagram-analytics", "destination": "/api/instagram-analytics" },
+    { "source": "/api/instagram-follower-input", "destination": "/api/instagram-follower-input" },
+    { "source": "/api/instagram-follower-cron", "destination": "/api/instagram-follower-cron" },
+    { "source": "/api/orders-export", "destination": "/api/orders-export" },
+    { "source": "/api/slack-report", "destination": "/api/slack-report" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}

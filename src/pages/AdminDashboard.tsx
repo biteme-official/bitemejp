@@ -12,6 +12,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 
+// Admin API base URL — 별도 Vercel 프로젝트로 분리된 경우 해당 URL, 동일 origin이면 빈 문자열
+const ADMIN_API_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL as string) ?? '';
+
 // ─── 상품명 자동번역 (일어 → 한국어, 어드민 전용) ───────────────────────────
 // MyMemory 무료 API 사용. 실제 사이트(biteme.co.jp)에는 영향 없음.
 const translationCache = new Map<string, string>();
@@ -147,7 +150,7 @@ const FUNNEL_ORDER = ["view_item", "add_to_cart", "begin_checkout", "purchase"] 
 async function fetchAnalytics(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<AnalyticsData> {
   const params = new URLSearchParams({ range });
   if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
-  const res = await fetch(`/api/analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  const res = await fetch(`${ADMIN_API_BASE}/api/analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "GA4 오류"); }
   return res.json();
@@ -156,7 +159,7 @@ async function fetchAnalytics(range: Range, secret: string, customFrom?: string,
 async function fetchShopify(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<ShopifyData> {
   const params = new URLSearchParams({ range });
   if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
-  const res = await fetch(`/api/shopify-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  const res = await fetch(`${ADMIN_API_BASE}/api/shopify-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "Shopify 오류"); }
   return res.json();
@@ -171,7 +174,7 @@ interface BehaviorData {
 
 async function fetchBehavior(range: Range, secret: string): Promise<BehaviorData> {
   const params = new URLSearchParams({ range });
-  const res = await fetch(`/api/behavior-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  const res = await fetch(`${ADMIN_API_BASE}/api/behavior-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "행동 데이터 오류"); }
   return res.json();
@@ -180,14 +183,14 @@ async function fetchBehavior(range: Range, secret: string): Promise<BehaviorData
 async function fetchInstagram(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<InstagramData> {
   const params = new URLSearchParams({ range });
   if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
-  const res = await fetch(`/api/instagram-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  const res = await fetch(`${ADMIN_API_BASE}/api/instagram-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "Instagram 오류"); }
   return res.json();
 }
 
 async function postFollowerData(rows: { date: string; delta: number }[], secret: string): Promise<void> {
-  const res = await fetch("/api/instagram-follower-input", {
+  const res = await fetch(`${ADMIN_API_BASE}/api/instagram-follower-input`, {
     method: "POST",
     headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
     body: JSON.stringify({ rows }),
@@ -198,7 +201,7 @@ async function postFollowerData(rows: { date: string; delta: number }[], secret:
 async function fetchCustomers(range: Range, secret: string, customFrom?: string, customTo?: string): Promise<CustomerData> {
   const params = new URLSearchParams({ range });
   if (range === "custom" && customFrom && customTo) { params.set("from", customFrom); params.set("to", customTo); }
-  const res = await fetch(`/api/customer-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
+  const res = await fetch(`${ADMIN_API_BASE}/api/customer-analytics?${params}`, { headers: { Authorization: `Bearer ${secret}` } });
   if (res.status === 401) throw new Error("UNAUTHORIZED");
   if (!res.ok) { const b = await res.json().catch(() => ({})); throw new Error(b.message || "회원 데이터 오류"); }
   return res.json();
