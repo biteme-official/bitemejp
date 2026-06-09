@@ -76,7 +76,7 @@ const ORDERS_QUERY = `
           id
           createdAt
           totalPriceSet { shopMoney { amount } }
-          noteAttributes { key value }
+          customAttributes { key value }
         }
       }
     }
@@ -87,18 +87,16 @@ interface OrderNode {
   id: string;
   createdAt: string;
   totalPriceSet: { shopMoney: { amount: string } };
-  noteAttributes: { key: string; value: string }[];
+  customAttributes: { key: string; value: string }[];
 }
 
-async function fetchAllOrders(token: string, rangeStart: string): Promise<{ orders: OrderNode[]; gqlErrors?: unknown }> {
+async function fetchAllOrders(token: string, rangeStart: string): Promise<OrderNode[]> {
   const filterQuery = `created_at:>='${rangeStart}' AND financial_status:paid`;
   const all: OrderNode[] = [];
   let cursor: string | null = null;
-  let lastErrors: unknown;
 
   do {
     const data = await adminGraphQL(token, ORDERS_QUERY, { query: filterQuery, cursor });
-    if (data.errors) lastErrors = data.errors;
     const edges: { node: OrderNode }[] = data.data?.orders?.edges || [];
     all.push(...edges.map((e) => e.node));
     cursor = data.data?.orders?.pageInfo?.hasNextPage
@@ -106,7 +104,7 @@ async function fetchAllOrders(token: string, rangeStart: string): Promise<{ orde
       : null;
   } while (cursor && all.length < 2000);
 
-  return { orders: all, gqlErrors: lastErrors };
+  return all;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -138,7 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       new Date(new Date(`${dateStr}T00:00:00+09:00`).getTime()).toISOString();
     const rangeStart = isCustom ? jstMidnightUTC(fromParam!) : getRangeStart(range);
 
-    const { orders, gqlErrors } = await fetchAllOrders(token, rangeStart);
+    const orders = await fetchAllOrders(token, rangeStart);
 
     // utm_source별 집계
     const sourceMap = new Map<string, { orders: number; revenue: number }>();
@@ -156,7 +154,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       dateSet.add(date);
 
-      const utmAttr = order.noteAttributes.find((a) => a.key === 'utm_source');
+      const utmAttr = order.customAttributes.find((a) => a.key === 'utm_source');
       const utmSource = utmAttr?.value?.trim() || '(없음)';
 
       // 소스별 집계
@@ -221,7 +219,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       sources,
       daily,
       sourceKeys,
-      ...(gqlErrors ? { _debug_gqlErrors: gqlErrors } : {}),
     });
   } catch (error) {
     console.error('[UTM Analytics]', error);
