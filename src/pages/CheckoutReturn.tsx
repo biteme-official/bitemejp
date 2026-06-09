@@ -30,6 +30,23 @@ export default function CheckoutReturn() {
           item_count: Array.isArray(items) ? items.length : 0,
           currency,
         });
+
+        // Meta Pixel Purchase
+        const fbq = (window as Window & { fbq?: (...args: unknown[]) => void }).fbq;
+        if (fbq) {
+          fbq('track', 'Purchase', {
+            value,
+            currency,
+            content_ids: items.map((item: { item_id: string }) => item.item_id),
+            content_type: 'product',
+            contents: items.map((item: { item_id: string; quantity: number; price: number }) => ({
+              id: item.item_id,
+              quantity: item.quantity,
+              item_price: item.price,
+            })),
+            num_items: items.reduce((sum: number, item: { quantity: number }) => sum + item.quantity, 0),
+          });
+        }
       } catch { /* ignore */ }
       sessionStorage.removeItem('checkout_ga4');
     }
