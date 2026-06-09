@@ -76,7 +76,7 @@ const ORDERS_QUERY = `
           id
           createdAt
           totalPriceSet { shopMoney { amount } }
-          noteAttributes { name value }
+          noteAttributes { key value }
         }
       }
     }
@@ -87,7 +87,7 @@ interface OrderNode {
   id: string;
   createdAt: string;
   totalPriceSet: { shopMoney: { amount: string } };
-  noteAttributes: { name: string; value: string }[];
+  noteAttributes: { key: string; value: string }[];
 }
 
 async function fetchAllOrders(token: string, rangeStart: string): Promise<OrderNode[]> {
@@ -154,7 +154,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       dateSet.add(date);
 
-      const utmAttr = order.noteAttributes.find((a) => a.name === 'utm_source');
+      const utmAttr = order.noteAttributes.find((a) => a.key === 'utm_source');
       const utmSource = utmAttr?.value?.trim() || '(없음)';
 
       // 소스별 집계
