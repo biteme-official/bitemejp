@@ -45,7 +45,7 @@ jobs:
       - name: Send Slack notification
         if: always()
         env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_E2E_WEBHOOK_URL }}
         run: |
           STATUS="${{ steps.e2e.outcome }}"
           if [ "$STATUS" = "success" ]; then
