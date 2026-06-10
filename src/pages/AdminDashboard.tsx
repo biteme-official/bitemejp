@@ -98,6 +98,7 @@ interface CustomerData {
 
 interface UtmSource {
   source: string;
+  medium: string;
   orders: number;
   revenue: number;
 }
@@ -1458,24 +1459,25 @@ function UtmSourceTable({ data }: { data: UtmData }) {
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-sm font-semibold">UTM 소스별 요약</CardTitle>
+          <CardTitle className="text-sm font-semibold">UTM 소스×매체별 요약</CardTitle>
           <CopyButton getData={() => {
-            const header = "utm_source\t주문 수\t매출(¥)\t주문 비율\t매출 비율";
+            const header = "utm_source\tutm_medium\t주문 수\t매출(¥)\t주문 비율\t매출 비율";
             const lines = sources.map(r => {
               const oPct = summary.totalOrders > 0 ? ((r.orders / summary.totalOrders) * 100).toFixed(1) : "0.0";
               const rPct = summary.totalRevenue > 0 ? ((r.revenue / summary.totalRevenue) * 100).toFixed(1) : "0.0";
-              return `${r.source}\t${r.orders}\t${r.revenue}\t${oPct}%\t${rPct}%`;
+              return `${r.source}\t${r.medium}\t${r.orders}\t${r.revenue}\t${oPct}%\t${rPct}%`;
             });
             return [header, ...lines].join("\n");
           }} />
         </div>
-        <p className="text-xs text-muted-foreground">Shopify 주문의 추가 세부 정보(note_attributes)에 기록된 utm_source 기준</p>
+        <p className="text-xs text-muted-foreground">Shopify 주문의 추가 세부 정보(note_attributes)에 기록된 utm_source × utm_medium 기준</p>
       </CardHeader>
       <CardContent className="p-0">
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b">
               <th className="text-left px-4 py-2 font-medium text-muted-foreground">utm_source</th>
+              <th className="text-left px-4 py-2 font-medium text-muted-foreground">utm_medium</th>
               <th className="text-right px-4 py-2 font-medium text-muted-foreground">주문 수</th>
               <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출 비율</th>
               <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
@@ -1494,6 +1496,7 @@ function UtmSourceTable({ data }: { data: UtmData }) {
                       <span className="font-mono">{row.source}</span>
                     </div>
                   </td>
+                  <td className="px-4 py-2.5 font-mono text-muted-foreground">{row.medium}</td>
                   <td className="px-4 py-2.5 text-right">{row.orders}건</td>
                   <td className="px-4 py-2.5 text-right text-muted-foreground">{revPct.toFixed(1)}%</td>
                   <td className="px-4 py-2.5 text-right font-medium">{formatRevenue(row.revenue)}</td>
@@ -1503,7 +1506,7 @@ function UtmSourceTable({ data }: { data: UtmData }) {
           </tbody>
           <tfoot className="border-t bg-muted/20">
             <tr>
-              <td className="px-4 py-2 font-semibold">합계</td>
+              <td className="px-4 py-2 font-semibold" colSpan={2}>합계</td>
               <td className="px-4 py-2 text-right font-semibold">{summary.totalOrders}건</td>
               <td className="px-4 py-2 text-right text-muted-foreground">100%</td>
               <td className="px-4 py-2 text-right font-semibold">{formatRevenue(summary.totalRevenue)}</td>
@@ -1574,9 +1577,17 @@ function UtmDailyTable({ data }: { data: UtmData }) {
             <thead className="sticky top-0 bg-background border-b z-10">
               <tr>
                 <th className="text-left px-4 py-2 font-medium text-muted-foreground sticky left-0 bg-background">날짜</th>
-                {sourceKeys.map((src) => (
-                  <th key={src} className="text-right px-4 py-2 font-medium text-muted-foreground whitespace-nowrap">{src}</th>
-                ))}
+                {sourceKeys.map((src) => {
+                  const [source, medium] = src.split("|||");
+                  return (
+                    <th key={src} className="text-right px-4 py-2 font-medium text-muted-foreground whitespace-nowrap">
+                      <div>{source}</div>
+                      {medium && medium !== "(없음)" && (
+                        <div className="font-normal text-muted-foreground/60">{medium}</div>
+                      )}
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
@@ -1640,12 +1651,19 @@ function UtmConversionTable({ utm, ga4Sources }: {
   }, [ga4Sources]);
 
   const rows = useMemo(() => {
-    return utm.sources
-      .filter(s => s.source !== "(없음)")
-      .map(s => {
-        const ga4 = ga4Map.get(s.source) ?? { sessions: 0, activeUsers: 0 };
-        const cvr = ga4.sessions > 0 ? (s.orders / ga4.sessions) * 100 : 0;
-        return { ...s, sessions: ga4.sessions, activeUsers: ga4.activeUsers, cvr };
+    const sourceAgg = new Map<string, { orders: number; revenue: number }>();
+    for (const s of utm.sources) {
+      if (s.source === "(없음)") continue;
+      const ex = sourceAgg.get(s.source) ?? { orders: 0, revenue: 0 };
+      ex.orders += s.orders;
+      ex.revenue += s.revenue;
+      sourceAgg.set(s.source, ex);
+    }
+    return Array.from(sourceAgg.entries())
+      .map(([source, v]) => {
+        const ga4 = ga4Map.get(source) ?? { sessions: 0, activeUsers: 0 };
+        const cvr = ga4.sessions > 0 ? (v.orders / ga4.sessions) * 100 : 0;
+        return { source, ...v, sessions: ga4.sessions, activeUsers: ga4.activeUsers, cvr };
       })
       .sort((a, b) => b.revenue - a.revenue);
   }, [utm.sources, ga4Map]);
@@ -1709,9 +1727,20 @@ function UtmDailyConversionChart({ utm, ga4OverTime }: {
   utm: UtmData;
   ga4OverTime: AnalyticsData["trafficSourcesOverTime"];
 }) {
-  const sources = utm.sources.filter(s => s.source !== "(없음)");
-  const [selectedSource, setSelectedSource] = useState<string>(() => sources[0]?.source || "");
-  const activeSource = selectedSource || sources[0]?.source || "";
+  const uniqueSources = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const s of utm.sources) {
+      if (s.source !== "(없음)" && !seen.has(s.source)) {
+        seen.add(s.source);
+        result.push(s.source);
+      }
+    }
+    return result;
+  }, [utm.sources]);
+
+  const [selectedSource, setSelectedSource] = useState<string>("");
+  const activeSource = selectedSource || uniqueSources[0] || "";
 
   const ga4Daily = useMemo(() => {
     const m = new Map<string, number>();
@@ -1724,17 +1753,19 @@ function UtmDailyConversionChart({ utm, ga4OverTime }: {
   }, [ga4OverTime, activeSource]);
 
   const chartData = useMemo(() => {
+    const relevantKeys = utm.sourceKeys.filter(k => k.startsWith(`${activeSource}|||`));
     return utm.daily.map(row => {
       const date = row.date as string;
+      const orders = relevantKeys.reduce((sum, k) => sum + ((row[`${k}__orders`] as number) ?? 0), 0);
       return {
         date: isoToLabel(date),
         sessions: ga4Daily.get(date) ?? 0,
-        orders: (row[`${activeSource}__orders`] as number) ?? 0,
+        orders,
       };
     });
-  }, [utm.daily, activeSource, ga4Daily]);
+  }, [utm.daily, utm.sourceKeys, activeSource, ga4Daily]);
 
-  if (sources.length === 0) return null;
+  if (uniqueSources.length === 0) return null;
 
   const hasAnyData = chartData.some(r => r.sessions > 0 || r.orders > 0);
   const interval = Math.max(0, Math.ceil(chartData.length / 10) - 1);
@@ -1748,13 +1779,13 @@ function UtmDailyConversionChart({ utm, ga4OverTime }: {
             <p className="text-xs text-muted-foreground">GA4 세션(막대) / Shopify 주문(선)</p>
           </div>
           <div className="flex rounded-md border overflow-hidden text-xs">
-            {sources.map(s => (
+            {uniqueSources.map(source => (
               <button
-                key={s.source}
-                onClick={() => setSelectedSource(s.source)}
-                className={`px-3 py-1.5 transition-colors ${activeSource === s.source ? "bg-orange-500 text-white font-medium" : "text-muted-foreground hover:bg-muted"}`}
+                key={source}
+                onClick={() => setSelectedSource(source)}
+                className={`px-3 py-1.5 transition-colors ${activeSource === source ? "bg-orange-500 text-white font-medium" : "text-muted-foreground hover:bg-muted"}`}
               >
-                {s.source}
+                {source}
               </button>
             ))}
           </div>
@@ -2723,7 +2754,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     <KpiCard label="utm_source 보유 주문" value={`${utm.summary.totalOrders.toLocaleString()}건`} accent />
                     <KpiCard label="utm_source 보유 매출" value={formatRevenue(utm.summary.totalRevenue)} accent />
-                    <KpiCard label="소스 종류" value={`${utm.sources.filter(s => s.source !== "(없음)").length}개`} sub="utm_source 값 종류" />
+                    <KpiCard label="소스×매체 조합" value={`${utm.sources.filter(s => s.source !== "(없음)").length}개`} sub="utm_source × utm_medium 조합 수" />
                   </div>
 
                   <SectionLabel>소스별 집계</SectionLabel>
@@ -2743,7 +2774,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
                   <UtmDailyTable data={utm} />
 
                   <p className="text-center text-xs text-muted-foreground pb-4">
-                    Shopify 주문 note_attributes.utm_source 기준 · GA4: G-WLTZH90W2L · {RANGE_LABELS[range]} 데이터
+                    Shopify 주문 note_attributes.utm_source × utm_medium 기준 · GA4: G-WLTZH90W2L · {RANGE_LABELS[range]} 데이터
                   </p>
                 </>
               ) : (

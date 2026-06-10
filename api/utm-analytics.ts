@@ -138,9 +138,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const orders = await fetchAllOrders(token, rangeStart);
 
-    // utm_source별 집계
-    const sourceMap = new Map<string, { orders: number; revenue: number }>();
-    // utm_source × date 집계
+    // utm_source × utm_medium 복합 집계
+    const sourceMap = new Map<string, { orders: number; revenue: number; source: string; medium: string }>();
+    // (source×medium) × date 집계
     const dailyMap = new Map<string, Map<string, { orders: number; revenue: number }>>();
     // 전체 날짜 목록
     const dateSet = new Set<string>();
@@ -156,25 +156,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const utmAttr = order.customAttributes.find((a) => a.key === 'utm_source');
       const utmSource = utmAttr?.value?.trim() || '(없음)';
+      const utmMediumAttr = order.customAttributes.find((a) => a.key === 'utm_medium');
+      const utmMedium = utmMediumAttr?.value?.trim() || '(없음)';
+      const compositeKey = `${utmSource}|||${utmMedium}`;
 
-      // 소스별 집계
-      const src = sourceMap.get(utmSource) ?? { orders: 0, revenue: 0 };
-      src.orders += 1;
-      src.revenue += revenue;
-      sourceMap.set(utmSource, src);
+      // 소스×매체별 집계
+      const srcEntry = sourceMap.get(compositeKey) ?? { orders: 0, revenue: 0, source: utmSource, medium: utmMedium };
+      srcEntry.orders += 1;
+      srcEntry.revenue += revenue;
+      sourceMap.set(compositeKey, srcEntry);
 
-      // 날짜별 소스 집계
+      // 날짜별 소스×매체 집계
       if (!dailyMap.has(date)) dailyMap.set(date, new Map());
       const dayMap = dailyMap.get(date)!;
-      const dayEntry = dayMap.get(utmSource) ?? { orders: 0, revenue: 0 };
+      const dayEntry = dayMap.get(compositeKey) ?? { orders: 0, revenue: 0 };
       dayEntry.orders += 1;
       dayEntry.revenue += revenue;
-      dayMap.set(utmSource, dayEntry);
+      dayMap.set(compositeKey, dayEntry);
     }
 
-    // utm_source 목록 (매출 순)
-    const sources = Array.from(sourceMap.entries())
-      .map(([source, v]) => ({ source, orders: v.orders, revenue: Math.round(v.revenue) }))
+    // utm_source × utm_medium 목록 (매출 순)
+    const sources = Array.from(sourceMap.values())
+      .map((v) => ({ source: v.source, medium: v.medium, orders: v.orders, revenue: Math.round(v.revenue) }))
       .sort((a, b) => b.revenue - a.revenue);
 
     const totalOrders = sources.reduce((s, r) => s + r.orders, 0);
@@ -201,15 +204,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // 날짜 × 소스 테이블 (소스가 없으면 0)
-    const sourceKeys = sources.map((s) => s.source);
+    // 날짜 × (소스×매체) 테이블 (없으면 0)
+    const sourceKeys = sources.map((s) => `${s.source}|||${s.medium}`);
     const daily = allDates.map((date) => {
       const dayMap = dailyMap.get(date);
       const row: Record<string, number | string> = { date };
-      for (const src of sourceKeys) {
-        const entry = dayMap?.get(src);
-        row[`${src}__orders`] = entry?.orders ?? 0;
-        row[`${src}__revenue`] = entry ? Math.round(entry.revenue) : 0;
+      for (const key of sourceKeys) {
+        const entry = dayMap?.get(key);
+        row[`${key}__orders`] = entry?.orders ?? 0;
+        row[`${key}__revenue`] = entry ? Math.round(entry.revenue) : 0;
       }
       return row;
     });
