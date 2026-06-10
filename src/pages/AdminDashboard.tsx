@@ -1453,24 +1453,47 @@ function NewVsReturningChart({ data }: { data: AnalyticsData["newVsReturning"] }
 
 // ─── UTM 분석 컴포넌트 ────────────────────────────────────────────────────────
 
-function UtmSourceTable({ data }: { data: UtmData }) {
+function UtmSourceTable({ data, ga4Sources = [] }: {
+  data: UtmData;
+  ga4Sources?: AnalyticsData["trafficSources"];
+}) {
   const { sources, summary } = data;
+
+  const ga4Map = useMemo(() => {
+    const m = new Map<string, { sessions: number; activeUsers: number }>();
+    for (const row of ga4Sources) {
+      const src = row.sessionSource as string;
+      const ex = m.get(src) ?? { sessions: 0, activeUsers: 0 };
+      ex.sessions += row.sessions as number;
+      ex.activeUsers += (row.activeUsers as number) ?? 0;
+      m.set(src, ex);
+    }
+    return m;
+  }, [ga4Sources]);
+
+  const hasGa4 = ga4Sources.length > 0;
+
   return (
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-semibold">UTM 소스×매체별 요약</CardTitle>
           <CopyButton getData={() => {
-            const header = "utm_source\tutm_medium\t주문 수\t매출(¥)\t주문 비율\t매출 비율";
+            const header = ["utm_source", "utm_medium", ...(hasGa4 ? ["GA4 유저", "전환율"] : []), "주문 수", "매출 비율(%)", "매출(¥)"].join("\t");
             const lines = sources.map(r => {
-              const oPct = summary.totalOrders > 0 ? ((r.orders / summary.totalOrders) * 100).toFixed(1) : "0.0";
-              const rPct = summary.totalRevenue > 0 ? ((r.revenue / summary.totalRevenue) * 100).toFixed(1) : "0.0";
-              return `${r.source}\t${r.medium}\t${r.orders}\t${r.revenue}\t${oPct}%\t${rPct}%`;
+              const revPct = summary.totalRevenue > 0 ? ((r.revenue / summary.totalRevenue) * 100).toFixed(1) : "0.0";
+              const ga4 = ga4Map.get(r.source) ?? { sessions: 0, activeUsers: 0 };
+              const cvr = ga4.sessions > 0 ? (r.orders / ga4.sessions * 100).toFixed(2) + "%" : "—";
+              const ga4Cols = hasGa4 ? [ga4.activeUsers > 0 ? String(ga4.activeUsers) : "—", cvr] : [];
+              return [r.source, r.medium, ...ga4Cols, r.orders, revPct, r.revenue].join("\t");
             });
             return [header, ...lines].join("\n");
           }} />
         </div>
-        <p className="text-xs text-muted-foreground">Shopify 주문의 추가 세부 정보(note_attributes)에 기록된 utm_source × utm_medium 기준</p>
+        <p className="text-xs text-muted-foreground">
+          Shopify utm_source × utm_medium 기준
+          {hasGa4 && " · GA4 유저·전환율은 소스 수준 집계"}
+        </p>
       </CardHeader>
       <CardContent className="p-0">
         <table className="w-full text-xs">
@@ -1478,7 +1501,9 @@ function UtmSourceTable({ data }: { data: UtmData }) {
             <tr className="border-b">
               <th className="text-left px-4 py-2 font-medium text-muted-foreground">utm_source</th>
               <th className="text-left px-4 py-2 font-medium text-muted-foreground">utm_medium</th>
+              {hasGa4 && <th className="text-right px-4 py-2 font-medium text-muted-foreground">GA4 유저</th>}
               <th className="text-right px-4 py-2 font-medium text-muted-foreground">주문 수</th>
+              {hasGa4 && <th className="text-right px-4 py-2 font-medium text-muted-foreground">전환율</th>}
               <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출 비율</th>
               <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
             </tr>
@@ -1486,6 +1511,8 @@ function UtmSourceTable({ data }: { data: UtmData }) {
           <tbody>
             {sources.map((row, i) => {
               const revPct = summary.totalRevenue > 0 ? (row.revenue / summary.totalRevenue) * 100 : 0;
+              const ga4 = ga4Map.get(row.source) ?? { sessions: 0, activeUsers: 0 };
+              const cvr = ga4.sessions > 0 ? (row.orders / ga4.sessions) * 100 : 0;
               return (
                 <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
                   <td className="px-4 py-2.5">
@@ -1497,7 +1524,20 @@ function UtmSourceTable({ data }: { data: UtmData }) {
                     </div>
                   </td>
                   <td className="px-4 py-2.5 font-mono text-muted-foreground">{row.medium}</td>
+                  {hasGa4 && (
+                    <td className="px-4 py-2.5 text-right">
+                      {ga4.activeUsers > 0 ? ga4.activeUsers.toLocaleString() : <span className="text-muted-foreground/40">—</span>}
+                    </td>
+                  )}
                   <td className="px-4 py-2.5 text-right">{row.orders}건</td>
+                  {hasGa4 && (
+                    <td className="px-4 py-2.5 text-right">
+                      {cvr > 0
+                        ? <span className={cvr >= 2 ? "text-green-600 font-semibold" : cvr >= 1 ? "text-orange-500" : ""}>{cvr.toFixed(2)}%</span>
+                        : <span className="text-muted-foreground/40">—</span>
+                      }
+                    </td>
+                  )}
                   <td className="px-4 py-2.5 text-right text-muted-foreground">{revPct.toFixed(1)}%</td>
                   <td className="px-4 py-2.5 text-right font-medium">{formatRevenue(row.revenue)}</td>
                 </tr>
@@ -1507,7 +1547,9 @@ function UtmSourceTable({ data }: { data: UtmData }) {
           <tfoot className="border-t bg-muted/20">
             <tr>
               <td className="px-4 py-2 font-semibold" colSpan={2}>합계</td>
+              {hasGa4 && <td className="px-4 py-2 text-right text-muted-foreground">—</td>}
               <td className="px-4 py-2 text-right font-semibold">{summary.totalOrders}건</td>
+              {hasGa4 && <td className="px-4 py-2 text-right text-muted-foreground">—</td>}
               <td className="px-4 py-2 text-right text-muted-foreground">100%</td>
               <td className="px-4 py-2 text-right font-semibold">{formatRevenue(summary.totalRevenue)}</td>
             </tr>
@@ -1627,97 +1669,6 @@ function UtmDailyTable({ data }: { data: UtmData }) {
             </tfoot>
           </table>
         </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ─── GA4 × Shopify UTM 전환율 컴포넌트 ──────────────────────────────────────────
-
-function UtmConversionTable({ utm, ga4Sources }: {
-  utm: UtmData;
-  ga4Sources: AnalyticsData["trafficSources"];
-}) {
-  const ga4Map = useMemo(() => {
-    const m = new Map<string, { sessions: number; activeUsers: number }>();
-    for (const row of ga4Sources) {
-      const src = row.sessionSource as string;
-      const ex = m.get(src) ?? { sessions: 0, activeUsers: 0 };
-      ex.sessions += row.sessions as number;
-      ex.activeUsers += (row.activeUsers as number) ?? 0;
-      m.set(src, ex);
-    }
-    return m;
-  }, [ga4Sources]);
-
-  const rows = useMemo(() => {
-    const sourceAgg = new Map<string, { orders: number; revenue: number }>();
-    for (const s of utm.sources) {
-      if (s.source === "(없음)") continue;
-      const ex = sourceAgg.get(s.source) ?? { orders: 0, revenue: 0 };
-      ex.orders += s.orders;
-      ex.revenue += s.revenue;
-      sourceAgg.set(s.source, ex);
-    }
-    return Array.from(sourceAgg.entries())
-      .map(([source, v]) => {
-        const ga4 = ga4Map.get(source) ?? { sessions: 0, activeUsers: 0 };
-        const cvr = ga4.sessions > 0 ? (v.orders / ga4.sessions) * 100 : 0;
-        return { source, ...v, sessions: ga4.sessions, activeUsers: ga4.activeUsers, cvr };
-      })
-      .sort((a, b) => b.revenue - a.revenue);
-  }, [utm.sources, ga4Map]);
-
-  if (rows.length === 0) return null;
-
-  return (
-    <Card>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-sm font-semibold">소스별 전환율 (GA4 × Shopify)</CardTitle>
-            <p className="text-xs text-muted-foreground">GA4 세션 수 대비 Shopify 실구매 전환율</p>
-          </div>
-          <CopyButton getData={() => {
-            const header = "utm_source\tGA4 세션\tGA4 유저\t주문 수\t전환율\t매출(¥)";
-            const lines = rows.map(r =>
-              `${r.source}\t${r.sessions}\t${r.activeUsers}\t${r.orders}\t${r.cvr > 0 ? r.cvr.toFixed(2) + "%" : "—"}\t${r.revenue}`
-            );
-            return [header, ...lines].join("\n");
-          }} />
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b">
-              <th className="text-left px-4 py-2 font-medium text-muted-foreground">utm_source</th>
-              <th className="text-right px-4 py-2 font-medium text-muted-foreground">GA4 세션</th>
-              <th className="text-right px-4 py-2 font-medium text-muted-foreground">GA4 유저</th>
-              <th className="text-right px-4 py-2 font-medium text-muted-foreground">주문 수</th>
-              <th className="text-right px-4 py-2 font-medium text-muted-foreground">전환율</th>
-              <th className="text-right px-4 py-2 font-medium text-muted-foreground">매출</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                <td className="px-4 py-2.5 font-mono">{row.source}</td>
-                <td className="px-4 py-2.5 text-right">{row.sessions > 0 ? row.sessions.toLocaleString() : <span className="text-muted-foreground/40">—</span>}</td>
-                <td className="px-4 py-2.5 text-right">{row.activeUsers > 0 ? row.activeUsers.toLocaleString() : <span className="text-muted-foreground/40">—</span>}</td>
-                <td className="px-4 py-2.5 text-right">{row.orders}건</td>
-                <td className="px-4 py-2.5 text-right">
-                  {row.cvr > 0 ? (
-                    <span className={row.cvr >= 2 ? "text-green-600 font-semibold" : row.cvr >= 1 ? "text-orange-500" : ""}>
-                      {row.cvr.toFixed(2)}%
-                    </span>
-                  ) : <span className="text-muted-foreground/40">—</span>}
-                </td>
-                <td className="px-4 py-2.5 text-right font-medium">{formatRevenue(row.revenue)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </CardContent>
     </Card>
   );
@@ -2757,14 +2708,11 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
                     <KpiCard label="소스×매체 조합" value={`${utm.sources.filter(s => s.source !== "(없음)").length}개`} sub="utm_source × utm_medium 조합 수" />
                   </div>
 
-                  <SectionLabel>소스별 집계</SectionLabel>
-                  <UtmSourceTable data={utm} />
+                  <SectionLabel>소스×매체별 집계</SectionLabel>
+                  <UtmSourceTable data={utm} ga4Sources={data?.trafficSources ?? []} />
 
                   {data && (
                     <>
-                      <SectionLabel>소스별 전환율</SectionLabel>
-                      <UtmConversionTable utm={utm} ga4Sources={data.trafficSources} />
-
                       <SectionLabel>일자별 세션 vs 주문</SectionLabel>
                       <UtmDailyConversionChart utm={utm} ga4OverTime={data.trafficSourcesOverTime} />
                     </>
