@@ -91,10 +91,9 @@ export default function TermsOfUse() {
           <section>
             <h2 className="text-lg font-semibold text-foreground mt-6 mb-3">第7条（返品・交換）</h2>
             <ol className="list-decimal pl-5 space-y-2">
-              <li>商品到着後7日以内に、未使用・未開封の状態であれば、返品・交換を承ります。</li>
-              <li>お客様都合による返品の場合、返送料はお客様の負担とします。</li>
+              <li>返品・交換は、商品に欠陥がある場合に限り対応いたします。お客様都合による返品・交換はお受けできません。</li>
               <li>不良品・誤配送の場合は、当社負担で交換・返金いたします。</li>
-              <li>返品・交換をご希望の場合は、事前にお問い合わせください。</li>
+              <li>返品・交換をご希望の場合は、商品到着後7日以内に事前にお問い合わせください。</li>
             </ol>
           </section>
 
@@ -160,7 +159,7 @@ export default function TermsOfUse() {
             <p>本規約に関するお問い合わせは、以下までご連絡ください。</p>
             <div className="mt-2 p-4 bg-secondary rounded-lg">
               <p className="font-medium text-foreground">BITE ME JAPAN</p>
-              <p>メール：support@biteme-jp.com</p>
+              <p>メール：japan@biteme.co.kr</p>
             </div>
           </section>
         </div>
