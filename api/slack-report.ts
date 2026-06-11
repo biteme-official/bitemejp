@@ -179,6 +179,73 @@ async function fetchTopProducts(token: string, createdAtMin: string): Promise<Ar
     .slice(0, 5);
 }
 
+async function fetchHourlyDistribution(token: string, createdAtMin: string): Promise<number[]> {
+  const query = `
+    query HourlyOrders($query: String!, $cursor: String) {
+      orders(first: 250, query: $query, after: $cursor, sortKey: CREATED_AT) {
+        pageInfo { hasNextPage endCursor }
+        edges { node { createdAt } }
+      }
+    }
+  `;
+
+  const hourCounts = new Array(24).fill(0);
+  let cursor: string | null = null;
+  let hasNextPage = true;
+
+  while (hasNextPage) {
+    const filterQuery = `created_at:>='${createdAtMin}' AND financial_status:paid`;
+    const data = await adminGraphQL(token, query, { query: filterQuery, cursor });
+    const edges = data.data?.orders?.edges || [];
+
+    for (const edge of edges) {
+      const jstHour = toJST(new Date(edge.node.createdAt)).getUTCHours();
+      hourCounts[jstHour]++;
+    }
+
+    hasNextPage = data.data?.orders?.pageInfo?.hasNextPage ?? false;
+    cursor = hasNextPage ? data.data?.orders?.pageInfo?.endCursor : null;
+  }
+
+  return hourCounts;
+}
+
+function buildHourlyBlock(hourCounts: number[]): unknown[] {
+  const total = hourCounts.reduce((s, c) => s + c, 0);
+  if (total === 0) return [];
+
+  const max = Math.max(...hourCounts);
+  const BAR = '█';
+  const BAR_MAX = 10;
+
+  const ranked = hourCounts
+    .map((count, hour) => ({ hour, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const top5 = ranked.slice(0, 5);
+
+  const lines = top5.map(({ hour, count }) => {
+    const bar = BAR.repeat(Math.round((count / max) * BAR_MAX));
+    const pct = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
+    return `*${String(hour).padStart(2, '0')}時* ${bar} ${count}件 (${pct}%)`;
+  });
+
+  const peakHour = ranked[0].hour;
+  const timeLabel = peakHour < 6 ? '深夜' : peakHour < 12 ? '午前' : peakHour < 18 ? '午後' : '夜';
+
+  return [
+    { type: 'divider' },
+    {
+      type: 'section',
+      text: { type: 'mrkdwn', text: `*📊 時間帯別注文分布 (過去4週間)*\n最も多い時間帯: *${String(peakHour).padStart(2, '0')}時台 (${timeLabel})*` },
+    },
+    {
+      type: 'section',
+      text: { type: 'mrkdwn', text: lines.join('\n') },
+    },
+  ];
+}
+
 async function fetchLowStockProducts(token: string): Promise<Array<{ title: string; variant: string; quantity: number }>> {
   const query = `
     query LowStock {
@@ -213,6 +280,7 @@ function buildSlackMessage(
   month: OrderMetrics,
   topProducts: Array<{ title: string; quantity: number; revenue: number }>,
   lowStock: Array<{ title: string; variant: string; quantity: number }>,
+  hourlyData?: number[],
 ) {
   const nowJST = toJST(new Date());
   const dateStr = `${nowJST.getUTCFullYear()}/${String(nowJST.getUTCMonth() + 1).padStart(2, '0')}/${String(nowJST.getUTCDate()).padStart(2, '0')}`;
@@ -265,6 +333,11 @@ function buildSlackMessage(
       type: 'section',
       text: { type: 'mrkdwn', text: productLines },
     });
+  }
+
+  // Friday: hourly distribution
+  if (hourlyData) {
+    blocks.push(...buildHourlyBlock(hourlyData));
   }
 
   // Low stock alerts
@@ -328,16 +401,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = await getAccessToken();
     const dates = getDateRanges();
 
-    const [today, yesterday, week, month, topProducts, lowStock] = await Promise.all([
+    const isFriday = toJST(new Date()).getUTCDay() === 5;
+    const fourWeeksAgo = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000).toISOString();
+
+    const [today, yesterday, week, month, topProducts, lowStock, hourlyData] = await Promise.all([
       fetchOrderMetrics(token, dates.today, dates.now),
       fetchOrderMetrics(token, dates.yesterday, dates.today),
       fetchOrderMetrics(token, dates.weekStart, dates.now),
       fetchOrderMetrics(token, dates.monthStart, dates.now),
       fetchTopProducts(token, dates.monthStart),
       fetchLowStockProducts(token),
+      isFriday ? fetchHourlyDistribution(token, fourWeeksAgo) : Promise.resolve(undefined),
     ]);
 
-    const message = buildSlackMessage(today, yesterday, week, month, topProducts, lowStock);
+    const message = buildSlackMessage(today, yesterday, week, month, topProducts, lowStock, hourlyData ?? undefined);
     await sendToSlack(message);
 
     return res.status(200).json({ ok: true, metrics: { today, yesterday, week, month } });
