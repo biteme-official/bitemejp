@@ -59,6 +59,7 @@
     { "source": "/api/instagram-reels", "destination": "/api/instagram-reels" },
     { "source": "/api/kr-reviews", "destination": "/api/kr-reviews" },
     { "source": "/api/shopify-purchase-webhook", "destination": "/api/shopify-purchase-webhook" },
+    { "source": "/api/product-feed", "destination": "/api/product-feed" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
