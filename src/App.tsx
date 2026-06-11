@@ -18,6 +18,7 @@ import WishlistPage from "./pages/WishlistPage";
 import Checkout from "./pages/Checkout";
 import AdminDashboard from "./pages/AdminDashboard";
 import TokushoHo from "./pages/TokushoHo";
+import About from "./pages/About";
 import DiscountRedirect from "./pages/DiscountRedirect";
 import BlogList from "./pages/BlogList";
 import BlogPost from "./pages/BlogPost";
@@ -67,6 +68,7 @@ const App = () => (
           <Route path="/wishlist" element={<WishlistPage />} />
           <Route path="/admin" element={<AdminDashboard />} />
           <Route path="/tokusho" element={<TokushoHo />} />
+          <Route path="/about" element={<About />} />
           <Route path="/discount/:code" element={<DiscountRedirect />} />
           <Route path="/blog" element={<BlogList />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
