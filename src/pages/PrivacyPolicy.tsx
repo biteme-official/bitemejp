@@ -138,7 +138,7 @@ export default function PrivacyPolicy() {
             <p>個人情報の取り扱いに関するお問い合わせは、以下までご連絡ください。</p>
             <div className="mt-2 p-4 bg-secondary rounded-lg">
               <p className="font-medium text-foreground">BITE ME JAPAN</p>
-              <p>メール：support@biteme-jp.com</p>
+              <p>メール：japan@biteme.co.kr</p>
             </div>
           </section>
         </div>
