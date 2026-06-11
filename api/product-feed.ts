@@ -1,9 +1,34 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
-const STOREFRONT_TOKEN = process.env.SHOPIFY_STOREFRONT_TOKEN || '';
-const API_VERSION = process.env.SHOPIFY_API_VERSION || '2025-10';
+const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || '';
+const CLIENT_ID = process.env.VITE_SHOPIFY_CLIENT_ID || '';
+const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || '';
+const API_VERSION = '2025-07';
 const STORE_URL = 'https://biteme.co.jp';
+
+let cachedToken: string | null = null;
+let tokenExpiresAt = 0;
+
+async function getStorefrontToken(): Promise<string> {
+  const now = Date.now();
+  if (cachedToken && now < tokenExpiresAt - 5 * 60 * 1000) return cachedToken;
+
+  const res = await fetch(`https://${SHOP}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+    }),
+  });
+
+  if (!res.ok) throw new Error(`Token error: ${res.status}`);
+  const data = await res.json();
+  cachedToken = data.access_token;
+  tokenExpiresAt = now + data.expires_in * 1000;
+  return cachedToken!;
+}
 
 const PRODUCTS_QUERY = `
   query GetProducts($cursor: String) {
@@ -36,6 +61,7 @@ interface ProductNode {
 }
 
 async function fetchAllProducts(): Promise<ProductNode[]> {
+  const token = await getStorefrontToken();
   const products: ProductNode[] = [];
   let cursor: string | null = null;
   let hasNextPage = true;
@@ -45,7 +71,7 @@ async function fetchAllProducts(): Promise<ProductNode[]> {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Shopify-Storefront-Private-Token': STOREFRONT_TOKEN,
+        'Shopify-Storefront-Private-Token': token,
       },
       body: JSON.stringify({ query: PRODUCTS_QUERY, variables: { cursor } }),
     });
