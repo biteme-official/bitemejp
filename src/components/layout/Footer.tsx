@@ -34,6 +34,9 @@ export function Footer() {
             <Link to="/contact" className="hover:text-primary transition-colors">
               お問い合わせ
             </Link>
+            <Link to="/about" className="hover:text-primary transition-colors">
+              会社概要
+            </Link>
             <Link to="/blog" className="hover:text-primary transition-colors">
               ブログ
             </Link>
