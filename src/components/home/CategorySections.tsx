@@ -4,12 +4,17 @@ import { useNavigate } from "react-router-dom";
 import {
   ShopifyCollection,
   ShopifyProduct,
-  fetchCollections,
   fetchCollectionProducts,
   formatPrice,
   getPreorderDate,
   fetchCartPreview,
 } from "@/lib/shopify";
+
+const CATEGORY_WHITELIST: { handle: string; title: string }[] = [
+  { handle: "小さなお口にもぴったり-ミニおもちゃ特集", title: "小さなお口にもぴったり！ミニおもちゃ特集" },
+  { handle: "人気商品", title: "人気商品" },
+  { handle: "bite-me-choigosim", title: "BITE ME×チェゴシム" },
+];
 import { Skeleton } from "@/components/ui/skeleton";
 
 interface CategoryData {
@@ -50,14 +55,10 @@ export function CategorySections() {
   useEffect(() => {
     const load = async () => {
       try {
-        const collections = await fetchCollections(10);
-        const filtered = collections
-          .filter((c) => c.handle !== "frontpage")
-          .slice(0, 4);
-
         const results = await Promise.all(
-          filtered.map(async (collection) => {
-            const res = await fetchCollectionProducts(collection.handle, 8);
+          CATEGORY_WHITELIST.map(async ({ handle, title }) => {
+            const res = await fetchCollectionProducts(handle, 8);
+            const collection: ShopifyCollection = { id: handle, title, handle, description: "", image: null };
             return { collection, products: res.products };
           })
         );
