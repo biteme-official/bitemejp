@@ -979,7 +979,7 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
  // Create checkout with optional discount code for B2B members
  export async function createStorefrontCheckoutWithDiscount(
    items: { variantId: string; quantity: number }[],
-   discountCode: string | null,
+   discountCodes: string | string[] | null,
    formEmail?: string
  ): Promise<string> {
   const lines = items.map(item => ({
@@ -989,8 +989,11 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
 
    // Build cart input with buyer identity if logged in
    const input: Record<string, unknown> = { lines };
-   if (discountCode) {
-     input.discountCodes = [discountCode];
+   const codes = Array.isArray(discountCodes)
+     ? discountCodes.filter(Boolean)
+     : discountCodes ? [discountCodes] : [];
+   if (codes.length > 0) {
+     input.discountCodes = codes;
    }
 
    // Attach buyer identity — always refresh token before checkout
@@ -1103,8 +1106,8 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
   const url = new URL(cart.checkoutUrl);
   url.searchParams.set('channel', 'online_store');
 
-  if (discountCode) {
-    url.searchParams.set('discount', discountCode);
+  if (codes.length > 0) {
+    url.searchParams.set('discount', codes[0]);
     localStorage.removeItem('affiliate_discount');
   }
 
