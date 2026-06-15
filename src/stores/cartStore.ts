@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { ShopifyProduct, createStorefrontCheckout, fetchProductById, fetchCartPreview } from '@/lib/shopify';
-import { GIFT_THRESHOLD, GIFT_PRODUCT_ID } from '@/config/giftConfig';
+import { ShopifyProduct, createStorefrontCheckoutWithDiscount, fetchProductById, fetchCartPreview } from '@/lib/shopify';
+import { GIFT_THRESHOLD, GIFT_PRODUCT_ID, GIFT_DISCOUNT_CODE } from '@/config/giftConfig';
 
 export interface CartItem {
   product: ShopifyProduct;
@@ -191,7 +191,14 @@ export const useCartStore = create<CartStore>()(
 
         setLoading(true);
         try {
-          const checkoutUrl = await createStorefrontCheckout(checkoutItems, email);
+          const affiliateCode = localStorage.getItem('affiliate_discount');
+          const hasGift = items.some(i => i.isGift);
+          const discountCodes = [
+            affiliateCode,
+            hasGift ? GIFT_DISCOUNT_CODE : null,
+          ].filter((c): c is string => !!c);
+
+          const checkoutUrl = await createStorefrontCheckoutWithDiscount(checkoutItems, discountCodes, email);
           setCheckoutUrl(checkoutUrl);
           return checkoutUrl;
         } catch (error) {
