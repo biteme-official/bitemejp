@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { ShopifyProduct, createStorefrontCheckout } from '@/lib/shopify';
+import { ShopifyProduct, createStorefrontCheckout, fetchProductByHandle } from '@/lib/shopify';
+import { GIFT_THRESHOLD, GIFT_PRODUCT_HANDLE } from '@/config/giftConfig';
 
 export interface CartItem {
   product: ShopifyProduct;
@@ -11,11 +12,31 @@ export interface CartItem {
     currencyCode: string;
   };
   quantity: number;
-  quantityAvailable: number | null; // Track available stock
+  quantityAvailable: number | null;
   selectedOptions: Array<{
     name: string;
     value: string;
   }>;
+  isGift?: boolean;
+}
+
+// Fetched once per session; avoids repeated API calls
+let _giftItemTemplate: CartItem | null = null;
+let _giftSyncing = false;
+
+function buildGiftCartItem(productNode: ShopifyProduct['node']): CartItem | null {
+  const variant = productNode.variants.edges[0]?.node;
+  if (!variant) return null;
+  return {
+    product: { node: productNode },
+    variantId: variant.id,
+    variantTitle: variant.title,
+    price: { amount: '0', currencyCode: 'JPY' },
+    quantity: 1,
+    quantityAvailable: null,
+    selectedOptions: variant.selectedOptions,
+    isGift: true,
+  };
 }
 
 interface CartStore {
@@ -24,7 +45,6 @@ interface CartStore {
   checkoutUrl: string | null;
   isLoading: boolean;
 
-  // Actions
   addItem: (item: CartItem) => void;
   updateQuantity: (variantId: string, quantity: number) => void;
   removeItem: (variantId: string) => void;
@@ -32,6 +52,7 @@ interface CartStore {
   setCartId: (cartId: string) => void;
   setCheckoutUrl: (url: string) => void;
   setLoading: (loading: boolean) => void;
+  syncGiftItem: () => Promise<void>;
   createCheckout: (lineItems?: { variantId: string; quantity: number }[], email?: string) => Promise<string | null>;
   getTotalItems: () => number;
   getTotalPrice: () => number;
@@ -46,54 +67,61 @@ export const useCartStore = create<CartStore>()(
       isLoading: false,
 
       addItem: (item) => {
+        if (item.isGift) return;
+
         const { items } = get();
-        const existingItem = items.find(i => i.variantId === item.variantId);
+        const existingItem = items.find(i => i.variantId === item.variantId && !i.isGift);
 
         if (existingItem) {
-          // Check stock limit when adding to existing item
           const newQuantity = existingItem.quantity + item.quantity;
           const maxQuantity = item.quantityAvailable ?? Infinity;
           const finalQuantity = Math.min(newQuantity, maxQuantity);
-
           set({
             items: items.map(i =>
-              i.variantId === item.variantId
+              i.variantId === item.variantId && !i.isGift
                 ? { ...i, quantity: finalQuantity, quantityAvailable: item.quantityAvailable }
                 : i
             )
           });
         } else {
-          // Check stock limit for new item
           const maxQuantity = item.quantityAvailable ?? Infinity;
           const finalQuantity = Math.min(item.quantity, maxQuantity);
           set({ items: [...items, { ...item, quantity: finalQuantity }] });
         }
+
+        get().syncGiftItem();
       },
 
       updateQuantity: (variantId, quantity) => {
+        const item = get().items.find(i => i.variantId === variantId);
+        if (item?.isGift) return;
+
         if (quantity <= 0) {
           get().removeItem(variantId);
           return;
         }
 
-        const item = get().items.find(i => i.variantId === variantId);
         if (!item) return;
 
-        // Check stock limit
         const maxQuantity = item.quantityAvailable ?? Infinity;
         const finalQuantity = Math.min(quantity, maxQuantity);
 
         set({
           items: get().items.map(i =>
-            i.variantId === variantId ? { ...i, quantity: finalQuantity } : i
+            i.variantId === variantId && !i.isGift ? { ...i, quantity: finalQuantity } : i
           )
         });
+
+        get().syncGiftItem();
       },
 
       removeItem: (variantId) => {
-        set({
-          items: get().items.filter(item => item.variantId !== variantId)
-        });
+        const item = get().items.find(i => i.variantId === variantId);
+        if (item?.isGift) return;
+
+        set({ items: get().items.filter(i => !(i.variantId === variantId && !i.isGift)) });
+
+        get().syncGiftItem();
       },
 
       clearCart: () => {
@@ -103,6 +131,39 @@ export const useCartStore = create<CartStore>()(
       setCartId: (cartId) => set({ cartId }),
       setCheckoutUrl: (checkoutUrl) => set({ checkoutUrl }),
       setLoading: (isLoading) => set({ isLoading }),
+
+      syncGiftItem: async () => {
+        if (_giftSyncing) return;
+        _giftSyncing = true;
+
+        try {
+          const { items } = get();
+          const nonGiftTotal = items
+            .filter(i => !i.isGift)
+            .reduce((sum, i) => sum + parseFloat(i.price.amount) * i.quantity, 0);
+
+          const hasGift = items.some(i => i.isGift);
+          const shouldHaveGift = nonGiftTotal >= GIFT_THRESHOLD;
+
+          if (shouldHaveGift && !hasGift) {
+            if (!_giftItemTemplate) {
+              const product = await fetchProductByHandle(GIFT_PRODUCT_HANDLE);
+              if (!product) return;
+              _giftItemTemplate = buildGiftCartItem(product);
+            }
+            if (_giftItemTemplate) {
+              const { items: latest } = get();
+              if (!latest.some(i => i.isGift)) {
+                set({ items: [...latest, _giftItemTemplate] });
+              }
+            }
+          } else if (!shouldHaveGift && hasGift) {
+            set({ items: get().items.filter(i => !i.isGift) });
+          }
+        } finally {
+          _giftSyncing = false;
+        }
+      },
 
       createCheckout: async (lineItems, email) => {
         const { items, setLoading, setCheckoutUrl } = get();
@@ -126,11 +187,11 @@ export const useCartStore = create<CartStore>()(
       },
 
       getTotalItems: () => {
-        return get().items.reduce((sum, item) => sum + item.quantity, 0);
+        return get().items.filter(i => !i.isGift).reduce((sum, item) => sum + item.quantity, 0);
       },
 
       getTotalPrice: () => {
-        return get().items.reduce((sum, item) => sum + (parseFloat(item.price.amount) * item.quantity), 0);
+        return get().items.filter(i => !i.isGift).reduce((sum, item) => sum + (parseFloat(item.price.amount) * item.quantity), 0);
       },
     }),
     {

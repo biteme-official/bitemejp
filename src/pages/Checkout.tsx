@@ -75,10 +75,11 @@ export default function Checkout() {
       .catch(console.error);
   }, [items]);
 
-  // Shopify Cart API로 자동할인 금액 조회
+  // Shopify Cart API로 자동할인 금액 조회 (사은품 제외)
   useEffect(() => {
-    if (items.length === 0) { setDiscountLoading(false); return; }
-    fetchCartPreview(items.map(i => ({ variantId: i.variantId, quantity: i.quantity })))
+    const regularItems = items.filter(i => !i.isGift);
+    if (regularItems.length === 0) { setDiscountLoading(false); return; }
+    fetchCartPreview(regularItems.map(i => ({ variantId: i.variantId, quantity: i.quantity })))
       .then(setDiscountInfo)
       .catch(() => setDiscountInfo(null))
       .finally(() => setDiscountLoading(false));

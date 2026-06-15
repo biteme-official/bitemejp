@@ -11,7 +11,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { ShoppingCart, Minus, Plus, Trash2, ExternalLink, Loader2 } from "lucide-react";
+import { ShoppingCart, Minus, Plus, Trash2, ExternalLink, Loader2, Gift } from "lucide-react";
 import { useCartStore } from "@/stores/cartStore";
 import { formatPrice, getPreorderDate, fetchCartPreview, CartDiscountInfo } from "@/lib/shopify";
 import { ThresholdBanner } from "./ThresholdBanner";
@@ -40,14 +40,17 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
     getTotalItems,
   } = useCartStore();
 
+  const regularItems = items.filter(i => !i.isGift);
+  const giftItems = items.filter(i => i.isGift);
+
   // Support both controlled and uncontrolled modes
   const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
   const setIsOpen = onOpenChange || setInternalOpen;
 
-  // 장바구니 열릴 때 Shopify Cart API로 실제 할인 금액 조회
+  // 장바구니 열릴 때 Shopify Cart API로 실제 할인 금액 조회 (사은품 제외)
   useEffect(() => {
-    if (isOpen && items.length > 0) {
-      fetchCartPreview(items.map(i => ({ variantId: i.variantId, quantity: i.quantity })))
+    if (isOpen && regularItems.length > 0) {
+      fetchCartPreview(regularItems.map(i => ({ variantId: i.variantId, quantity: i.quantity })))
         .then(setDiscountInfo)
         .catch(() => setDiscountInfo(null));
     } else {
@@ -55,27 +58,27 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
     }
   }, [isOpen, items]);
 
-  // GA4: view_cart event when drawer opens
+  // GA4: view_cart event when drawer opens (사은품 제외)
   useEffect(() => {
-    if (isOpen && items.length > 0) {
-      const ga4Items = items.map(item => shopifyToGA4Item(
+    if (isOpen && regularItems.length > 0) {
+      const ga4Items = regularItems.map(item => shopifyToGA4Item(
         item.product.node,
         { title: item.variantTitle, price: item.price },
         item.quantity
       ));
-      const total = items.reduce((sum, item) => sum + (parseFloat(item.price.amount) * item.quantity), 0);
-      trackViewCart(ga4Items, items[0]?.price.currencyCode || 'USD', total);
+      const total = regularItems.reduce((sum, item) => sum + (parseFloat(item.price.amount) * item.quantity), 0);
+      trackViewCart(ga4Items, regularItems[0]?.price.currencyCode || 'JPY', total);
     }
   }, [isOpen]);
 
   const totalItems = getTotalItems();
   const currencyCode = items[0]?.price.currencyCode || 'USD';
 
-  // Calculate total price from selected items only (or all if none selected)
+  // Calculate total price from selected regular items only (gift excluded)
   const { totalPrice, selectedCount } = useMemo(() => {
     const itemsToCalculate = selectedItems.size > 0
-      ? items.filter(item => selectedItems.has(item.variantId))
-      : items;
+      ? regularItems.filter(item => selectedItems.has(item.variantId))
+      : regularItems;
 
     const total = itemsToCalculate.reduce((sum, item) => {
       const price = parseFloat(item.price.amount) || 0;
@@ -85,16 +88,16 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
 
     return {
       totalPrice: total,
-      selectedCount: selectedItems.size > 0 ? selectedItems.size : items.length
+      selectedCount: selectedItems.size > 0 ? selectedItems.size : regularItems.length
     };
   }, [items, selectedItems]);
 
-  // Check if all items are selected
-  const allSelected = items.length > 0 && selectedItems.size === items.length;
+  // Check if all regular items are selected (gift excluded)
+  const allSelected = regularItems.length > 0 && selectedItems.size === regularItems.length;
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      setSelectedItems(new Set(items.map(item => item.variantId)));
+      setSelectedItems(new Set(regularItems.map(item => item.variantId)));
     } else {
       setSelectedItems(new Set());
     }
@@ -216,7 +219,7 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
 
               <div className="flex-1 overflow-y-auto pr-2 min-h-0">
                 <div className="space-y-4">
-                  {items.map((item) => (
+                  {regularItems.map((item) => (
                     <div key={item.variantId} className="flex gap-3 p-2 bg-muted/30 rounded-lg">
                       {/* Checkbox */}
                       <div className="flex items-center">
@@ -332,11 +335,38 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
                       </div>
                     </div>
                   ))}
+
+                  {/* 사은품 아이템 */}
+                  {giftItems.map((giftItem) => (
+                    <div key={`gift-${giftItem.variantId}`} className="flex gap-3 p-2 bg-primary/5 border border-primary/20 rounded-lg">
+                      <div className="w-4 flex-shrink-0" />
+                      <div className="w-16 h-16 rounded-md overflow-hidden flex-shrink-0 bg-primary/10 flex items-center justify-center">
+                        {giftItem.product.node.images?.edges?.[0]?.node ? (
+                          <img
+                            src={giftItem.product.node.images.edges[0].node.url}
+                            alt={giftItem.product.node.title}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <Gift className="h-6 w-6 text-primary" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 mb-0.5">
+                          <Badge className="text-[10px] px-1.5 py-0 bg-primary text-primary-foreground">
+                            🎁 プレゼント
+                          </Badge>
+                        </div>
+                        <p className="font-medium text-sm line-clamp-2">{giftItem.product.node.title}</p>
+                        <p className="text-sm font-bold text-primary mt-1">無料</p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
               <div className="flex-shrink-0 space-y-4 pt-4 border-t mt-4">
-                {items.some(item => getPreorderDate(item.product.node.tags ?? [])) && (
+                {regularItems.some(item => getPreorderDate(item.product.node.tags ?? [])) && (
                   <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 text-[11px] text-amber-800 leading-relaxed">
                     <p className="font-semibold mb-0.5">⚠️ 予約商品が含まれるご注文について</p>
                     <p>予約商品を含むご注文は、予約出荷日に合わせて全商品をまとめて発送いたします。通常商品を早急にお受け取り希望の場合は、お手数ですが別途ご購入ください。</p>
