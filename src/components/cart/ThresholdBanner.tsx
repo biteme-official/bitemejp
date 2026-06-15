@@ -2,17 +2,20 @@ import { useState, useEffect } from "react";
 import { Gift, Truck } from "lucide-react";
 import { useCartStore } from "@/stores/cartStore";
 import { useTranslation } from "@/hooks/useTranslation";
-import { fetchShippingRates, ShippingRate } from "@/lib/shopify";
+import { fetchShippingRates, fetchCartPreview, ShippingRate } from "@/lib/shopify";
 import { GIFT_THRESHOLD } from "@/config/giftConfig";
 
 export function ThresholdBanner() {
   const items = useCartStore(state => state.items);
   const [shippingRate, setShippingRate] = useState<ShippingRate | null>(null);
+  const [discountedTotal, setDiscountedTotal] = useState<number | null>(null);
   const { formatPrice } = useTranslation();
 
+  const nonGiftItems = items.filter(i => !i.isGift);
+
   useEffect(() => {
-    if (items.length === 0) return;
-    const lineItems = items.map((i) => ({ variantId: i.variantId, quantity: i.quantity }));
+    if (nonGiftItems.length === 0) { setShippingRate(null); return; }
+    const lineItems = nonGiftItems.map((i) => ({ variantId: i.variantId, quantity: i.quantity }));
     fetchShippingRates("JP", lineItems)
       .then((rates) => {
         const nonFreeRate = rates.find((r) => parseFloat(r.amount) > 0);
@@ -21,16 +24,25 @@ export function ThresholdBanner() {
       .catch(console.error);
   }, [items]);
 
+  // 할인가 기준으로 프로그레스 계산
+  useEffect(() => {
+    if (nonGiftItems.length === 0) { setDiscountedTotal(0); return; }
+    fetchCartPreview(nonGiftItems.map(i => ({ variantId: i.variantId, quantity: i.quantity })))
+      .then(info => setDiscountedTotal(info?.discountedTotal ?? null))
+      .catch(() => setDiscountedTotal(null));
+  }, [items]);
+
   if (items.length === 0) return null;
 
   const currencyCode = items[0]?.price.currencyCode || "JPY";
-  const nonGiftTotal = items
-    .filter(i => !i.isGift)
-    .reduce((sum, i) => sum + parseFloat(i.price.amount) * i.quantity, 0);
 
-  const giftUnlocked = nonGiftTotal >= GIFT_THRESHOLD;
-  const remaining = Math.max(0, GIFT_THRESHOLD - nonGiftTotal);
-  const progress = Math.min(100, (nonGiftTotal / GIFT_THRESHOLD) * 100);
+  // 할인가 로드 전에는 정가 기준으로 fallback
+  const effectiveTotal = discountedTotal
+    ?? nonGiftItems.reduce((sum, i) => sum + parseFloat(i.price.amount) * i.quantity, 0);
+
+  const giftUnlocked = effectiveTotal >= GIFT_THRESHOLD;
+  const remaining = Math.max(0, GIFT_THRESHOLD - effectiveTotal);
+  const progress = Math.min(100, (effectiveTotal / GIFT_THRESHOLD) * 100);
 
   return (
     <div className="space-y-2 mb-4">

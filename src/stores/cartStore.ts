@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { ShopifyProduct, createStorefrontCheckout, fetchProductById } from '@/lib/shopify';
+import { ShopifyProduct, createStorefrontCheckout, fetchProductById, fetchCartPreview } from '@/lib/shopify';
 import { GIFT_THRESHOLD, GIFT_PRODUCT_ID } from '@/config/giftConfig';
 
 export interface CartItem {
@@ -138,12 +138,28 @@ export const useCartStore = create<CartStore>()(
 
         try {
           const { items } = get();
-          const nonGiftTotal = items
-            .filter(i => !i.isGift)
-            .reduce((sum, i) => sum + parseFloat(i.price.amount) * i.quantity, 0);
+          const nonGiftItems = items.filter(i => !i.isGift);
+
+          // 할인가 기준으로 임계값 판단 — fetchCartPreview로 실제 결제금액 조회
+          let effectiveTotal: number;
+          try {
+            if (nonGiftItems.length > 0) {
+              const preview = await fetchCartPreview(
+                nonGiftItems.map(i => ({ variantId: i.variantId, quantity: i.quantity }))
+              );
+              effectiveTotal = preview?.discountedTotal
+                ?? nonGiftItems.reduce((sum, i) => sum + parseFloat(i.price.amount) * i.quantity, 0);
+            } else {
+              effectiveTotal = 0;
+            }
+          } catch {
+            effectiveTotal = nonGiftItems.reduce(
+              (sum, i) => sum + parseFloat(i.price.amount) * i.quantity, 0
+            );
+          }
 
           const hasGift = items.some(i => i.isGift);
-          const shouldHaveGift = nonGiftTotal >= GIFT_THRESHOLD;
+          const shouldHaveGift = effectiveTotal >= GIFT_THRESHOLD;
 
           if (shouldHaveGift && !hasGift) {
             if (!_giftItemTemplate) {
