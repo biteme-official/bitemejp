@@ -1106,8 +1106,8 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
   const url = new URL(cart.checkoutUrl);
   url.searchParams.set('channel', 'online_store');
 
-  if (discountCode) {
-    url.searchParams.set('discount', discountCode);
+  if (codes.length > 0) {
+    url.searchParams.set('discount', codes[0]);
     localStorage.removeItem('affiliate_discount');
   }
 
