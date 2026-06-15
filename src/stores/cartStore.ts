@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { ShopifyProduct, createStorefrontCheckout, fetchProductByHandle } from '@/lib/shopify';
-import { GIFT_THRESHOLD, GIFT_PRODUCT_HANDLE } from '@/config/giftConfig';
+import { ShopifyProduct, createStorefrontCheckout, fetchProductById } from '@/lib/shopify';
+import { GIFT_THRESHOLD, GIFT_PRODUCT_ID } from '@/config/giftConfig';
 
 export interface CartItem {
   product: ShopifyProduct;
@@ -147,7 +147,7 @@ export const useCartStore = create<CartStore>()(
 
           if (shouldHaveGift && !hasGift) {
             if (!_giftItemTemplate) {
-              const product = await fetchProductByHandle(GIFT_PRODUCT_HANDLE);
+              const product = await fetchProductById(GIFT_PRODUCT_ID);
               if (!product) return;
               _giftItemTemplate = buildGiftCartItem(product);
             }
