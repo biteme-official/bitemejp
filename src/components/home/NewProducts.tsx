@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { ShopifyProduct, fetchNewProducts, formatPrice, getPreorderDate, fetchCartPreview } from "@/lib/shopify";
+import { ShopifyProduct, fetchNewProducts, formatPrice, getPreorderDate, fetchProductDiscounts } from "@/lib/shopify";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDiscountStore } from "@/stores/discountStore";
 
@@ -21,14 +21,14 @@ export function NewProducts() {
           )
         );
         setProducts(available);
-        const variants: { variantId: string; quantity: number }[] = [];
+        const reps: { productId: string; variantId: string }[] = [];
         available.forEach(p => {
           const v = (p.node.variants.edges.find(e => e.node.availableForSale) ?? p.node.variants.edges[0])?.node;
-          if (v) variants.push({ variantId: v.id, quantity: 1 });
+          if (v) reps.push({ productId: p.node.id, variantId: v.id });
         });
-        fetchCartPreview(variants).then(info => {
-          if (!info) return;
-          setProductDiscounts(info.productDiscounts);
+        fetchProductDiscounts(reps).then(map => {
+          if (Object.keys(map).length === 0) return;
+          setProductDiscounts(map);
         }).catch(console.error);
       })
       .catch(console.error)

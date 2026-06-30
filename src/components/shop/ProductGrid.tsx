@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ShopifyProduct, fetchProducts, fetchCollectionProducts, fetchBestSellingProducts, fetchNewProducts, formatPrice, getPreorderDate, fetchCartPreview } from '@/lib/shopify';
+import { ShopifyProduct, fetchProducts, fetchCollectionProducts, fetchBestSellingProducts, fetchNewProducts, formatPrice, getPreorderDate, fetchProductDiscounts } from '@/lib/shopify';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ShoppingCart, Loader2, Heart } from 'lucide-react';
@@ -139,17 +139,17 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
     }
   }, [loading, totalProductCount, filteredAndSortedProducts]);
 
-  // 상품 목록이 바뀌면 Shopify Cart API로 자동 할인 금액 일괄 조회 (결과는 store에 캐시)
+  // 상품 목록이 바뀌면 Shopify Cart API로 자동 할인율을 상품별 개별 카트로 조회 (결과는 store에 캐시)
   useEffect(() => {
     if (allProducts.length === 0) return;
-    const variants: { variantId: string; quantity: number }[] = [];
+    const reps: { productId: string; variantId: string }[] = [];
     allProducts.forEach(p => {
       const v = (p.node.variants.edges.find(e => e.node.availableForSale) ?? p.node.variants.edges[0])?.node;
-      if (v) variants.push({ variantId: v.id, quantity: 1 });
+      if (v) reps.push({ productId: p.node.id, variantId: v.id });
     });
-    fetchCartPreview(variants).then(info => {
-      if (!info || Object.keys(info.productDiscounts).length === 0) return;
-      setProductDiscounts(info.productDiscounts);
+    fetchProductDiscounts(reps).then(map => {
+      if (Object.keys(map).length === 0) return;
+      setProductDiscounts(map);
     });
   }, [allProducts]);
 

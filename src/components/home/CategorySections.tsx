@@ -7,7 +7,7 @@ import {
   fetchCollectionProducts,
   formatPrice,
   getPreorderDate,
-  fetchCartPreview,
+  fetchProductDiscounts,
 } from "@/lib/shopify";
 
 const CATEGORY_WHITELIST: { handle: string; title: string }[] = [
@@ -72,19 +72,17 @@ export function CategorySections() {
           }))
           .filter((r) => r.products.length >= 4);
         setSections(validSections);
-        const variantMeta: Record<string, { productId: string; price: number }> = {};
-        const allVariants: { variantId: string; quantity: number }[] = [];
+        const reps: { productId: string; variantId: string }[] = [];
+        const seen = new Set<string>();
         validSections.flatMap(r => r.products).forEach(p => {
-          if (variantMeta[p.node.id]) return;
+          if (seen.has(p.node.id)) return;
+          seen.add(p.node.id);
           const v = (p.node.variants.edges.find(e => e.node.availableForSale) ?? p.node.variants.edges[0])?.node;
-          if (v) {
-            variantMeta[v.id] = { productId: p.node.id, price: parseFloat(v.price.amount) };
-            allVariants.push({ variantId: v.id, quantity: 1 });
-          }
+          if (v) reps.push({ productId: p.node.id, variantId: v.id });
         });
-        fetchCartPreview(allVariants).then(info => {
-          if (!info || Object.keys(info.productDiscounts).length === 0) return;
-          setDiscountMap(info.productDiscounts);
+        fetchProductDiscounts(reps).then(map => {
+          if (Object.keys(map).length === 0) return;
+          setDiscountMap(map);
         });
       } catch (err) {
         console.error(err);

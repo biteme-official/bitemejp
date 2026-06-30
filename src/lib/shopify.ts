@@ -448,6 +448,36 @@ export async function fetchCartPreview(
   return promise;
 }
 
+/**
+ * 상품별 자동 할인율(%)을 "상품마다 개별 카트" 미리보기로 조회한다.
+ *
+ * 전 상품을 하나의 카트에 담으면(묶음 카트) 자동 할인이 특정 상품 라인에 할당되지
+ * 않거나, lines(first: 100) 제한·품절 변형 혼입 등으로 누락될 수 있다. 상품 상세
+ * 페이지가 "해당 상품만" 담은 단일 카트로 안정적으로 할인을 표시하는 것과 동일하게,
+ * 리스트에서도 상품마다 대표 변형 1개로 개별 카트를 만들어 할인율을 수집한다.
+ * (네트워크 부하는 concurrency로 제한하며, in-flight dedup·재시도는 fetchCartPreview가 처리)
+ */
+export async function fetchProductDiscounts(
+  reps: { productId: string; variantId: string }[],
+  concurrency = 6
+): Promise<Record<string, number>> {
+  const result: Record<string, number> = {};
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < reps.length) {
+      const { productId, variantId } = reps[cursor++];
+      const info = await fetchCartPreview([{ variantId, quantity: 1 }]);
+      const pct = info?.productDiscounts[productId];
+      // 0도 기록해 과거 할인이 끝났을 때 stale 값이 덮이도록 한다
+      if (pct !== undefined) result[productId] = pct;
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, reps.length) }, () => worker())
+  );
+  return result;
+}
+
 // Collections
 export interface ShopifyCollection {
   id: string;
