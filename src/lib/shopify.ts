@@ -417,11 +417,14 @@ async function _doFetchCartPreview(
     }
   };
 
-  const result = await attempt();
-  // Retry once on network/server failure (null result) after a short delay
-  if (result === null) {
-    await new Promise(r => setTimeout(r, 1500));
-    return attempt();
+  // 실패(null)·Shopify Throttled 시 지수 백오프로 재시도. 리스트에서 상품별 카트를
+  // 다수 조회할 때 rate limit(Throttled)이 걸려도 점진적으로 복구되도록 한다.
+  let result = await attempt();
+  let delay = 800;
+  for (let i = 0; i < 3 && result === null; i++) {
+    await new Promise(r => setTimeout(r, delay));
+    delay *= 2;
+    result = await attempt();
   }
   return result;
 }
@@ -448,32 +451,68 @@ export async function fetchCartPreview(
   return promise;
 }
 
+// 상품별 할인율 캐시 (variantId → pct). 여러 리스트·페이지네이션에서 같은 상품을
+// 중복 조회하지 않도록 세션 동안 유지한다.
+const _productDiscountCache = new Map<string, number>();
+
+// Shopify Storefront API rate limit(Throttled) 방지용 전역 동시성 제한.
+// 여러 리스트(NewProducts·CategorySections·ProductGrid)가 동시에 마운트돼도
+// 카트 미리보기 호출이 한꺼번에 폭주하지 않도록 모든 조회가 이 한도를 공유한다.
+const _MAX_DISCOUNT_CONCURRENCY = 3;
+let _activeDiscountFetches = 0;
+const _discountWaiters: (() => void)[] = [];
+function _acquireDiscountSlot(): Promise<void> {
+  if (_activeDiscountFetches < _MAX_DISCOUNT_CONCURRENCY) {
+    _activeDiscountFetches++;
+    return Promise.resolve();
+  }
+  return new Promise<void>(resolve => _discountWaiters.push(resolve)).then(() => {
+    _activeDiscountFetches++;
+  });
+}
+function _releaseDiscountSlot(): void {
+  _activeDiscountFetches--;
+  _discountWaiters.shift()?.();
+}
+
 /**
  * 상품별 자동 할인율(%)을 "상품마다 개별 카트" 미리보기로 조회한다.
  *
- * 전 상품을 하나의 카트에 담으면(묶음 카트) 자동 할인이 특정 상품 라인에 할당되지
- * 않거나, lines(first: 100) 제한·품절 변형 혼입 등으로 누락될 수 있다. 상품 상세
- * 페이지가 "해당 상품만" 담은 단일 카트로 안정적으로 할인을 표시하는 것과 동일하게,
- * 리스트에서도 상품마다 대표 변형 1개로 개별 카트를 만들어 할인율을 수집한다.
- * (네트워크 부하는 concurrency로 제한하며, in-flight dedup·재시도는 fetchCartPreview가 처리)
+ * 전 상품을 하나의 카트에 담으면(묶음 카트) Shopify 자동 할인은 카트당 1개만
+ * 적용돼 대부분의 상품이 누락된다. 상품 상세 페이지가 "해당 상품만" 담은 단일
+ * 카트로 안정적으로 할인을 표시하는 것과 동일하게, 리스트에서도 상품마다 대표
+ * 변형 1개로 개별 카트를 만들어 할인율을 수집한다.
+ *
+ * 다만 개별 카트는 호출 수가 많아 rate limit(Throttled)에 걸리기 쉬우므로:
+ *   - 전역 동시성 제한(_MAX_DISCOUNT_CONCURRENCY)으로 동시 호출을 묶고,
+ *   - 결과를 캐시해 중복 조회를 없애며,
+ *   - 백오프 재시도(_doFetchCartPreview)로 throttle을 복구한다.
  */
 export async function fetchProductDiscounts(
-  reps: { productId: string; variantId: string }[],
-  concurrency = 6
+  reps: { productId: string; variantId: string }[]
 ): Promise<Record<string, number>> {
   const result: Record<string, number> = {};
-  let cursor = 0;
-  const worker = async () => {
-    while (cursor < reps.length) {
-      const { productId, variantId } = reps[cursor++];
-      const info = await fetchCartPreview([{ variantId, quantity: 1 }]);
-      const pct = info?.productDiscounts[productId];
-      // 0도 기록해 과거 할인이 끝났을 때 stale 값이 덮이도록 한다
-      if (pct !== undefined) result[productId] = pct;
-    }
-  };
+  const todo: { productId: string; variantId: string }[] = [];
+  for (const r of reps) {
+    const cached = _productDiscountCache.get(r.variantId);
+    if (cached !== undefined) result[r.productId] = cached;
+    else todo.push(r);
+  }
+
   await Promise.all(
-    Array.from({ length: Math.min(concurrency, reps.length) }, () => worker())
+    todo.map(async ({ productId, variantId }) => {
+      await _acquireDiscountSlot();
+      try {
+        const info = await fetchCartPreview([{ variantId, quantity: 1 }]);
+        const pct = info?.productDiscounts[productId];
+        if (pct !== undefined) {
+          _productDiscountCache.set(variantId, pct);
+          result[productId] = pct;
+        }
+      } finally {
+        _releaseDiscountSlot();
+      }
+    })
   );
   return result;
 }
