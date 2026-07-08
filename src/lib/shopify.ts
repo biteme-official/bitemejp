@@ -375,6 +375,9 @@ async function _doFetchCartPreview(
     try {
       const data = await storefrontApiRequest(CART_PREVIEW_MUTATION, {
         input: {
+          // 실제 체크아웃 카트(CART_CREATE_MUTATION)와 동일한 일본 마켓 컨텍스트로
+          // 평가해야 마켓(국가)별로 스코프된 자동 할인이 미리보기에도 그대로 잡힌다.
+          buyerIdentity: { countryCode: 'JP' },
           lines: deduped.map(item => ({
             merchandiseId: item.variantId,
             quantity: item.quantity,
