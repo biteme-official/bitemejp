@@ -9,7 +9,7 @@ import biteMeLogo from "@/assets/bite-me-logo.png";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
-import { fetchProductByHandle, fetchProductById, formatPrice, ShopifyProduct, fetchProductRecommendations, ProductRecommendation, getPreorderDate, fetchCartPreview } from "@/lib/shopify";
+import { fetchProductByHandle, fetchProductById, formatPrice, ShopifyProduct, fetchProductRecommendations, ProductRecommendation, getPreorderDate, fetchAutomaticDiscountData, discountPercentForProduct } from "@/lib/shopify";
 import { trackViewItem, trackAddToCart, shopifyToGA4Item } from "@/lib/ga4-ecommerce";
 import { track } from "@/lib/track";
 import { useCartStore } from "@/stores/cartStore";
@@ -275,11 +275,16 @@ export default function ProductDetail() {
             currency: variant?.price.currencyCode ?? data.priceRange.minVariantPrice.currencyCode,
           });
 
-          // 자동 할인 금액 조회 (결과는 store에 캐시)
-          const variants = data.variants.edges.map(e => ({ variantId: e.node.id, quantity: 1 }));
-          fetchCartPreview(variants).then(info => {
-            if (info?.lineDiscounts && Object.keys(info.lineDiscounts).length > 0) {
-              setVariantDiscounts(info.lineDiscounts);
+          // 자동 할인 조회 (Admin API 맵). 상품 할인율(%) → variant별 할인 금액으로 환산.
+          // 기존 Storefront cartCreate 방식은 서버 IP rate limit으로 상시 THROTTLED됐다.
+          fetchAutomaticDiscountData().then(discountData => {
+            const pct = discountPercentForProduct(discountData, data.id);
+            if (pct > 0) {
+              const lineDiscounts: Record<string, number> = {};
+              data.variants.edges.forEach(e => {
+                lineDiscounts[e.node.id] = Math.round(parseFloat(e.node.price.amount) * pct / 100);
+              });
+              setVariantDiscounts(lineDiscounts);
             }
           });
         }
