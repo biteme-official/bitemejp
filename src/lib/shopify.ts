@@ -375,6 +375,9 @@ async function _doFetchCartPreview(
     try {
       const data = await storefrontApiRequest(CART_PREVIEW_MUTATION, {
         input: {
+          // 실제 체크아웃 카트(CART_CREATE_MUTATION)와 동일한 일본 마켓 컨텍스트로
+          // 평가해야 마켓(국가)별로 스코프된 자동 할인이 미리보기에도 그대로 잡힌다.
+          buyerIdentity: { countryCode: 'JP' },
           lines: deduped.map(item => ({
             merchandiseId: item.variantId,
             quantity: item.quantity,
@@ -451,69 +454,62 @@ export async function fetchCartPreview(
   return promise;
 }
 
-// 상품별 할인율 캐시 (variantId → pct). 여러 리스트·페이지네이션에서 같은 상품을
-// 중복 조회하지 않도록 세션 동안 유지한다.
-const _productDiscountCache = new Map<string, number>();
-
-// Shopify Storefront API rate limit(Throttled) 방지용 전역 동시성 제한.
-// 여러 리스트(NewProducts·CategorySections·ProductGrid)가 동시에 마운트돼도
-// 카트 미리보기 호출이 한꺼번에 폭주하지 않도록 모든 조회가 이 한도를 공유한다.
-const _MAX_DISCOUNT_CONCURRENCY = 3;
-let _activeDiscountFetches = 0;
-const _discountWaiters: (() => void)[] = [];
-function _acquireDiscountSlot(): Promise<void> {
-  if (_activeDiscountFetches < _MAX_DISCOUNT_CONCURRENCY) {
-    _activeDiscountFetches++;
-    return Promise.resolve();
-  }
-  return new Promise<void>(resolve => _discountWaiters.push(resolve)).then(() => {
-    _activeDiscountFetches++;
-  });
+// 자동 할인 맵 (Admin API 기반). Storefront `cartCreate`(카트 미리보기)는 모든 호출이
+// Vercel 서버 IP 하나로 나가 Shopify의 IP 기준 카트 rate limit을 전 사용자가 공유 →
+// 상시 THROTTLED되어 리스트/상세에서 할인이 잡히지 않았다. 할인 "표시"는 카트 버킷과
+// 무관한 Admin API(`/api/automatic-discounts`)로 조회한다. (실제 할인 적용은 체크아웃
+// 시 Shopify가 서버에서 수행하므로 이 변경은 표시 계층에만 영향.)
+export interface AutomaticDiscountData {
+  productMap: Record<string, number>; // productId(gid) → 할인율(%)
+  allItemsPercentage: number;         // 전상품 대상 자동할인 중 최대 %
 }
-function _releaseDiscountSlot(): void {
-  _activeDiscountFetches--;
-  _discountWaiters.shift()?.();
+
+const _EMPTY_DISCOUNTS: AutomaticDiscountData = { productMap: {}, allItemsPercentage: 0 };
+let _autoDiscountPromise: Promise<AutomaticDiscountData> | null = null;
+let _autoDiscountAt = 0;
+const _AUTO_DISCOUNT_TTL = 5 * 60 * 1000; // 5분 (엔드포인트도 10분 캐시)
+
+// 전 소비자(리스트·상세)가 하나의 조회를 공유한다. 실패 시 빈 맵 → 정가로 degrade.
+export async function fetchAutomaticDiscountData(): Promise<AutomaticDiscountData> {
+  const now = Date.now();
+  if (_autoDiscountPromise && now - _autoDiscountAt < _AUTO_DISCOUNT_TTL) {
+    return _autoDiscountPromise;
+  }
+  _autoDiscountAt = now;
+  _autoDiscountPromise = (async () => {
+    try {
+      const res = await fetch('/api/automatic-discounts');
+      if (!res.ok) return _EMPTY_DISCOUNTS;
+      const data = await res.json();
+      return {
+        productMap: data?.productMap || {},
+        allItemsPercentage: data?.allItemsPercentage || 0,
+      };
+    } catch {
+      return _EMPTY_DISCOUNTS;
+    }
+  })();
+  return _autoDiscountPromise;
+}
+
+// 특정 상품의 자동 할인율(%). 상품별 할인과 전상품 할인 중 큰 값.
+export function discountPercentForProduct(data: AutomaticDiscountData, productId: string): number {
+  return Math.max(data.productMap[productId] || 0, data.allItemsPercentage);
 }
 
 /**
- * 상품별 자동 할인율(%)을 "상품마다 개별 카트" 미리보기로 조회한다.
- *
- * 전 상품을 하나의 카트에 담으면(묶음 카트) Shopify 자동 할인은 카트당 1개만
- * 적용돼 대부분의 상품이 누락된다. 상품 상세 페이지가 "해당 상품만" 담은 단일
- * 카트로 안정적으로 할인을 표시하는 것과 동일하게, 리스트에서도 상품마다 대표
- * 변형 1개로 개별 카트를 만들어 할인율을 수집한다.
- *
- * 다만 개별 카트는 호출 수가 많아 rate limit(Throttled)에 걸리기 쉬우므로:
- *   - 전역 동시성 제한(_MAX_DISCOUNT_CONCURRENCY)으로 동시 호출을 묶고,
- *   - 결과를 캐시해 중복 조회를 없애며,
- *   - 백오프 재시도(_doFetchCartPreview)로 throttle을 복구한다.
+ * 상품별 자동 할인율(%) 맵을 반환한다. (drop-in: 기존 cartCreate 방식 대체)
+ * Admin API로 조회한 자동 할인 맵에서 요청한 상품만 골라 반환한다.
  */
 export async function fetchProductDiscounts(
   reps: { productId: string; variantId: string }[]
 ): Promise<Record<string, number>> {
+  const data = await fetchAutomaticDiscountData();
   const result: Record<string, number> = {};
-  const todo: { productId: string; variantId: string }[] = [];
   for (const r of reps) {
-    const cached = _productDiscountCache.get(r.variantId);
-    if (cached !== undefined) result[r.productId] = cached;
-    else todo.push(r);
+    const pct = discountPercentForProduct(data, r.productId);
+    if (pct > 0) result[r.productId] = pct;
   }
-
-  await Promise.all(
-    todo.map(async ({ productId, variantId }) => {
-      await _acquireDiscountSlot();
-      try {
-        const info = await fetchCartPreview([{ variantId, quantity: 1 }]);
-        const pct = info?.productDiscounts[productId];
-        if (pct !== undefined) {
-          _productDiscountCache.set(variantId, pct);
-          result[productId] = pct;
-        }
-      } finally {
-        _releaseDiscountSlot();
-      }
-    })
-  );
   return result;
 }
 
