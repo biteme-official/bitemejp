@@ -4,6 +4,7 @@ import { track } from "@/lib/track";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { HeroBanner } from "@/components/home/HeroBanner";
+import { AffiliatePromo } from "@/components/home/AffiliatePromo";
 import { NewProducts } from "@/components/home/NewProducts";
 import { CategorySections } from "@/components/home/CategorySections";
 import { InstagramReels } from "@/components/home/InstagramReels";
@@ -63,6 +64,7 @@ const Index = () => {
       {!isFiltered && (
         <div className="max-w-7xl mx-auto">
           <HeroBanner />
+          <AffiliatePromo />
           <NewProducts />
           <CategorySections />
           <InstagramReels />
