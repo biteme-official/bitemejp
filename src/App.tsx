@@ -22,6 +22,7 @@ import About from "./pages/About";
 import DiscountRedirect from "./pages/DiscountRedirect";
 import BlogList from "./pages/BlogList";
 import BlogPost from "./pages/BlogPost";
+import Affiliate from "./pages/Affiliate";
 import { LineFloatingButton } from "./components/layout/LineFloatingButton";
 import { useCartStore } from "@/stores/cartStore";
 
@@ -72,6 +73,7 @@ const App = () => (
           <Route path="/discount/:code" element={<DiscountRedirect />} />
           <Route path="/blog" element={<BlogList />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
+          <Route path="/affiliate" element={<Affiliate />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
         <LineFloatingButton />
