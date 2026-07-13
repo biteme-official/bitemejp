@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Instagram, Mail, Sparkles, Gift, Users, ChevronLeft, Loader2, CheckCircle2 } from "lucide-react";
+import { Instagram, Mail, Sparkles, BadgePercent, Users, PartyPopper, ChevronLeft, Loader2, CheckCircle2 } from "lucide-react";
 import { Footer } from "@/components/layout/Footer";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -9,14 +9,9 @@ import biteMeLogo from "@/assets/bite-me-logo.png";
 
 const BENEFITS = [
   {
-    icon: Gift,
-    title: "商品ギフティング",
-    desc: "話題のペット用品を無償でお届け。実際に使ってレビューいただけます。",
-  },
-  {
-    icon: Sparkles,
-    title: "成果報酬・特別クーポン",
-    desc: "専用アフィリエイトコードで、フォロワーへの特典と紹介報酬をご用意。",
+    icon: BadgePercent,
+    title: "成果報酬コミッション",
+    desc: "専用アフィリエイトコードでご紹介いただいた売上に応じてコミッションを還元。オープン記念として特別料率でご案内します。",
   },
   {
     icon: Users,
@@ -102,9 +97,31 @@ export default function Affiliate() {
             <h1 className="text-3xl md:text-4xl font-bold leading-tight">
               BITE ME JAPAN<br />アフィリエイト募集
             </h1>
-            <p className="text-muted-foreground leading-relaxed">
-              ペットとの毎日を発信するあなたと、BITE MEが一緒に。
-              Instagramでの発信を通じて、こだわりのペット用品を届けるコラボパートナーを募集しています。
+            <div className="text-muted-foreground leading-relaxed space-y-3">
+              <p>
+                BITE MEの商品をご愛用いただいている皆さまと、一緒に商品の魅力を届けるアフィリエイトパートナーを募集しています。
+              </p>
+              <p>
+                ご購入・ご使用いただいたお気に入りの商品を、Instagramを通じてフォロワーの皆さまにご紹介ください。
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* オープン記念コミッション */}
+        <section className="max-w-2xl mx-auto px-4 -mt-4">
+          <div className="rounded-2xl bg-primary text-primary-foreground px-6 py-7 text-center shadow-sm">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold">
+              <PartyPopper className="h-3.5 w-3.5" />
+              オープン記念キャンペーン
+            </span>
+            <div className="mt-3 flex items-end justify-center gap-1">
+              <span className="text-6xl font-extrabold leading-none tracking-tight">10</span>
+              <span className="text-3xl font-bold pb-1">%</span>
+            </div>
+            <p className="mt-2 text-sm font-medium">ご紹介いただいた売上のコミッション率</p>
+            <p className="mt-2 text-xs text-primary-foreground/80 leading-relaxed">
+              アフィリエイトプログラム開始を記念して、期間限定で特別コミッション率10%をご提供します。
             </p>
           </div>
         </section>
