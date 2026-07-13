@@ -26,37 +26,6 @@ function normalizeInstagram(raw: string): string {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const INSTAGRAM_RE = /^[A-Za-z0-9._]{1,30}$/;
 
-async function notifySlack(instagram: string, email: string, queuePosition: number | null) {
-  const webhook = process.env.SLACK_WEBHOOK_URL;
-  if (!webhook) return;
-  try {
-    await fetch(webhook, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        blocks: [
-          {
-            type: 'header',
-            text: { type: 'plain_text', text: '🤝 新しいアフィリエイト応募' },
-          },
-          {
-            type: 'section',
-            fields: [
-              { type: 'mrkdwn', text: `*Instagram*\n<https://instagram.com/${instagram}|@${instagram}>` },
-              { type: 'mrkdwn', text: `*メール*\n${email}` },
-              ...(queuePosition !== null
-                ? [{ type: 'mrkdwn', text: `*受付順(未対応)*\n${queuePosition}番目` }]
-                : []),
-            ],
-          },
-        ],
-      }),
-    });
-  } catch (err) {
-    console.error('[affiliate-apply] Slack notify failed:', err);
-  }
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const corsOrigin = getCorsOrigin(req);
   res.setHeader('Access-Control-Allow-Origin', corsOrigin);
@@ -103,19 +72,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Failed to submit' });
   }
 
-  // 접수 대기열(미대응) 순번 계산 — 실패해도 신청 자체는 성공 처리
-  let queuePosition: number | null = null;
-  try {
-    const { count } = await supabase
-      .from('affiliate_applications')
-      .select('id', { count: 'exact', head: true })
-      .eq('status', 'pending');
-    queuePosition = typeof count === 'number' ? count : null;
-  } catch {
-    queuePosition = null;
-  }
-
-  await notifySlack(instagram, email, queuePosition);
-
-  return res.status(200).json({ ok: true, duplicate: false, queuePosition });
+  return res.status(200).json({ ok: true, duplicate: false });
 }
