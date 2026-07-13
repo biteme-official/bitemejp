@@ -40,6 +40,9 @@ export function Footer() {
             <Link to="/blog" className="hover:text-primary transition-colors">
               ブログ
             </Link>
+            <Link to="/affiliate" className="hover:text-primary transition-colors">
+              アフィリエイト募集
+            </Link>
           </div>
           <p className="text-xs text-muted-foreground/60">© 2026 BITE ME JAPAN. All rights reserved.</p>
         </div>

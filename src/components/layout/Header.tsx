@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Menu, Phone, ChevronRight, ChevronDown, Package, User, LogOut, BookOpen } from "lucide-react";
+import { Menu, Phone, ChevronRight, ChevronDown, Package, User, LogOut, BookOpen, BadgePercent } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { LineLoginButton } from "@/components/auth/LineLoginButton";
 import { Button } from "@/components/ui/button";
@@ -272,6 +272,22 @@ export function Header({ onSearch, onCollectionSelect }: HeaderProps) {
                 >
                   <BookOpen className="h-4 w-4 text-muted-foreground" />
                   <span className="font-medium text-sm">ブログ</span>
+                </button>
+              </div>
+
+              {/* Affiliate */}
+              <div className="border-b border-border/50">
+                <button
+                  onClick={() => { navigate("/affiliate"); setIsMenuOpen(false); }}
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-secondary/50 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <BadgePercent className="h-4 w-4 text-primary" />
+                    <span className="font-medium text-sm">アフィリエイト募集</span>
+                  </div>
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                    10%
+                  </span>
                 </button>
               </div>
 
