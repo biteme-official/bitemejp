@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Instagram, Mail, Sparkles, BadgePercent, Users, PartyPopper, ChevronLeft, Loader2, CheckCircle2 } from "lucide-react";
+import { Instagram, Mail, Sparkles, BadgePercent, Users, PartyPopper, ChevronLeft, Loader2, CheckCircle2, ExternalLink } from "lucide-react";
 import { Footer } from "@/components/layout/Footer";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -20,10 +20,14 @@ const BENEFITS = [
   },
 ];
 
+// Shopify Collabs のアプリケーションページ（テーマ拡張の「Apply now」と同じ導線）
+const COLLABS_SIGNUP_URL =
+  "https://api.collabs.shopify.com/creator/signup/community_application/fa3c59dfb38cb9a2?origin=THEME_EXTENSION";
+
 const STEPS = [
-  "下のフォームからInstagramアカウントとメールアドレスをご登録ください。",
-  "ご登録は受付順に承ります。担当者が順番に内容を確認いたします。",
-  "審査通過後、ご登録のメール宛に招待をお送りします。順次ご案内するため、少々お時間をいただく場合があります。",
+  "下のボタンからShopify Collabsにご応募ください。Collabsのアカウント作成後、そのまま応募が完了します。",
+  "ご応募は受付順に承ります。担当者が順番に内容を確認いたします。",
+  "審査通過後、Collabsを通じて招待をお送りします。順次ご案内するため、少々お時間をいただく場合があります。",
 ];
 
 export default function Affiliate() {
@@ -162,8 +166,30 @@ export default function Affiliate() {
           </p>
         </section>
 
-        {/* 応募フォーム */}
-        <section className="max-w-md mx-auto px-4 pb-16">
+        {/* 応募 */}
+        <section className="max-w-md mx-auto px-4 pb-16 space-y-6">
+          {/* Collabsで応募（主導線） */}
+          <div className="bg-card border border-border rounded-2xl px-6 py-8 space-y-4 text-center">
+            <div className="space-y-1">
+              <h3 className="text-lg font-semibold">Collabsで応募する</h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Shopify Collabsのページで、そのままご応募いただけます。
+              </p>
+            </div>
+            <Button asChild className="w-full">
+              <a href={COLLABS_SIGNUP_URL} target="_blank" rel="noopener noreferrer">
+                Collabsで応募する
+                <ExternalLink className="h-4 w-4 ml-2" />
+              </a>
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <span className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground shrink-0">または</span>
+            <span className="h-px flex-1 bg-border" />
+          </div>
+
           {done ? (
             <div className="bg-card border border-border rounded-2xl px-6 py-10 text-center space-y-3">
               <CheckCircle2 className="h-12 w-12 text-primary mx-auto" />
@@ -179,9 +205,9 @@ export default function Affiliate() {
           ) : (
             <form onSubmit={handleSubmit} className="bg-card border border-border rounded-2xl px-6 py-8 space-y-5">
               <div className="text-center space-y-1">
-                <h3 className="text-lg font-semibold">応募する</h3>
-                <p className="text-xs text-muted-foreground">
-                  Instagramアカウントとメールアドレスをご登録ください。
+                <h3 className="text-lg font-semibold">フォームで応募する</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Collabsをご利用でない方は、こちらからご登録ください。担当者より順次ご連絡いたします。
                 </p>
               </div>
 
