@@ -173,7 +173,7 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
       const lineTag = `line_id:${profile.userId}`;
       const mergedTags = Array.from(new Set([...existingTags.filter((t: string) => !t.startsWith('line_id:')), lineTag]));
 
-      await adminGraphQL(adminToken, `
+      const updateResult = await adminGraphQL(adminToken, `
         mutation SaveLineId($input: CustomerInput!) {
           customerUpdate(input: $input) {
             customer { id }
@@ -192,10 +192,30 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
           }],
         },
       });
-      console.log('[Shopify Sync] LINE ID tag+metafield saved for', customerNode.id);
+
+      // ⚠️ 이 매핑이 LINE CRM(세그먼트 발송)의 유일한 연결고리다.
+      // 실패해도 로그인 자체는 성공시키되, 절대 조용히 넘기지 않는다.
+      // 2026-08-07: REPORT 앱에 write_customers 스코프가 없어 전량 실패하고 있던 것을
+      //             console.warn 이 삼켜서 1년 가까이 발견되지 않았음 (Issue #102).
+      const userErrors = updateResult?.data?.customerUpdate?.userErrors ?? [];
+      const topErrors = updateResult?.errors;
+      if (topErrors) {
+        console.error(
+          '[Shopify Sync] 🔴 LINE ID 매핑 저장 실패 (GraphQL). write_customers 스코프를 확인하세요:',
+          JSON.stringify(topErrors)
+        );
+      } else if (userErrors.length > 0) {
+        console.error('[Shopify Sync] 🔴 LINE ID 매핑 저장 실패 (userErrors):', JSON.stringify(userErrors));
+      } else if (!updateResult?.data?.customerUpdate?.customer?.id) {
+        console.error('[Shopify Sync] 🔴 LINE ID 매핑 저장 실패 (응답에 customer 없음):', JSON.stringify(updateResult));
+      } else {
+        console.log('[Shopify Sync] LINE ID tag+metafield saved for', customerNode.id);
+      }
+    } else {
+      console.error('[Shopify Sync] 🔴 LINE ID 매핑 대상 고객을 찾지 못함:', email);
     }
   } catch (err) {
-    console.warn('[Shopify Sync] Tag/metafield save failed (non-critical):', err);
+    console.error('[Shopify Sync] 🔴 LINE ID 매핑 저장 중 예외:', err);
   }
 
   return { customerAccessToken: accessToken, shopifyEmail: email, shopifyCustomerId };
