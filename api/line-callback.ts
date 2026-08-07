@@ -14,6 +14,19 @@ interface ShopifySyncResult {
   customerAccessToken: string | null;
   shopifyEmail: string;
   shopifyCustomerId: string | null;
+  /** 아직 실제 이메일이 없어 주문 확인 메일이 도달하지 못하는 상태 */
+  needsEmail: boolean;
+}
+
+/**
+ * LINE이 이메일을 주지 않은 유저에게 부여하는 자리표시자 도메인.
+ * ⚠️ 이 도메인은 MX 레코드가 없어 실제로 메일이 도달하지 않는다.
+ *    로그인 후 실제 이메일을 수집해 교체한다 (api/update-customer-email.ts).
+ */
+const PLACEHOLDER_EMAIL_DOMAIN = '@line-user.biteme.co.jp';
+
+function placeholderEmail(lineUserId: string): string {
+  return `line_${lineUserId}${PLACEHOLDER_EMAIL_DOMAIN}`;
 }
 
 async function getStorefrontToken(): Promise<string> {
@@ -85,44 +98,97 @@ async function storefrontQuery(token: string, query: string, variables: Record<s
   return res.json();
 }
 
+/**
+ * line_id 태그로 기존 고객을 찾는다.
+ *
+ * ⚠️ 이메일을 조회 키로 쓰면 안 된다. 유저가 실제 이메일을 등록하면 고객의 email이
+ *    바뀌는데, 다음 로그인 때 다시 자리표시자 이메일로 조회하면 못 찾고
+ *    중복 고객을 새로 만들어 버린다 (주문 이력 분리).
+ *    LINE userId 는 불변이므로 이쪽을 키로 삼는다.
+ */
+async function findCustomerByLineId(
+  adminToken: string,
+  lineUserId: string
+): Promise<{ id: string; email: string } | null> {
+  const result = await adminGraphQL(adminToken, `
+    query FindByLineId($query: String!) {
+      customers(first: 1, query: $query) {
+        edges { node { id email } }
+      }
+    }
+  `, { query: `tag:"line_id:${lineUserId}"` });
+
+  const node = result?.data?.customers?.edges?.[0]?.node;
+  return node?.email ? { id: node.id, email: node.email } : null;
+}
+
 async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncResult> {
+  const empty: ShopifySyncResult = {
+    customerAccessToken: null,
+    shopifyEmail: '',
+    shopifyCustomerId: null,
+    needsEmail: false,
+  };
+
   const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN;
-  if (!shop) return { customerAccessToken: null, shopifyEmail: '', shopifyCustomerId: null };
+  if (!shop) return empty;
 
   let token: string;
   try {
     token = await getStorefrontToken();
   } catch {
-    return { customerAccessToken: null, shopifyEmail: '', shopifyCustomerId: null };
+    return empty;
   }
 
   const nameParts = profile.displayName.trim().split(' ');
   const firstName = nameParts[0] || profile.displayName;
   const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
-  const email = profile.email || `line_${profile.userId}@line-user.biteme.co.jp`;
   const password = generatePassword(profile.userId);
 
-  // 1. Try to create customer
-  const createResult = await storefrontQuery(token, `
-    mutation customerCreate($input: CustomerCreateInput!) {
-      customerCreate(input: $input) {
-        customer { id email }
-        customerUserErrors { code field message }
-      }
+  // Admin 토큰은 기존 고객 조회에도 쓰이므로 먼저 확보한다 (실패해도 로그인은 계속).
+  let adminToken: string | null = null;
+  try {
+    adminToken = await getAdminToken();
+  } catch (err) {
+    console.error('[Shopify Sync] 🔴 Admin 토큰 발급 실패:', err);
+  }
+
+  // line_id 태그로 기존 고객을 먼저 찾는다. 찾으면 그 고객의 현재 이메일을 사용한다
+  // (유저가 실제 이메일로 교체했을 수 있음). 못 찾으면 신규로 간주.
+  let existing: { id: string; email: string } | null = null;
+  if (adminToken) {
+    try {
+      existing = await findCustomerByLineId(adminToken, profile.userId);
+    } catch (err) {
+      console.error('[Shopify Sync] 🔴 line_id 조회 실패:', err);
     }
-  `, { input: { email, password, firstName, lastName, acceptsMarketing: false } });
+  }
 
-  const errors = createResult.data?.customerCreate?.customerUserErrors ?? [];
-  const alreadyExists = errors.some((e: { code: string }) =>
-    e.code === 'CUSTOMER_DISABLED' || e.code === 'EMAIL_TAKEN' || e.code === 'TAKEN'
-  );
+  const email = existing?.email ?? profile.email ?? placeholderEmail(profile.userId);
 
-  if (alreadyExists) {
-    console.log('[Shopify Sync] Customer already exists, attempting login');
-  } else if (errors.length > 0) {
-    console.error('[Shopify Sync] customerCreate errors:', JSON.stringify(errors));
-  } else {
-    console.log('[Shopify Sync] Customer created:', createResult.data?.customerCreate?.customer?.id);
+  // 1. 기존 고객이 없을 때만 생성 시도
+  if (!existing) {
+    const createResult = await storefrontQuery(token, `
+      mutation customerCreate($input: CustomerCreateInput!) {
+        customerCreate(input: $input) {
+          customer { id email }
+          customerUserErrors { code field message }
+        }
+      }
+    `, { input: { email, password, firstName, lastName, acceptsMarketing: false } });
+
+    const errors = createResult.data?.customerCreate?.customerUserErrors ?? [];
+    const alreadyExists = errors.some((e: { code: string }) =>
+      e.code === 'CUSTOMER_DISABLED' || e.code === 'EMAIL_TAKEN' || e.code === 'TAKEN'
+    );
+
+    if (alreadyExists) {
+      console.log('[Shopify Sync] Customer already exists, attempting login');
+    } else if (errors.length > 0) {
+      console.error('[Shopify Sync] customerCreate errors:', JSON.stringify(errors));
+    } else {
+      console.log('[Shopify Sync] Customer created:', createResult.data?.customerCreate?.customer?.id);
+    }
   }
 
   // 2. Get customer access token
@@ -147,18 +213,21 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
   // 3. Admin API で顧客を検索して LINE userId をメタフィールドに保存
   let shopifyCustomerId: string | null = null;
   try {
-    const adminToken = await getAdminToken();
+    if (!adminToken) throw new Error('Admin 토큰 없음');
 
-    // email で顧客 GID を取得
-    const findResult = await adminGraphQL(adminToken, `
-      query FindCustomer($query: String!) {
-        customers(first: 1, query: $query) {
-          edges { node { id } }
+    // line_id 로 이미 찾았으면 재조회 불필요. 신규 고객만 email 로 GID 조회.
+    let customerNode: { id: string } | null = existing ? { id: existing.id } : null;
+    if (!customerNode) {
+      const findResult = await adminGraphQL(adminToken, `
+        query FindCustomer($query: String!) {
+          customers(first: 1, query: $query) {
+            edges { node { id } }
+          }
         }
-      }
-    `, { query: `email:"${email}"` });
+      `, { query: `email:"${email}"` });
+      customerNode = findResult?.data?.customers?.edges?.[0]?.node ?? null;
+    }
 
-    const customerNode = findResult?.data?.customers?.edges?.[0]?.node;
     if (customerNode) {
       shopifyCustomerId = customerNode.id;
 
@@ -218,7 +287,12 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
     console.error('[Shopify Sync] 🔴 LINE ID 매핑 저장 중 예외:', err);
   }
 
-  return { customerAccessToken: accessToken, shopifyEmail: email, shopifyCustomerId };
+  return {
+    customerAccessToken: accessToken,
+    shopifyEmail: email,
+    shopifyCustomerId,
+    needsEmail: email.endsWith(PLACEHOLDER_EMAIL_DOMAIN),
+  };
 }
 
 const ALLOWED_ORIGINS = [
@@ -339,6 +413,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       shopifyCustomerToken: shopifyResult.customerAccessToken,
       shopifyEmail: shopifyResult.shopifyEmail,
       shopifyCustomerId: shopifyResult.shopifyCustomerId,
+      needsEmail: shopifyResult.needsEmail,
     });
   } catch (error) {
     console.error('[LINE Callback] Error:', error);
