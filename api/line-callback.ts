@@ -1,7 +1,39 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 const SHOPIFY_API_VERSION = '2025-07';
+
+/**
+ * api/line-login-state.ts 가 서명한 state 를 검증한다.
+ *
+ * localStorage 기반 검증은 LINE 앱을 거쳐 돌아올 때 브라우저 컨텍스트가 바뀌면
+ * 값이 사라져 로그인이 통째로 실패했다. 서명은 자체 검증이 가능해 이 문제가 없다.
+ *
+ * 반환값: 검증 성공 시 돌아갈 경로, 실패 시 null.
+ */
+function verifySignedState(state: string, secret: string): { returnTo: string } | null {
+  const dot = state.indexOf('.');
+  if (dot <= 0) return null;
+
+  const body = state.slice(0, dot);
+  const sig = state.slice(dot + 1);
+  const expected = createHmac('sha256', secret).update(body).digest('base64url');
+
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (typeof payload?.e !== 'number' || Date.now() > payload.e) return null;
+    const r = typeof payload.r === 'string' ? payload.r : '/';
+    // 오픈 리다이렉트 방지 — 서명되어 있어도 한 번 더 확인한다.
+    const returnTo = r.startsWith('/') && !r.startsWith('//') ? r : '/';
+    return { returnTo };
+  } catch {
+    return null;
+  }
+}
 
 interface LineProfile {
   userId: string;
@@ -339,7 +371,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ message: 'Server configuration error' });
   }
 
-  const { code, redirectUri } = req.body;
+  const { code, redirectUri, state } = req.body;
 
   if (!code || !redirectUri) {
     return res.status(400).json({ message: 'Missing code or redirectUri' });
@@ -347,6 +379,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (!ALLOWED_REDIRECT_URIS.includes(redirectUri)) {
     return res.status(400).json({ message: 'Invalid redirect URI' });
+  }
+
+  // 서명된 state 검증. 서명이 없는 state(구버전 클라이언트/서명 발급 실패 시 폴백)는
+  // 클라이언트의 localStorage 대조로 보호되므로 통과시킨다.
+  let returnTo = '/';
+  if (typeof state === 'string' && state.includes('.')) {
+    const verified = verifySignedState(state, channelSecret);
+    if (!verified) {
+      console.error('[LINE Callback] 🔴 state 서명 검증 실패 (위조 또는 만료)');
+      return res.status(400).json({ message: 'ログインの有効期限が切れました。もう一度お試しください。' });
+    }
+    returnTo = verified.returnTo;
   }
 
   try {
@@ -414,6 +458,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       shopifyEmail: shopifyResult.shopifyEmail,
       shopifyCustomerId: shopifyResult.shopifyCustomerId,
       needsEmail: shopifyResult.needsEmail,
+      returnTo,
     });
   } catch (error) {
     console.error('[LINE Callback] Error:', error);

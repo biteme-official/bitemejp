@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { initiateLineLogin } from '@/lib/line-auth';
 
 interface LineLoginButtonProps {
@@ -5,10 +6,18 @@ interface LineLoginButtonProps {
 }
 
 export function LineLoginButton({ className }: LineLoginButtonProps) {
+  // state 발급을 위해 서버를 한 번 거치므로 중복 클릭을 막는다.
+  const [starting, setStarting] = useState(false);
+
   return (
     <button
-      onClick={initiateLineLogin}
-      className={`flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-md text-white font-medium text-sm transition-colors hover:opacity-90 ${className ?? ''}`}
+      onClick={() => {
+        if (starting) return;
+        setStarting(true);
+        initiateLineLogin().catch(() => setStarting(false));
+      }}
+      disabled={starting}
+      className={`flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-md text-white font-medium text-sm transition-colors hover:opacity-90 disabled:opacity-70 ${className ?? ''}`}
       style={{ backgroundColor: '#06C755' }}
     >
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none">

@@ -22,8 +22,12 @@ export default function LineCallback() {
   const [emailError, setEmailError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // LINE 앱을 거쳐 오면 브라우저 컨텍스트가 바뀌어 localStorage 가 비어 있을 수 있다.
+  // 그 경우 서버가 서명된 state 에서 복원해준 경로를 쓴다.
+  const [serverReturnTo, setServerReturnTo] = useState<string>('/');
+
   function goBack() {
-    const returnTo = localStorage.getItem('line_login_return_to') || '/';
+    const returnTo = localStorage.getItem('line_login_return_to') || serverReturnTo;
     localStorage.removeItem('line_login_return_to');
     navigate(returnTo, { replace: true });
   }
@@ -52,6 +56,8 @@ export default function LineCallback() {
 
     handleLineCallback(code, state)
       .then((profile) => {
+        if (profile.returnTo) setServerReturnTo(profile.returnTo);
+
         login({
           userId: profile.userId,
           displayName: profile.displayName,
@@ -74,7 +80,8 @@ export default function LineCallback() {
         setSuccess({ displayName: profile.displayName });
 
         // Redirect to the page user was on before login
-        const returnTo = localStorage.getItem('line_login_return_to') || '/';
+        const returnTo =
+          localStorage.getItem('line_login_return_to') || profile.returnTo || '/';
         localStorage.removeItem('line_login_return_to');
 
         setTimeout(() => {
