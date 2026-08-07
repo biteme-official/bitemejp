@@ -24,6 +24,7 @@ import BlogList from "./pages/BlogList";
 import BlogPost from "./pages/BlogPost";
 import Affiliate from "./pages/Affiliate";
 import { LineFloatingButton } from "./components/layout/LineFloatingButton";
+import { NoticeBanner } from "./components/layout/NoticeBanner";
 import { useCartStore } from "@/stores/cartStore";
 
 const queryClient = new QueryClient();
@@ -56,6 +57,7 @@ const App = () => (
         <CheckoutReturnGuard />
         <Toaster />
         <Sonner closeButton />
+        <NoticeBanner />
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/product/:id" element={<ProductDetail />} />
