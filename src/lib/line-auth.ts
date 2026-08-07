@@ -24,6 +24,11 @@ export function initiateLineLogin(): void {
     redirect_uri: callbackUrl,
     state: state,
     scope: 'profile openid email',
+    // 로그인 흐름에 공식계정(@621txosw) 친구추가 단계를 삽입.
+    // LINE 푸시 메시지는 친구에게만 발송 가능하므로 CRM의 전제 조건.
+    // ⚠️ LINE Developers > Login 채널 > "링크된 LINE 공식계정" 설정이
+    //    비어 있으면 이 파라미터는 조용히 무시된다.
+    bot_prompt: 'aggressive',
   });
 
   window.location.href = `https://access.line.me/oauth2/v2.1/authorize?${params.toString()}`;
