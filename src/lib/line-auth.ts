@@ -42,6 +42,8 @@ export interface LineCallbackResult {
   shopifyCustomerToken?: string;
   shopifyEmail?: string;
   shopifyCustomerId?: string;
+  /** true 이면 자리표시자 이메일 상태 — 주문 확인 메일이 도달하지 않는다 */
+  needsEmail?: boolean;
 }
 
 export async function handleLineCallback(code: string, state: string): Promise<LineCallbackResult> {
@@ -64,4 +66,34 @@ export async function handleLineCallback(code: string, state: string): Promise<L
   }
 
   return response.json();
+}
+
+export interface SubmitEmailResult {
+  email: string;
+  /** 이메일 변경으로 재발급된 토큰. null 이면 기존 토큰을 유지한다. */
+  customerAccessToken?: string | null;
+}
+
+/**
+ * LINE이 이메일을 주지 않은 유저의 실제 이메일을 등록한다.
+ * 자리표시자 이메일(@line-user.biteme.co.jp)은 메일이 도달하지 않아
+ * 주문 확인·배송 알림을 받지 못하므로 로그인 직후 수집한다.
+ */
+export async function submitCustomerEmail(
+  customerAccessToken: string,
+  email: string
+): Promise<SubmitEmailResult> {
+  const response = await fetch('/api/update-customer-email', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ customerAccessToken, email }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.message || 'メールアドレスの登録に失敗しました。');
+  }
+
+  return data;
 }

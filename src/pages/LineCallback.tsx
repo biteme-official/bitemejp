@@ -1,15 +1,37 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { handleLineCallback } from '@/lib/line-auth';
+import { handleLineCallback, submitCustomerEmail } from '@/lib/line-auth';
 import { useAuthStore } from '@/stores/authStore';
-import { Loader2, CheckCircle2 } from 'lucide-react';
+import { Loader2, CheckCircle2, Mail } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 
 export default function LineCallback() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const login = useAuthStore((state) => state.login);
+  const updateEmail = useAuthStore((state) => state.updateEmail);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<{ displayName: string } | null>(null);
+
+  // LINE이 이메일을 주지 않은 경우에만 입력 단계를 노출한다.
+  // 자리표시자 이메일(@line-user.biteme.co.jp)은 MX 레코드가 없어
+  // 주문 확인·배송 메일이 전량 바운스되기 때문.
+  const [emailStep, setEmailStep] = useState<{ token: string; displayName: string } | null>(null);
+  const [emailInput, setEmailInput] = useState('');
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  function goBack() {
+    const returnTo = localStorage.getItem('line_login_return_to') || '/';
+    localStorage.removeItem('line_login_return_to');
+    navigate(returnTo, { replace: true });
+  }
+
+  function finishWithGreeting(displayName: string) {
+    setSuccess({ displayName });
+    setTimeout(goBack, 2000);
+  }
 
   useEffect(() => {
     const code = searchParams.get('code');
@@ -40,6 +62,15 @@ export default function LineCallback() {
           shopifyCustomerId: profile.shopifyCustomerId,
         });
 
+        // 토큰이 없으면 이메일을 바꿀 수단이 없으므로 그냥 통과시킨다.
+        if (profile.needsEmail && profile.shopifyCustomerToken) {
+          setEmailStep({
+            token: profile.shopifyCustomerToken,
+            displayName: profile.displayName,
+          });
+          return;
+        }
+
         setSuccess({ displayName: profile.displayName });
 
         // Redirect to the page user was on before login
@@ -57,6 +88,23 @@ export default function LineCallback() {
       });
   }, [searchParams, navigate, login]);
 
+  async function handleEmailSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!emailStep || submitting) return;
+
+    setEmailError(null);
+    setSubmitting(true);
+    try {
+      const result = await submitCustomerEmail(emailStep.token, emailInput);
+      updateEmail(result.email, result.customerAccessToken);
+      finishWithGreeting(emailStep.displayName);
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : 'メールアドレスの登録に失敗しました。');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -64,6 +112,62 @@ export default function LineCallback() {
           <p className="text-destructive text-lg mb-2">{error}</p>
           <p className="text-muted-foreground text-sm">トップページに戻ります...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (emailStep) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background px-6">
+        <form onSubmit={handleEmailSubmit} className="w-full max-w-sm space-y-5">
+          <div className="text-center space-y-3">
+            <Mail className="h-10 w-10 text-primary mx-auto" />
+            <h1 className="text-lg font-bold text-foreground">メールアドレスのご登録</h1>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {emailStep.displayName}さん、ようこそ！
+              <br />
+              ご注文確認・配送のお知らせをお送りするため、
+              <br />
+              メールアドレスをご登録ください。
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Input
+              type="email"
+              inputMode="email"
+              autoComplete="email"
+              autoFocus
+              required
+              placeholder="example@email.com"
+              value={emailInput}
+              onChange={(e) => setEmailInput(e.target.value)}
+              disabled={submitting}
+              aria-invalid={emailError ? true : undefined}
+            />
+            {emailError && <p className="text-sm text-destructive">{emailError}</p>}
+          </div>
+
+          <div className="space-y-3">
+            <Button type="submit" className="w-full" disabled={submitting || !emailInput.trim()}>
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : '登録する'}
+            </Button>
+            <button
+              type="button"
+              onClick={() => finishWithGreeting(emailStep.displayName)}
+              disabled={submitting}
+              className="w-full text-sm text-muted-foreground underline underline-offset-4 disabled:opacity-50"
+            >
+              あとで登録する
+            </button>
+          </div>
+
+          <p className="text-xs text-muted-foreground text-center leading-relaxed">
+            ご登録いただいたメールアドレスは、
+            <br />
+            プライバシーポリシーに従って取り扱います。
+          </p>
+        </form>
       </div>
     );
   }
