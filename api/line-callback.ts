@@ -35,6 +35,34 @@ function verifySignedState(state: string, secret: string): { returnTo: string } 
   }
 }
 
+/** 로그인 세션 토큰 유효기간. 만료되면 LINE 재로그인 1회로 갱신된다. */
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * 로그인 세션 토큰을 발급한다.
+ *
+ * LINE OAuth 코드 교환에 성공한 요청에만 발급되므로 "이 사람이 이 LINE 계정의
+ * 주인이다"는 증명이 된다. 주문 조회·이메일 등록 API 는 이 서명을 확인하고
+ * **클라이언트가 보낸 고객 ID 는 신뢰하지 않는다.**
+ *
+ * 서명 형식은 api/line-login-state.ts 의 state 와 동일하다
+ * (`<base64url 페이로드>.<base64url 서명>`, 비밀키도 LINE_CHANNEL_SECRET 재사용).
+ */
+function signSessionToken(
+  lineUserId: string,
+  shopifyCustomerId: string | null,
+  secret: string
+): string {
+  const payload = {
+    u: lineUserId,
+    c: shopifyCustomerId,
+    e: Date.now() + SESSION_TTL_MS,
+  };
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = createHmac('sha256', secret).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+
 interface LineProfile {
   userId: string;
   displayName: string;
@@ -523,6 +551,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       shopifyEmail: shopifyResult.shopifyEmail,
       shopifyCustomerId: shopifyResult.shopifyCustomerId,
       needsEmail: shopifyResult.needsEmail,
+      // 주문 조회·이메일 등록 API 의 인증 수단. Storefront 토큰 발급이 실패한
+      // 계정(초기 가입자 일부)도 이걸로 본인 확인이 되므로 기능이 막히지 않는다.
+      lineSessionToken: signSessionToken(
+        profile.userId,
+        shopifyResult.shopifyCustomerId,
+        channelSecret
+      ),
       returnTo,
     });
   } catch (error) {

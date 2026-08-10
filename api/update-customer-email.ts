@@ -7,11 +7,16 @@
  * (2026-08-07 실측: 주문에도 이 주소가 그대로 기록됨) 로그인 후 실제
  * 이메일을 받아 교체한다.
  *
- * 인증: customerAccessToken 을 Storefront API 로 검증해 본인만 변경 가능.
- *       자리표시자 이메일인 경우에만 허용한다.
+ * 인증 (둘 중 하나): Storefront customerAccessToken, 또는 /api/line-callback 이
+ *       서명한 lineSessionToken. 어느 쪽이든 서버가 검증하며, 클라이언트가 보낸
+ *       고객 ID 는 신뢰하지 않는다. 자리표시자 이메일인 경우에만 변경을 허용한다.
+ *
+ * 세션 토큰을 함께 받는 이유: 초기 가입자 일부는 결정론적 비밀번호로
+ * customerAccessToken 이 발급되지 않아(UNIDENTIFIED_CUSTOMER) 토큰만 요구하면
+ * 이메일을 영영 등록할 수 없었다.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
 const SHOPIFY_API_VERSION = '2025-07';
@@ -28,6 +33,34 @@ function getCorsOrigin(req: VercelRequest): string {
   if (ALLOWED_ORIGINS.includes(origin)) return origin;
   if (/^https:\/\/smart-paw-finder[a-z0-9-]*\.vercel\.app$/.test(origin)) return origin;
   return ALLOWED_ORIGINS[0];
+}
+
+/** api/line-callback.ts 의 signSessionToken 과 한 쌍 */
+function verifySessionToken(
+  token: unknown,
+  secret: string
+): { lineUserId: string; shopifyCustomerId: string | null } | null {
+  if (typeof token !== 'string') return null;
+
+  const dot = token.indexOf('.');
+  if (dot <= 0) return null;
+
+  const body = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const expected = createHmac('sha256', secret).update(body).digest('base64url');
+
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (typeof payload?.e !== 'number' || Date.now() > payload.e) return null;
+    if (typeof payload?.u !== 'string' || !payload.u) return null;
+    return { lineUserId: payload.u, shopifyCustomerId: typeof payload.c === 'string' ? payload.c : null };
+  } catch {
+    return null;
+  }
 }
 
 /** api/line-callback.ts 와 반드시 동일한 규칙 */
@@ -110,10 +143,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ message: 'Method not allowed' });
 
-  const { customerAccessToken, email } = req.body || {};
+  const { customerAccessToken, lineSessionToken, email } = req.body || {};
 
-  if (!customerAccessToken || typeof customerAccessToken !== 'string') {
-    return res.status(400).json({ message: 'customerAccessToken is required' });
+  const channelSecret = process.env.LINE_CHANNEL_SECRET;
+  if (!channelSecret) {
+    console.error('[Update Email] 🔴 LINE_CHANNEL_SECRET 미설정');
+    return res.status(500).json({ message: 'Server configuration error' });
+  }
+
+  const session = verifySessionToken(lineSessionToken, channelSecret);
+  const hasToken = customerAccessToken && typeof customerAccessToken === 'string';
+
+  if (!session && !hasToken) {
+    return res.status(400).json({ message: 'customerAccessToken or lineSessionToken is required' });
   }
   if (!email || typeof email !== 'string' || !EMAIL_RE.test(email.trim())) {
     return res.status(400).json({ message: 'メールアドレスの形式が正しくありません。' });
@@ -127,16 +169,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const sfToken = await getStorefrontToken();
+    const adminToken = await getAdminToken();
 
-    // 1. 토큰 검증 — 본인 계정만 변경할 수 있도록 서버에서 확인한다.
-    //    클라이언트가 보낸 고객 ID 는 신뢰하지 않는다.
-    const meResult = await storefrontQuery(sfToken, `
-      query Me($token: String!) {
-        customer(customerAccessToken: $token) { id email }
+    // 1. 본인 확인 — 서버가 검증한 것만 쓴다. 클라이언트가 보낸 고객 ID 는 신뢰하지 않는다.
+    let me: { id: string; email: string } | null = null;
+
+    if (hasToken) {
+      const meResult = await storefrontQuery(sfToken, `
+        query Me($token: String!) {
+          customer(customerAccessToken: $token) { id email }
+        }
+      `, { token: customerAccessToken });
+      me = meResult?.data?.customer ?? null;
+    }
+
+    // 토큰이 없거나 무효인 경우, 서명된 세션 토큰으로 대상 고객을 찾는다.
+    if (!me?.id && session) {
+      const lookup = session.shopifyCustomerId
+        ? await adminGraphQL(adminToken, `
+            query ById($id: ID!) { customer(id: $id) { id email } }
+          `, { id: session.shopifyCustomerId })
+        : await adminGraphQL(adminToken, `
+            query ByTag($query: String!) {
+              customers(first: 1, query: $query) { edges { node { id email } } }
+            }
+          `, { query: `tag:"line_id:${session.lineUserId}"` });
+
+      me = lookup?.data?.customer ?? lookup?.data?.customers?.edges?.[0]?.node ?? null;
+
+      // 서명된 고객 ID 가 그 LINE 유저의 것인지 확인한다. 자리표시자 이메일이면
+      // 로컬파트의 userId 로, 실제 이메일로 바뀐 뒤라면 line_id 태그로 대조한다.
+      if (me?.id) {
+        const emailUserId = extractLineUserId(me.email ?? '');
+        if (emailUserId && emailUserId !== session.lineUserId) {
+          console.error('[Update Email] 🔴 세션의 userId 와 고객 이메일의 userId 불일치');
+          me = null;
+        }
       }
-    `, { token: customerAccessToken });
+    }
 
-    const me = meResult?.data?.customer;
     if (!me?.id) {
       return res.status(401).json({ message: 'ログイン情報が無効です。もう一度ログインしてください。' });
     }
@@ -154,7 +225,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 3. Admin API 로 이메일 교체
-    const adminToken = await getAdminToken();
     const updateResult = await adminGraphQL(adminToken, `
       mutation UpdateEmail($input: CustomerInput!) {
         customerUpdate(input: $input) {

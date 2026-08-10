@@ -17,7 +17,11 @@ export default function LineCallback() {
   // LINE이 이메일을 주지 않은 경우에만 입력 단계를 노출한다.
   // 자리표시자 이메일(@line-user.biteme.co.jp)은 MX 레코드가 없어
   // 주문 확인·배송 메일이 전량 바운스되기 때문.
-  const [emailStep, setEmailStep] = useState<{ token: string; displayName: string } | null>(null);
+  const [emailStep, setEmailStep] = useState<{
+    token: string | null;
+    sessionToken?: string;
+    displayName: string;
+  } | null>(null);
   const [emailInput, setEmailInput] = useState('');
   const [emailError, setEmailError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -66,12 +70,15 @@ export default function LineCallback() {
           shopifyCustomerToken: profile.shopifyCustomerToken,
           shopifyEmail: profile.shopifyEmail,
           shopifyCustomerId: profile.shopifyCustomerId,
+          lineSessionToken: profile.lineSessionToken,
         });
 
-        // 토큰이 없으면 이메일을 바꿀 수단이 없으므로 그냥 통과시킨다.
-        if (profile.needsEmail && profile.shopifyCustomerToken) {
+        // 인증 수단이 하나라도 있으면 이메일을 등록할 수 있다.
+        // Storefront 토큰이 발급되지 않는 계정(초기 가입자 일부)은 세션 토큰으로 처리된다.
+        if (profile.needsEmail && (profile.shopifyCustomerToken || profile.lineSessionToken)) {
           setEmailStep({
-            token: profile.shopifyCustomerToken,
+            token: profile.shopifyCustomerToken ?? null,
+            sessionToken: profile.lineSessionToken,
             displayName: profile.displayName,
           });
           return;
@@ -102,7 +109,7 @@ export default function LineCallback() {
     setEmailError(null);
     setSubmitting(true);
     try {
-      const result = await submitCustomerEmail(emailStep.token, emailInput);
+      const result = await submitCustomerEmail(emailStep.token, emailInput, emailStep.sessionToken);
       updateEmail(result.email, result.customerAccessToken);
       finishWithGreeting(emailStep.displayName);
     } catch (err) {
