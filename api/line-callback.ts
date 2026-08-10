@@ -240,6 +240,10 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
   //    생성 성공 시 반환된 ID 를 보관한다 — 검색 인덱스 지연 때문에 이 ID 가 없으면
   //    바로 뒤의 매핑 저장이 대상 고객을 못 찾고 통째로 스킵된다 (#108).
   let createdCustomerId: string | null = null;
+  // 이메일 검색 폴백은 "고객이 이미 존재한다"고 확인됐을 때만 의미가 있다.
+  // 생성이 실패한 유저를 검색하면 없는 고객을 찾느라 재시도 대기만 쓰고
+  // 그만큼 로그인 응답이 늦어진다.
+  let customerMayExist = false;
   if (!existing) {
     const createResult = await storefrontQuery(token, `
       mutation customerCreate($input: CustomerCreateInput!) {
@@ -254,18 +258,23 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
     const alreadyExists = errors.some((e: { code: string }) =>
       e.code === 'CUSTOMER_DISABLED' || e.code === 'EMAIL_TAKEN' || e.code === 'TAKEN'
     );
+    // customerUserErrors 만 보면 스로틀링·토큰 오류 같은 최상위 GraphQL 실패가
+    // "오류 0건"으로 보여 생성 성공으로 오인된다. 고객 ID 유무까지 함께 확인한다.
+    const createdCustomer = createResult.data?.customerCreate?.customer ?? null;
+    const topLevelErrors = createResult.errors;
 
     if (alreadyExists) {
+      customerMayExist = true;
       console.log('[Shopify Sync] Customer already exists, attempting login');
-    } else if (errors.length > 0) {
+    } else if (errors.length > 0 || topLevelErrors || !createdCustomer?.id) {
       // 생성 실패는 곧 이 유저 전체 누락(고객·토큰·이메일 수집·CRM 연계)이다.
       // 응답은 200 이라 화면상 로그인은 성공해 보이므로 로그로만 드러난다.
       console.error(
         '[Shopify Sync] 🔴 신규 고객 생성 실패 — 이 유저는 Shopify 고객/토큰/CRM 연계가 모두 누락됩니다:',
-        JSON.stringify(errors)
+        JSON.stringify(topLevelErrors ?? (errors.length > 0 ? errors : createResult))
       );
     } else {
-      createdCustomerId = createResult.data?.customerCreate?.customer?.id ?? null;
+      createdCustomerId = createdCustomer.id;
       console.log('[Shopify Sync] Customer created:', createdCustomerId);
     }
   }
@@ -299,7 +308,7 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
     // Storefront customerCreate 가 주는 ID 는 Admin GID 와 동일 형식이라 그대로 쓸 수 있다.
     let customerNode: { id: string } | null =
       existing ? { id: existing.id } : createdCustomerId ? { id: createdCustomerId } : null;
-    if (!customerNode) {
+    if (!customerNode && customerMayExist) {
       customerNode = await findCustomerIdByEmail(adminToken, email);
     }
 
@@ -313,9 +322,33 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
         }
       `, { id: customerNode.id });
 
-      const existingTags: string[] = tagsResult?.data?.customer?.tags ?? [];
+      // ⚠️ customerUpdate 의 tags 는 병합이 아니라 전체 교체다. 그래서 기존 태그를
+      //    먼저 읽어 합치는데, 이 조회가 실패했을 때 []로 넘어가면 그 고객의 태그가
+      //    (joy_tag_member 등 포함) 통째로 지워진다. 조회 실패 시엔 태그를 아예 건드리지
+      //    않고 메타필드만 저장한다 — 태그는 다음 로그인에서 다시 시도된다.
+      const existingTags: string[] | undefined = tagsResult?.data?.customer?.tags;
       const lineTag = `line_id:${profile.userId}`;
-      const mergedTags = Array.from(new Set([...existingTags.filter((t: string) => !t.startsWith('line_id:')), lineTag]));
+
+      const updateInput: Record<string, unknown> = {
+        id: customerNode.id,
+        metafields: [{
+          namespace: 'custom',
+          key: 'line_id',
+          value: profile.userId,
+          type: 'single_line_text_field',
+        }],
+      };
+
+      if (Array.isArray(existingTags)) {
+        updateInput.tags = Array.from(
+          new Set([...existingTags.filter((t: string) => !t.startsWith('line_id:')), lineTag])
+        );
+      } else {
+        console.error(
+          '[Shopify Sync] 🔴 기존 태그 조회 실패 — 태그 전체가 지워질 수 있어 이번에는 메타필드만 저장합니다:',
+          JSON.stringify(tagsResult?.errors ?? tagsResult)
+        );
+      }
 
       const updateResult = await adminGraphQL(adminToken, `
         mutation SaveLineId($input: CustomerInput!) {
@@ -324,18 +357,7 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
             userErrors { field message }
           }
         }
-      `, {
-        input: {
-          id: customerNode.id,
-          tags: mergedTags,
-          metafields: [{
-            namespace: 'custom',
-            key: 'line_id',
-            value: profile.userId,
-            type: 'single_line_text_field',
-          }],
-        },
-      });
+      `, { input: updateInput });
 
       // ⚠️ 이 매핑이 LINE CRM(세그먼트 발송)의 유일한 연결고리다.
       // 실패해도 로그인 자체는 성공시키되, 절대 조용히 넘기지 않는다.
