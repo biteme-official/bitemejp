@@ -154,6 +154,37 @@ async function findCustomerByLineId(
   return node?.email ? { id: node.id, email: node.email } : null;
 }
 
+/**
+ * 이메일로 고객 GID 를 찾는다 (폴백 전용).
+ *
+ * ⚠️ Shopify 고객 검색 인덱스는 생성 직후 즉시 반영되지 않는다.
+ *    2026-08-10 프로덕션 실측: 생성 +1.2s·+2.5s·+4.9s 모두 NOT FOUND, +9.3s 에 최초 반영.
+ *    그래서 신규 고객은 customerCreate 가 돌려준 ID 를 그대로 쓰고, 이 경로는
+ *    그 ID 를 얻지 못했을 때(이미 존재하던 고객 등)만 탄다 — 그 경우 인덱스에는
+ *    이미 들어있으므로 보통 첫 시도에 찾는다. 재시도는 안전망이다.
+ */
+async function findCustomerIdByEmail(
+  adminToken: string,
+  email: string,
+  attempts = 3
+): Promise<{ id: string } | null> {
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise((resolve) => setTimeout(resolve, 1500 * i));
+
+    const findResult = await adminGraphQL(adminToken, `
+      query FindCustomer($query: String!) {
+        customers(first: 1, query: $query) {
+          edges { node { id } }
+        }
+      }
+    `, { query: `email:"${email}"` });
+
+    const node = findResult?.data?.customers?.edges?.[0]?.node ?? null;
+    if (node) return node;
+  }
+  return null;
+}
+
 async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncResult> {
   const empty: ShopifySyncResult = {
     customerAccessToken: null,
@@ -172,9 +203,16 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
     return empty;
   }
 
-  const nameParts = profile.displayName.trim().split(' ');
-  const firstName = nameParts[0] || profile.displayName;
-  const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+  // ⚠️ 이 스토어는 성(姓)을 필수로 요구한다. LINE 표시이름에 공백이 없으면 lastName 이
+  //    비게 되고, customerCreate 가 `BLANK: Last nameを入力してください` 로 실패해
+  //    고객·토큰·CRM 연계가 통째로 누락된다 (로그인은 성공한 것처럼 보인다).
+  //    2026-04-28 커밋 b0f0dc2 가 `|| firstName` 폴백을 지우면서 생긴 회귀 — 그 이후
+  //    가입 성공자 65명은 전원 공백이 있는 이름이었다(공백 없는 이름 0명, #108).
+  //    전각 공백(U+3000)도 구분자로 인정한다 — 일본어 이름에서 흔하다.
+  const displayName = profile.displayName?.trim() || 'LINEユーザー';
+  const nameParts = displayName.split(/\s+/);
+  const firstName = nameParts[0];
+  const lastName = nameParts.slice(1).join(' ') || firstName;
   const password = generatePassword(profile.userId);
 
   // Admin 토큰은 기존 고객 조회에도 쓰이므로 먼저 확보한다 (실패해도 로그인은 계속).
@@ -199,6 +237,9 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
   const email = existing?.email ?? profile.email ?? placeholderEmail(profile.userId);
 
   // 1. 기존 고객이 없을 때만 생성 시도
+  //    생성 성공 시 반환된 ID 를 보관한다 — 검색 인덱스 지연 때문에 이 ID 가 없으면
+  //    바로 뒤의 매핑 저장이 대상 고객을 못 찾고 통째로 스킵된다 (#108).
+  let createdCustomerId: string | null = null;
   if (!existing) {
     const createResult = await storefrontQuery(token, `
       mutation customerCreate($input: CustomerCreateInput!) {
@@ -217,9 +258,15 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
     if (alreadyExists) {
       console.log('[Shopify Sync] Customer already exists, attempting login');
     } else if (errors.length > 0) {
-      console.error('[Shopify Sync] customerCreate errors:', JSON.stringify(errors));
+      // 생성 실패는 곧 이 유저 전체 누락(고객·토큰·이메일 수집·CRM 연계)이다.
+      // 응답은 200 이라 화면상 로그인은 성공해 보이므로 로그로만 드러난다.
+      console.error(
+        '[Shopify Sync] 🔴 신규 고객 생성 실패 — 이 유저는 Shopify 고객/토큰/CRM 연계가 모두 누락됩니다:',
+        JSON.stringify(errors)
+      );
     } else {
-      console.log('[Shopify Sync] Customer created:', createResult.data?.customerCreate?.customer?.id);
+      createdCustomerId = createResult.data?.customerCreate?.customer?.id ?? null;
+      console.log('[Shopify Sync] Customer created:', createdCustomerId);
     }
   }
 
@@ -247,17 +294,13 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
   try {
     if (!adminToken) throw new Error('Admin 토큰 없음');
 
-    // line_id 로 이미 찾았으면 재조회 불필요. 신규 고객만 email 로 GID 조회.
-    let customerNode: { id: string } | null = existing ? { id: existing.id } : null;
+    // 고객 GID 확보 순서: line_id 조회 결과 → 방금 생성한 고객 ID → 이메일 검색(폴백).
+    // 방금 만든 고객을 검색으로 찾으려 하면 인덱스 지연 때문에 항상 실패한다 (#108).
+    // Storefront customerCreate 가 주는 ID 는 Admin GID 와 동일 형식이라 그대로 쓸 수 있다.
+    let customerNode: { id: string } | null =
+      existing ? { id: existing.id } : createdCustomerId ? { id: createdCustomerId } : null;
     if (!customerNode) {
-      const findResult = await adminGraphQL(adminToken, `
-        query FindCustomer($query: String!) {
-          customers(first: 1, query: $query) {
-            edges { node { id } }
-          }
-        }
-      `, { query: `email:"${email}"` });
-      customerNode = findResult?.data?.customers?.edges?.[0]?.node ?? null;
+      customerNode = await findCustomerIdByEmail(adminToken, email);
     }
 
     if (customerNode) {
