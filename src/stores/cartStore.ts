@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { ShopifyProduct, createStorefrontCheckoutWithDiscount, fetchProductById, fetchCartPreview } from '@/lib/shopify';
 import { GIFT_THRESHOLD, GIFT_PRODUCT_ID, GIFT_DISCOUNT_CODE } from '@/config/giftConfig';
-import { LINE_WELCOME_DISCOUNT_KEY } from '@/lib/lineWelcomeDiscount';
+import { readWelcomeCode } from '@/lib/lineWelcomeDiscount';
 
 export interface CartItem {
   product: ShopifyProduct;
@@ -195,7 +195,7 @@ export const useCartStore = create<CartStore>()(
           const affiliateCode = localStorage.getItem('affiliate_discount');
           // 어필리에이트 코드가 있으면 그쪽을 우선한다. 둘 다 넣으면 Shopify 가
           // 하나만 적용해 파트너 성과가 유실될 수 있다.
-          const welcomeCode = affiliateCode ? null : localStorage.getItem(LINE_WELCOME_DISCOUNT_KEY);
+          const welcomeCode = affiliateCode ? null : readWelcomeCode();
           const hasGift = items.some(i => i.isGift);
           const discountCodes = [
             affiliateCode,
