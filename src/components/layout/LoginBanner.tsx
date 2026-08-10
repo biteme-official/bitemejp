@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { X } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { initiateLineLogin } from "@/lib/line-auth";
+import { LINE_WELCOME_DISCOUNT_LABEL } from "@/lib/lineWelcomeDiscount";
 
 /**
  * 비로그인 방문자에게 LINE 로그인을 안내하는 상단 띠 배너.
@@ -12,12 +13,12 @@ import { initiateLineLogin } from "@/lib/line-auth";
  * 로그인해야 Shopify 고객과 LINE userId 가 연결되고, 그래야 주문·배송 알림과
  * 세그먼트 발송이 가능해진다.
  *
- * 문구는 지금 사실인 것만 약속한다. 쿠폰(WELCOME10)은 현재 LINE 위주로 배포 중이라
- * 사이트 전체 노출은 별도 판단이 필요해 넣지 않았다 — 넣으려면 COPY 만 고치면 된다.
+ * 쿠폰은 원래 "친구추가" 보상이었는데, 친구추가만으로는 고객과 LINE userId 가 연결되지
+ * 않아 로그인 보상으로 옮겼다(#116). 로그인 성공 시 자동 적용되므로 문구가 사실이다.
  */
 const COPY = {
-  headline: "LINEでログイン",
-  body: "ご注文・配送のお知らせがLINEで届きます",
+  headline: `LINEでログインして${LINE_WELCOME_DISCOUNT_LABEL}`,
+  body: "ご注文・配送のお知らせもLINEで届きます",
   cta: "ログイン",
   close: "閉じる",
 };

@@ -356,6 +356,10 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
       //    않고 메타필드만 저장한다 — 태그는 다음 로그인에서 다시 시도된다.
       const existingTags: string[] | undefined = tagsResult?.data?.customer?.tags;
       const lineTag = `line_id:${profile.userId}`;
+      // line_id 태그는 사람마다 값이 달라 Shopify 고객 세그먼트로 묶을 수 없다.
+      // "LINE 로그인 회원 전체"를 하나의 조건으로 잡기 위한 공통 태그를 함께 붙인다
+      // (회원 전용 쿠폰·세그먼트 발송의 기준).
+      const memberTag = 'line_member';
 
       const updateInput: Record<string, unknown> = {
         id: customerNode.id,
@@ -369,7 +373,7 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
 
       if (Array.isArray(existingTags)) {
         updateInput.tags = Array.from(
-          new Set([...existingTags.filter((t: string) => !t.startsWith('line_id:')), lineTag])
+          new Set([...existingTags.filter((t: string) => !t.startsWith('line_id:')), lineTag, memberTag])
         );
       } else {
         console.error(
