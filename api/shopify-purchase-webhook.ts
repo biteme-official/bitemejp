@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 // Vercel 자동 JSON 파싱 비활성화 — HMAC 검증에 raw body 필요
 export const config = { api: { bodyParser: false } };
@@ -64,9 +64,22 @@ function readRawBody(req: VercelRequest): Promise<string> {
   });
 }
 
-function verifyHmac(rawBody: string, signature: string, secret: string): boolean {
-  const computed = createHmac('sha256', secret).update(rawBody, 'utf8').digest('base64');
-  return computed === signature;
+/**
+ * 웹훅 서명 검증.
+ *
+ * ⚠️ 서명에 쓰이는 비밀키가 **웹훅을 어디서 등록했는지에 따라 다르다.**
+ *  - Shopify 관리자 > 설정 > 알림 에서 등록 → 스토어 웹훅 서명 비밀키 (SHOPIFY_WEBHOOK_SECRET)
+ *  - Admin API 로 앱이 등록          → 그 앱의 client secret (REPORT_SHOPIFY_CLIENT_SECRET)
+ *
+ * 기존 orders/create 는 전자, 배송 알림용 fulfillments/create 는 후자로 등록할 수 있어
+ * 둘 다 허용한다. 어느 경로로 등록하든 동작하므로 등록 방법에 발이 묶이지 않는다.
+ */
+function verifyHmac(rawBody: string, signature: string, secrets: string[]): boolean {
+  const received = Buffer.from(signature, 'base64');
+  return secrets.some((secret) => {
+    const computed = createHmac('sha256', secret).update(rawBody, 'utf8').digest();
+    return computed.length === received.length && timingSafeEqual(computed, received);
+  });
 }
 
 async function sendGA4Purchase(order: ShopifyOrder, apiSecret: string): Promise<void> {
@@ -396,7 +409,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const rawBody = await readRawBody(req);
 
-  if (!verifyHmac(rawBody, signature, webhookSecret)) {
+  // 등록 경로에 따라 서명 비밀키가 다르므로 둘 다 시도한다 (verifyHmac 주석 참고)
+  const signingSecrets = [webhookSecret, process.env.REPORT_SHOPIFY_CLIENT_SECRET]
+    .filter((s): s is string => !!s);
+
+  if (!verifyHmac(rawBody, signature, signingSecrets)) {
     return res.status(401).json({ error: 'Invalid signature' });
   }
 
