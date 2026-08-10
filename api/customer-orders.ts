@@ -4,13 +4,18 @@
  * Storefront API の customer クエリ (2025-07で不安定) を使わず、
  * Admin API で顧客の注文を取得するプロキシエンドポイント。
  *
- * Flow:
- *  1. フロントから shopifyCustomerToken を受け取る
- *  2. Storefront API で customerAccessToken を検証 → email 取得
- *  3. Admin API で email に紐づく注文を取得して返す
+ * 인증 (둘 중 하나 필수):
+ *  - lineSessionToken : /api/line-callback 이 LINE 로그인 성공 후 서명해 발급한 토큰
+ *  - customerAccessToken : Storefront API 로 검증하는 고객 토큰
+ *
+ * ⚠️ 서명 없는 shopifyCustomerId / lineUserId 는 받지 않는다.
+ *    예전에는 이 둘만 있으면 인증 없이 주문을 내줬고, 고객 GID 는 연속된 숫자라
+ *    열거가 가능했다. 응답의 statusPageUrl 로 성명·배송지까지 노출됐다.
+ *    조회 대상은 **반드시 서명된 페이로드 또는 검증된 토큰에서만** 얻는다.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
 const API_VERSION = '2025-07';
@@ -166,6 +171,38 @@ const ORDERS_BY_EMAIL_QUERY = `
   }
 `;
 
+/**
+ * /api/line-callback 이 발급한 세션 토큰을 검증한다.
+ * 서명 형식·비밀키는 api/line-callback.ts 의 signSessionToken 과 한 쌍이다.
+ */
+function verifySessionToken(
+  token: unknown,
+  secret: string
+): { lineUserId: string; shopifyCustomerId: string | null } | null {
+  if (typeof token !== 'string') return null;
+
+  const dot = token.indexOf('.');
+  if (dot <= 0) return null;
+
+  const body = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const expected = createHmac('sha256', secret).update(body).digest('base64url');
+
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (typeof payload?.e !== 'number' || Date.now() > payload.e) return null;
+    if (typeof payload?.u !== 'string' || !payload.u) return null;
+    const c = typeof payload.c === 'string' ? payload.c : null;
+    return { lineUserId: payload.u, shopifyCustomerId: c };
+  } catch {
+    return null;
+  }
+}
+
 const ALLOWED_ORIGINS = [
   'https://biteme.co.jp',
   'https://www.biteme.co.jp',
@@ -184,27 +221,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { customerAccessToken, shopifyCustomerId, lineUserId, userEmail } = req.body || {};
-  // shopifyCustomerId か lineUserId があれば Admin API で直接解決できるので token は任意
-  const hasIdentifier = (shopifyCustomerId && typeof shopifyCustomerId === 'string')
-    || (lineUserId && typeof lineUserId === 'string')
-    || (customerAccessToken && typeof customerAccessToken === 'string');
-  if (!hasIdentifier) {
-    return res.status(400).json({ error: 'customerAccessToken, shopifyCustomerId, or lineUserId is required' });
+  const { customerAccessToken, lineSessionToken } = req.body || {};
+
+  const channelSecret = process.env.LINE_CHANNEL_SECRET;
+  if (!channelSecret) {
+    console.error('[customer-orders] 🔴 LINE_CHANNEL_SECRET 미설정');
+    return res.status(500).json({ error: 'Server configuration error' });
+  }
+
+  // 신원은 서명된 세션 토큰에서만 얻는다. 클라이언트가 보낸 고객 ID 는 쓰지 않는다.
+  const session = verifySessionToken(lineSessionToken, channelSecret);
+  const shopifyCustomerId = session?.shopifyCustomerId ?? null;
+  const lineUserId = session?.lineUserId ?? null;
+
+  if (!session && !(customerAccessToken && typeof customerAccessToken === 'string')) {
+    return res.status(401).json({ error: 'ログイン情報が無効です。もう一度ログインしてください。' });
   }
 
   try {
-    // 顧客 GID を解決する (3段階フォールバック)
+    // 顧客 GID を解決する (3段階フォールバック) — 입력은 전부 검증된 값이다.
     const resolveCustomerId = async (): Promise<string | null> => {
-      // 1. authStore の GID で Admin API を直接確認 (マージ後に消えていないか検証)
-      if (shopifyCustomerId && typeof shopifyCustomerId === 'string') {
+      // 1. 서명된 GID 로 Admin API 직접 확인 (고객 병합으로 사라졌는지 검증)
+      if (shopifyCustomerId) {
         const check = await adminGraphQL(ADMIN_CUSTOMER_ORDERS_QUERY, { customerId: shopifyCustomerId, cursor: null });
-        if (check?.data?.customer !== null) return shopifyCustomerId;
+        // ⚠️ `!== null` 로 보면 GraphQL 오류로 data 가 아예 없을 때(undefined)도
+        //    검증 통과가 되어 버린다. 고객 id 가 실제로 왔는지로 판정한다.
+        if (check?.data?.customer?.id) return shopifyCustomerId;
         console.warn('[customer-orders] stored GID not found, falling back');
       }
 
       // 2. LINE userId → 決定論的メールアドレスで顧客を検索 (tag: の : がShopify構文と衝突するため email検索に変更)
-      if (lineUserId && typeof lineUserId === 'string') {
+      if (lineUserId) {
         const lineEmail = `line_${lineUserId}@line-user.biteme.co.jp`;
         const emailResult = await adminGraphQL(`
           query FindByEmail($query: String!) {
@@ -279,17 +326,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const existingIds = new Set(allOrders.map((o: unknown) => (o as { id: string }).id));
 
+    // ⚠️ 병합에 쓰는 이메일은 서명된 lineUserId 또는 Admin 조회 결과에서만 온다.
+    //    예전에는 프론트가 보낸 userEmail 로도 병합했는데, 그러면 아무 이메일이나
+    //    넣어 그 주소의 게스트 주문을 긁어올 수 있었다.
     // 1) LINE 合成メール (line_U...@line-user.biteme.co.jp)
-    if (lineUserId && typeof lineUserId === 'string') {
+    if (lineUserId) {
       await mergeOrdersByEmail(`line_${lineUserId}@line-user.biteme.co.jp`, existingIds);
     }
     // 2) Shopify顧客の実メール — GID照会で取得したメールでゲスト注文を検索
     if (shopifyCustomerEmail && shopifyCustomerEmail.includes('@')) {
       await mergeOrdersByEmail(shopifyCustomerEmail, existingIds);
-    }
-    // 3) フロントから渡された実メール (上記と異なる場合のみ)
-    if (userEmail && typeof userEmail === 'string' && userEmail.includes('@') && userEmail !== shopifyCustomerEmail) {
-      await mergeOrdersByEmail(userEmail, existingIds);
     }
 
     // 日付順に再ソート

@@ -138,15 +138,11 @@ export default function MyPage() {
 
   // Fetch customer orders via Admin API proxy
   useEffect(() => {
-    const canFetch = isLoggedIn && (user?.shopifyCustomerToken || user?.shopifyCustomerId || user?.userId);
+    // 서버가 인정하는 인증 수단만 있으면 조회한다. 고객 ID·userId 만으로는 조회되지 않는다.
+    const canFetch = isLoggedIn && (user?.shopifyCustomerToken || user?.lineSessionToken);
     if (canFetch) {
       setLoading(true);
-      const savedCheckoutEmail = (() => {
-        try { return JSON.parse(localStorage.getItem('checkout-shipping') || '{}').email || undefined; }
-        catch { return undefined; }
-      })();
-      const userEmail = user!.email || savedCheckoutEmail;
-      fetchCustomerOrdersViaAdmin(user!.shopifyCustomerToken, user!.shopifyCustomerId, user!.userId, userEmail)
+      fetchCustomerOrdersViaAdmin(user!.shopifyCustomerToken, user!.lineSessionToken)
         .then(setOrders)
         .catch(console.error)
         .finally(() => setLoading(false));

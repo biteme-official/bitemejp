@@ -1068,13 +1068,13 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
      const authData = JSON.parse(localStorage.getItem('line-auth') || '{}');
      const user = authData?.state?.user;
 
-     if (user?.userId && user?.shopifyEmail) {
+     if (user?.lineSessionToken && user?.shopifyEmail) {
        // 체크아웃 직전 토큰 갱신 → 만료 문제 방지
        try {
          const refreshRes = await fetch('/api/refresh-customer-token', {
            method: 'POST',
            headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ lineUserId: user.userId, shopifyEmail: user.shopifyEmail }),
+           body: JSON.stringify({ lineSessionToken: user.lineSessionToken, shopifyEmail: user.shopifyEmail }),
          });
          if (refreshRes.ok) {
            const refreshData = await refreshRes.json();
@@ -1378,16 +1378,18 @@ export async function fetchCustomerOrders(customerAccessToken: string): Promise<
 /**
  * Admin API 経由で顧客の注文を取得（Storefront API の customer クエリ deprecation 対策）
  */
+/**
+ * ⚠️ 고객 ID·LINE userId 를 직접 넘기지 않는다. 서버는 서명된 lineSessionToken
+ *    (또는 Storefront customerAccessToken)에서만 조회 대상을 정한다.
+ */
 export async function fetchCustomerOrdersViaAdmin(
   customerAccessToken: string | null | undefined,
-  shopifyCustomerId?: string,
-  lineUserId?: string,
-  userEmail?: string,
+  lineSessionToken?: string,
 ): Promise<ShopifyOrder[]> {
   const res = await fetch('/api/customer-orders', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ customerAccessToken, shopifyCustomerId, lineUserId, userEmail }),
+    body: JSON.stringify({ customerAccessToken, lineSessionToken }),
   });
   if (!res.ok) return [];
   const data = await res.json();

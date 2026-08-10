@@ -2,10 +2,15 @@
  * /api/refresh-customer-token
  *
  * LINE userId を受け取り、Shopify の customerAccessToken を再発行して返す。
- * 体크아웃 직전에 호출하여 항상 유효한 토큰을 사용하도록 보장한다.
+ * 체크아웃 직전에 호출하여 항상 유효한 토큰을 사용하도록 보장한다.
+ *
+ * ⚠️ 인증 필수: /api/line-callback 이 서명한 lineSessionToken 이 있어야 한다.
+ *    비밀번호를 서버가 `HMAC(secret, lineUserId)` 로 만들어 쓰기 때문에, 예전처럼
+ *    lineUserId + email 만 받으면 **아무 비밀도 모르는 요청자에게 진짜 고객 토큰을
+ *    내주게 된다.** userId 는 서명된 페이로드에서만 읽는다.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
 const SHOPIFY_API_VERSION = '2025-07';
@@ -15,6 +20,31 @@ const ALLOWED_ORIGINS = [
   'https://www.biteme.co.jp',
   'http://localhost:5173',
 ];
+
+/** api/line-callback.ts 의 signSessionToken 과 한 쌍 */
+function verifySessionToken(token: unknown, secret: string): { lineUserId: string } | null {
+  if (typeof token !== 'string') return null;
+
+  const dot = token.indexOf('.');
+  if (dot <= 0) return null;
+
+  const body = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  const expected = createHmac('sha256', secret).update(body).digest('base64url');
+
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (typeof payload?.e !== 'number' || Date.now() > payload.e) return null;
+    if (typeof payload?.u !== 'string' || !payload.u) return null;
+    return { lineUserId: payload.u };
+  } catch {
+    return null;
+  }
+}
 
 function generatePassword(lineUserId: string): string {
   const secret = process.env.SHOPIFY_CLIENT_SECRET || 'fallback-secret';
@@ -64,9 +94,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { lineUserId, shopifyEmail } = req.body || {};
-  if (!lineUserId || !shopifyEmail) {
-    return res.status(400).json({ error: 'lineUserId and shopifyEmail are required' });
+  const { lineSessionToken, shopifyEmail } = req.body || {};
+
+  const channelSecret = process.env.LINE_CHANNEL_SECRET;
+  if (!channelSecret) {
+    console.error('[refresh-customer-token] 🔴 LINE_CHANNEL_SECRET 미설정');
+    return res.status(500).json({ error: 'Server configuration error' });
+  }
+
+  // userId 는 서명된 토큰에서만 읽는다. 클라이언트가 보낸 값은 쓰지 않는다.
+  const session = verifySessionToken(lineSessionToken, channelSecret);
+  if (!session) {
+    return res.status(401).json({ error: 'ログイン情報が無効です。もう一度ログインしてください。' });
+  }
+  const lineUserId = session.lineUserId;
+
+  if (!shopifyEmail || typeof shopifyEmail !== 'string') {
+    return res.status(400).json({ error: 'shopifyEmail is required' });
   }
 
   try {

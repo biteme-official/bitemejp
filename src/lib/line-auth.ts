@@ -73,6 +73,8 @@ export interface LineCallbackResult {
   shopifyCustomerId?: string;
   /** true 이면 자리표시자 이메일 상태 — 주문 확인 메일이 도달하지 않는다 */
   needsEmail?: boolean;
+  /** 서명된 세션 토큰. 주문 조회·이메일 등록 API 의 인증 수단이다. */
+  lineSessionToken?: string;
   /** 서명된 state 에서 복원한 복귀 경로. localStorage 가 없을 때 사용한다. */
   returnTo?: string;
 }
@@ -127,13 +129,14 @@ export interface SubmitEmailResult {
  * 주문 확인·배송 알림을 받지 못하므로 로그인 직후 수집한다.
  */
 export async function submitCustomerEmail(
-  customerAccessToken: string,
-  email: string
+  customerAccessToken: string | null | undefined,
+  email: string,
+  lineSessionToken?: string
 ): Promise<SubmitEmailResult> {
   const response = await fetch('/api/update-customer-email', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ customerAccessToken, email }),
+    body: JSON.stringify({ customerAccessToken, lineSessionToken, email }),
   });
 
   const data = await response.json().catch(() => ({}));

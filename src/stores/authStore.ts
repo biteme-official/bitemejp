@@ -9,6 +9,12 @@ export interface LineUserProfile {
   shopifyCustomerToken?: string;
   shopifyEmail?: string;
   shopifyCustomerId?: string; // gid://shopify/Customer/xxx
+  /**
+   * /api/line-callback 이 서명해 발급한 세션 토큰.
+   * 주문 조회·이메일 등록·토큰 재발급 API 의 인증 수단이며,
+   * Storefront 토큰이 발급되지 않는 계정도 이걸로 본인 확인이 된다.
+   */
+  lineSessionToken?: string;
 }
 
 interface AuthStore {
