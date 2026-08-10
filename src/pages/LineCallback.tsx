@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { handleLineCallback, submitCustomerEmail } from '@/lib/line-auth';
+import { LINE_WELCOME_DISCOUNT_CODE, LINE_WELCOME_DISCOUNT_KEY } from '@/lib/lineWelcomeDiscount';
 import { useAuthStore } from '@/stores/authStore';
 import { Loader2, CheckCircle2, Mail } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -72,6 +73,13 @@ export default function LineCallback() {
           shopifyCustomerId: profile.shopifyCustomerId,
           lineSessionToken: profile.lineSessionToken,
         });
+
+        // 로그인 보상 쿠폰을 예약해둔다. 체크아웃 생성 시 자동으로 붙는다
+        // (cartStore). 1인 1회 제한은 Shopify 가 강제하므로 여기서 소진 여부를
+        // 따로 추적하지 않는다.
+        try {
+          localStorage.setItem(LINE_WELCOME_DISCOUNT_KEY, LINE_WELCOME_DISCOUNT_CODE);
+        } catch { /* 저장 실패해도 로그인은 계속된다 */ }
 
         // 인증 수단이 하나라도 있으면 이메일을 등록할 수 있다.
         // Storefront 토큰이 발급되지 않는 계정(초기 가입자 일부)은 세션 토큰으로 처리된다.

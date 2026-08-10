@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
-import { Phone, Mail } from "lucide-react";
+import { Phone, Mail, MessageCircle } from "lucide-react";
 
 const ContactUs = () => {
   const navigate = useNavigate();
@@ -40,6 +40,23 @@ const ContactUs = () => {
                 className="text-foreground hover:text-primary transition-colors font-medium"
               >
                 japan@biteme.co.kr
+              </a>
+            </div>
+
+            {/*
+              LINE 1:1 상담. 플로팅 버튼이 비로그인 상태에서는 로그인 유도로 쓰이므로
+              LINE 문의 진입점을 여기서 항상 보장한다.
+            */}
+            <div className="flex items-center justify-center gap-2">
+              <MessageCircle className="h-5 w-5 text-primary" />
+              <span>LINE:</span>
+              <a
+                href="https://line.me/R/ti/p/@621txosw"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-foreground hover:text-primary transition-colors font-medium"
+              >
+                LINEで問い合わせる
               </a>
             </div>
           </div>
