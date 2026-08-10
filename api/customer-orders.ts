@@ -104,6 +104,8 @@ const VERIFY_CUSTOMER_QUERY = `
 const ADMIN_CUSTOMER_ORDERS_QUERY = `
   query CustomerOrders($customerId: ID!, $cursor: String) {
     customer(id: $customerId) {
+      # id 는 GID 유효성 판정에 쓴다 (없으면 존재 확인이 항상 실패한다)
+      id
       email
       orders(first: 50, after: $cursor, sortKey: PROCESSED_AT, reverse: true) {
         pageInfo { hasNextPage endCursor }
