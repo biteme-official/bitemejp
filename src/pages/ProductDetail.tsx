@@ -318,10 +318,13 @@ export default function ProductDetail() {
   useEffect(() => {
     if (!product?.id) return;
     const numericId = product.id.split('/').pop()!;
-    fetch(`/api/kr-reviews?shopify_product_id=${numericId}`)
-      .then(r => r.ok ? r.json() : { reviews: [] })
-      .then(data => setReviewCount((data.reviews || []).length))
-      .catch(() => {});
+    const count = (path: string) =>
+      fetch(`${path}?shopify_product_id=${numericId}`)
+        .then(r => r.ok ? r.json() : { reviews: [] })
+        .then(data => (data.reviews || []).length as number)
+        .catch(() => 0);
+    Promise.all([count('/api/judgeme-reviews'), count('/api/kr-reviews')])
+      .then(([own, kr]) => setReviewCount(own + kr));
   }, [product?.id]);
 
   const checkScrollability = () => {

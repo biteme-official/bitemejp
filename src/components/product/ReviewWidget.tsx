@@ -9,6 +9,9 @@ interface Review {
   content_ja?: string;
   date: string;
   images: string[];
+  /** judgeme = 일본몰 고객이 직접 작성 / 미지정 = 한국몰 수집 리뷰 */
+  source?: 'judgeme';
+  verified?: boolean;
 }
 
 function StarRating({ rating }: { rating: number }) {
@@ -40,14 +43,23 @@ export function ReviewWidget({ productNumericId, onCount }: { productNumericId: 
 
   useEffect(() => {
     if (!productNumericId) return;
-    fetch(`/api/kr-reviews?shopify_product_id=${productNumericId}`)
-      .then(r => r.ok ? r.json() : { reviews: [] })
-      .then(data => {
-        const list = (data.reviews || []).slice().sort((a: Review, b: Review) => b.rating - a.rating);
+
+    const load = (path: string) =>
+      fetch(`${path}?shopify_product_id=${productNumericId}`)
+        .then(r => (r.ok ? r.json() : { reviews: [] }))
+        .then(d => (d.reviews || []) as Review[])
+        .catch(() => [] as Review[]);
+
+    Promise.all([load('/api/judgeme-reviews'), load('/api/kr-reviews')])
+      .then(([own, kr]) => {
+        // 일본몰 고객이 직접 쓴 리뷰를 최신순으로 먼저, 그 뒤에 한국몰 수집 리뷰(별점순)
+        const list = [
+          ...own.slice().sort((a, b) => b.date.localeCompare(a.date)),
+          ...kr.slice().sort((a, b) => b.rating - a.rating),
+        ];
         setReviews(list);
         onCount?.(list.length);
       })
-      .catch(() => {})
       .finally(() => setLoading(false));
   }, [productNumericId]);
 
@@ -84,7 +96,14 @@ export function ReviewWidget({ productNumericId, onCount }: { productNumericId: 
             {paged.map((r) => (
               <div key={r.id} className="bg-card rounded-xl border border-border p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <StarRating rating={r.rating} />
+                  <div className="flex items-center gap-2">
+                    <StarRating rating={r.rating} />
+                    {r.verified && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">
+                        購入者
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs text-muted-foreground">{formatDate(r.date)}</span>
                 </div>
                 {(r.content_ja || r.content) && (

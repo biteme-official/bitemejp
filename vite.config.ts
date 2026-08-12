@@ -5,6 +5,7 @@ import { componentTagger } from "lovable-tagger";
 import { shopifyProxyMiddleware } from "./server/shopify-proxy";
 import { lineCallbackMiddleware } from "./server/line-callback";
 import { krReviewsMiddleware } from "./server/kr-reviews";
+import { judgemeReviewsMiddleware } from "./server/judgeme-reviews";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -26,6 +27,7 @@ export default defineConfig(({ mode }) => {
           server.middlewares.use(shopifyProxyMiddleware());
           server.middlewares.use(lineCallbackMiddleware());
           server.middlewares.use(krReviewsMiddleware());
+          server.middlewares.use(judgemeReviewsMiddleware());
         },
       },
     ].filter(Boolean),
