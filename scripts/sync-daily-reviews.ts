@@ -6,8 +6,9 @@
  * - ID 중복 제거 후 번역(content_ja 없는 것만) → 파일 저장
  *
  * 사용법:
- *   npx tsx scripts/sync-daily-reviews.ts            # 어제 날짜
- *   npx tsx scripts/sync-daily-reviews.ts 2025-05-07 # 특정 날짜
+ *   npx tsx scripts/sync-daily-reviews.ts                  # 어제 날짜
+ *   npx tsx scripts/sync-daily-reviews.ts 2025-05-07       # 특정 날짜
+ *   npx tsx scripts/sync-daily-reviews.ts --since 2025-05-09 # 해당 날짜 이후 전체 (백필)
  */
 
 import { chromium } from '@playwright/test';
@@ -25,6 +26,11 @@ const CREMA_HOST = 'review6.cre.ma';
 const SHOP_CODE = 'biteme.co.kr';
 const WIDGET_ID = '25';
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+// 상품당 페이징 상한 (페이지당 5건) — 무한 루프 방지
+const MAX_PAGES = 300;
+// 백필(--since) 시 상품당 수집 상한. trim-reviews.ts 가 50건으로 자르므로
+// 그보다 조금만 더 모으면 충분하다 (불필요한 번역 비용 방지).
+const BACKFILL_MAX_PER_PRODUCT = 60;
 
 interface ScrapedReview {
   id: string;
@@ -99,21 +105,30 @@ function parseReview(item: Record<string, unknown>): ScrapedReview | null {
   return { id, rating, name, content, date, images };
 }
 
-/** 특정 날짜의 리뷰만 수집 (최신순이라 조건 충족 전까지만 페이징) */
-async function fetchReviewsForDate(
+/**
+ * sinceDate 이후 리뷰 수집 (최신순 정렬이라 조건 충족 전까지만 페이징)
+ * exactDate 를 주면 해당 날짜 리뷰만 남긴다.
+ *
+ * ⚠️ sort=recent 필수 — 미지정 시 API 기본 정렬이 최신순이 아니라
+ *    (2021~2022년 리뷰가 1페이지에 섞여 옴) 첫 페이지에서 페이징이 끊긴다.
+ */
+async function fetchReviewsSince(
   token: string,
   productCd: string,
-  targetDate: string
+  sinceDate: string,
+  exactDate?: string,
+  maxItems?: number
 ): Promise<ScrapedReview[]> {
   const results: ScrapedReview[] = [];
   let page = 1;
 
-  while (true) {
+  while (page <= MAX_PAGES) {
     const params = new URLSearchParams({
       secure_device_token: token,
       product_code: productCd,
       widget_id: WIDGET_ID,
       page: String(page),
+      sort: 'recent',
       fields: 'reviews.evaluation_properties',
     });
 
@@ -127,22 +142,26 @@ async function fetchReviewsForDate(
     const rawList: Record<string, unknown>[] = data.reviews || [];
     if (rawList.length === 0) break;
 
-    let foundOlder = false;
+    let stop = false;
     for (const item of rawList) {
       const review = parseReview(item);
       if (!review) continue;
       const d = dateOf(review.date);
-      if (d === targetDate) {
-        results.push(review);
-      } else if (d < targetDate) {
-        // 어제보다 오래된 리뷰 → 이후 페이지도 불필요
-        foundOlder = true;
+      if (d < sinceDate) {
+        // 기준일보다 오래된 리뷰 → 이후 페이지도 불필요
+        stop = true;
         break;
       }
-      // d > targetDate (오늘 등) → 아직 어제 안 됨, 계속
+      // exactDate 지정 시 그 날짜만, 아니면 sinceDate 이후 전부
+      if (!exactDate || d === exactDate) results.push(review);
+      // 최신순이므로 상한에 닿으면 나머지는 어차피 트림 대상
+      if (maxItems && results.length >= maxItems) {
+        stop = true;
+        break;
+      }
     }
 
-    if (foundOlder) break;
+    if (stop) break;
 
     const pagy = data.pagy as Record<string, unknown> | undefined;
     if (!pagy?.next) break;
@@ -217,8 +236,20 @@ async function translateNewReviews(reviews: ScrapedReview[]): Promise<void> {
 }
 
 // ── 메인 ──────────────────────────────────────────────
-const targetDate = getTargetDate(process.argv[2]);
-console.log(`\n대상 날짜: ${targetDate} (KST)\n`);
+// --since YYYY-MM-DD → 해당 날짜 이후 전체 수집 (백필). 없으면 단일 날짜 모드.
+const sinceIdx = process.argv.indexOf('--since');
+const sinceArg = sinceIdx >= 0 ? process.argv[sinceIdx + 1] : undefined;
+
+if (sinceArg && !/^\d{4}-\d{2}-\d{2}$/.test(sinceArg)) {
+  console.error('❌ --since 형식이 잘못됨 (YYYY-MM-DD). 종료합니다.');
+  process.exit(1);
+}
+
+const targetDate = sinceArg ? undefined : getTargetDate(process.argv[2]);
+const sinceDate = sinceArg ?? targetDate!;
+console.log(
+  sinceArg ? `\n백필 모드: ${sinceArg} 이후 전체 (KST)\n` : `\n대상 날짜: ${targetDate} (KST)\n`
+);
 
 const mappingPath = join(DATA_DIR, 'product-mapping.json');
 const mapping: { kr_product_cd: string | null; confidence: string }[] =
@@ -240,7 +271,13 @@ let totalNew = 0;
 
 for (const productCd of targets) {
   const filePath = join(REVIEWS_DIR, `${productCd}.json`);
-  const newReviews = await fetchReviewsForDate(token, productCd, targetDate);
+  const newReviews = await fetchReviewsSince(
+    token,
+    productCd,
+    sinceDate,
+    targetDate,
+    sinceArg ? BACKFILL_MAX_PER_PRODUCT : undefined
+  );
 
   if (newReviews.length === 0) continue;
 
@@ -276,4 +313,6 @@ for (const productCd of targets) {
   console.log(`  [${productCd}] +${toAdd.length}건 저장 (누적 ${data.total}건)`);
 }
 
-console.log(`\n✓ 완료: ${totalNew}건 신규 추가 (${targetDate})`);
+console.log(
+  `\n✓ 완료: ${totalNew}건 신규 추가 (${targetDate ?? `${sinceDate} 이후`})`
+);
