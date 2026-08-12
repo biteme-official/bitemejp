@@ -245,11 +245,19 @@ if (sinceArg && !/^\d{4}-\d{2}-\d{2}$/.test(sinceArg)) {
   process.exit(1);
 }
 
+// --only <kr_product_cd> → 특정 상품만, --max N → 상품당 수집 상한 덮어쓰기
+// (트림 제외 상품처럼 50건 상한을 안 쓰는 상품을 채울 때 사용)
+const onlyIdx = process.argv.indexOf('--only');
+const onlyArg = onlyIdx >= 0 ? process.argv[onlyIdx + 1] : undefined;
+const maxIdx = process.argv.indexOf('--max');
+const maxArg = maxIdx >= 0 ? Number(process.argv[maxIdx + 1]) : undefined;
+
 const targetDate = sinceArg ? undefined : getTargetDate(process.argv[2]);
 const sinceDate = sinceArg ?? targetDate!;
 console.log(
   sinceArg ? `\n백필 모드: ${sinceArg} 이후 전체 (KST)\n` : `\n대상 날짜: ${targetDate} (KST)\n`
 );
+if (onlyArg) console.log(`대상 상품 한정: ${onlyArg}`);
 
 const mappingPath = join(DATA_DIR, 'product-mapping.json');
 const mapping: { kr_product_cd: string | null; confidence: string }[] =
@@ -257,7 +265,8 @@ const mapping: { kr_product_cd: string | null; confidence: string }[] =
 
 const targets = mapping
   .filter((m) => m.kr_product_cd && m.confidence !== 'no_match')
-  .map((m) => m.kr_product_cd!);
+  .map((m) => m.kr_product_cd!)
+  .filter((cd) => !onlyArg || cd === onlyArg);
 
 console.log(`매핑된 상품 ${targets.length}개 대상\n토큰 획득 중...`);
 const token = await getCremaToken(targets[0]);
@@ -276,7 +285,7 @@ for (const productCd of targets) {
     productCd,
     sinceDate,
     targetDate,
-    sinceArg ? BACKFILL_MAX_PER_PRODUCT : undefined
+    sinceArg ? (maxArg || BACKFILL_MAX_PER_PRODUCT) : undefined
   );
 
   if (newReviews.length === 0) continue;
