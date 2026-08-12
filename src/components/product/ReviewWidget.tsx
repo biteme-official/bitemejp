@@ -44,11 +44,17 @@ export function ReviewWidget({ productNumericId, onCount }: { productNumericId: 
   useEffect(() => {
     if (!productNumericId) return;
 
-    const load = (path: string) =>
-      fetch(`${path}?shopify_product_id=${productNumericId}`)
+    // Judge.me 는 외부 API 라 지연될 수 있다. 한 쪽이 늦어도 다른 쪽 리뷰는
+    // 보여야 하므로 타임아웃을 두고 실패 시 빈 배열로 degrade 한다.
+    const load = (path: string, timeoutMs = 5000) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      return fetch(`${path}?shopify_product_id=${productNumericId}`, { signal: ctrl.signal })
         .then(r => (r.ok ? r.json() : { reviews: [] }))
         .then(d => (d.reviews || []) as Review[])
-        .catch(() => [] as Review[]);
+        .catch(() => [] as Review[])
+        .finally(() => clearTimeout(timer));
+    };
 
     Promise.all([load('/api/judgeme-reviews'), load('/api/kr-reviews')])
       .then(([own, kr]) => {

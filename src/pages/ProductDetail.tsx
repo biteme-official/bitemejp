@@ -318,11 +318,15 @@ export default function ProductDetail() {
   useEffect(() => {
     if (!product?.id) return;
     const numericId = product.id.split('/').pop()!;
-    const count = (path: string) =>
-      fetch(`${path}?shopify_product_id=${numericId}`)
+    const count = (path: string) => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      return fetch(`${path}?shopify_product_id=${numericId}`, { signal: ctrl.signal })
         .then(r => r.ok ? r.json() : { reviews: [] })
         .then(data => (data.reviews || []).length as number)
-        .catch(() => 0);
+        .catch(() => 0)
+        .finally(() => clearTimeout(timer));
+    };
     Promise.all([count('/api/judgeme-reviews'), count('/api/kr-reviews')])
       .then(([own, kr]) => setReviewCount(own + kr));
   }, [product?.id]);
