@@ -1,8 +1,52 @@
 {
   "product_cd": "1000048907",
-  "scraped_at": "2026-05-08T05:13:34.922Z",
-  "total": 18,
+  "scraped_at": "2026-08-12T11:09:52.724Z",
+  "total": 22,
   "reviews": [
+    {
+      "id": "623643",
+      "rating": 5,
+      "name": "네****",
+      "content": "생각보다 좀 크긴한데 그랴도 좋아해요",
+      "date": "2026-07-30T15:59:34+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/36/43/image1/ec9bfd905390cc76.webp"
+      ],
+      "content_ja": "想像していたより少し大きいですが、それでも気に入っています"
+    },
+    {
+      "id": "623486",
+      "rating": 4,
+      "name": "네****",
+      "content": "배송 빠르게 잘왔어요",
+      "date": "2026-07-29T20:19:42+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/34/86/image1/03ee781a070fc61d.webp"
+      ],
+      "content_ja": "配送が早く届きました"
+    },
+    {
+      "id": "619696",
+      "rating": 5,
+      "name": "네****",
+      "content": "강아지가 너무 좋아해요",
+      "date": "2026-07-03T13:50:10+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/96/96/image1/8779392f492f7621.webp"
+      ],
+      "content_ja": "犬がとても気に入っています"
+    },
+    {
+      "id": "619051",
+      "rating": 5,
+      "name": "네****",
+      "content": "잘갖고놀아요! 사줄맛이나네용",
+      "date": "2026-07-03T01:38:40+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/90/51/image1/68ed9849a6ff1238.webp"
+      ],
+      "content_ja": "よく遊んでいます！買ってあげた甲斐がありますね"
+    },
     {
       "id": "581198",
       "rating": 5,

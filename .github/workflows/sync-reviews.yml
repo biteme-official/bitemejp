@@ -47,6 +47,9 @@ jobs:
             npx tsx scripts/sync-daily-reviews.ts
           fi
 
+      - name: Trim to 50 reviews per product
+        run: npx tsx scripts/trim-reviews.ts
+
       - name: Commit new reviews
         run: |
           git config user.name "github-actions[bot]"

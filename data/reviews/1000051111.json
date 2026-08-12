@@ -1,8 +1,30 @@
 {
   "product_cd": "1000051111",
-  "scraped_at": "2026-05-08T05:11:27.711Z",
-  "total": 19,
+  "scraped_at": "2026-08-12T11:07:40.509Z",
+  "total": 21,
   "reviews": [
+    {
+      "id": "612344",
+      "rating": 5,
+      "name": "김****",
+      "content": "너무 귀여운 장난감 저희애 입에물고 미침ㅋㅋ",
+      "date": "2026-05-25T08:21:00+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/23/44/image1/5b8e0e7c4e9720d0.webp"
+      ],
+      "content_ja": "すごくかわいいおもちゃで、うちの子がくわえて夢中になってますｗｗ"
+    },
+    {
+      "id": "610735",
+      "rating": 5,
+      "name": "네****",
+      "content": "가격 대비 만족합니다.",
+      "date": "2026-05-13T19:32:35+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/07/35/image1/9353a63b2bcef7e1.webp"
+      ],
+      "content_ja": "価格の割に満足しています。"
+    },
     {
       "id": "590407",
       "rating": 5,

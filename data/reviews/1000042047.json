@@ -1,8 +1,41 @@
 {
   "product_cd": "1000042047",
-  "scraped_at": "2026-05-08T05:15:54.632Z",
-  "total": 35,
+  "scraped_at": "2026-08-12T11:12:30.570Z",
+  "total": 38,
   "reviews": [
+    {
+      "id": "624496",
+      "rating": 5,
+      "name": "네****",
+      "content": "저희 집 강아지가 좋아해요 오자마자 잘 가지고 놀아요",
+      "date": "2026-08-04T19:01:40+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/44/96/image1/a95f986d98a8f7bf.webp"
+      ],
+      "content_ja": "うちのワンちゃんが気に入ってます。届いてすぐに遊び始めました。"
+    },
+    {
+      "id": "619664",
+      "rating": 5,
+      "name": "네****",
+      "content": "너무 귀엽고 딴딴해서 줄이 잘풀리지조 않아서 너무좋아요  \n바잇미 장난감 내구성 좋아서 강추해요",
+      "date": "2026-07-03T16:21:34+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/96/64/image1/735726af2f06008d.webp"
+      ],
+      "content_ja": "とてもかわいくて丈夫なので、紐がほどけにくくて良いです。バイトミーのおもちゃは耐久性が良いので、強くおすすめします。"
+    },
+    {
+      "id": "616632",
+      "rating": 5,
+      "name": "네****",
+      "content": "터그놀이하기에도 좋고 던지기 놀이하기에도 좋아요!",
+      "date": "2026-06-19T22:54:35+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/66/32/image1/3f62312a0ddf6306.webp"
+      ],
+      "content_ja": "綱引き遊びにも良いし、投げて遊ぶのにも良いです！"
+    },
     {
       "id": "565786",
       "rating": 5,

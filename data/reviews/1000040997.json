@@ -1,8 +1,19 @@
 {
   "product_cd": "1000040997",
-  "scraped_at": "2026-05-08T05:16:21.978Z",
+  "scraped_at": "2026-08-12T11:13:10.757Z",
   "total": 50,
   "reviews": [
+    {
+      "id": "617084",
+      "rating": 5,
+      "name": "네****",
+      "content": "엄청 부드럽고 귀여워요",
+      "date": "2026-06-21T13:01:53+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/70/84/image1/abe9ee7e748126f2.webp"
+      ],
+      "content_ja": "とても柔らかくて可愛いです"
+    },
     {
       "id": "608212",
       "rating": 5,
@@ -551,17 +562,6 @@
         "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/56/06/35/image1/8629839eb231fe0e.webp"
       ],
       "content_ja": "新しいおもちゃばっかり好きだから定期的に交換してあげないといけないんですけど、これはカサカサ、ピピッ、タグが全部一緒になってるおもちゃだから遊ばせるのに良いです"
-    },
-    {
-      "id": "560547",
-      "rating": 5,
-      "name": "다****",
-      "content": "잘 가지고 놀아요~ 배송 빠르고 좋습니다! 삑삑이 좋아하는데 진짜 좋아하네용ㅎㅎ",
-      "date": "2024-10-18T09:50:26+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/56/05/47/image1/c1ac6431304e717a.webp"
-      ],
-      "content_ja": "よく持って遊んでます～ 配送も早くて良いです！ピピッが好きみたいで、本当に気に入ってますね😄"
     }
   ]
 }

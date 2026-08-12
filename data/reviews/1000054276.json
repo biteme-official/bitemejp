@@ -1,8 +1,19 @@
 {
   "product_cd": "1000054276",
-  "scraped_at": "2026-05-08T04:59:13.779Z",
-  "total": 14,
+  "scraped_at": "2026-08-12T11:02:16.543Z",
+  "total": 15,
   "reviews": [
+    {
+      "id": "616061",
+      "rating": 5,
+      "name": "임****",
+      "content": "이런 장난감은 처음 사보는데 좋아해주길 ㅠ",
+      "date": "2026-06-16T15:05:15+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/60/61/image1/9619c50001cec218.webp"
+      ],
+      "content_ja": "このようなおもちゃを初めて買ってみたのですが、気に入ってくれるといいなあ"
+    },
     {
       "id": "594964",
       "rating": 5,

@@ -1,8 +1,74 @@
 {
   "product_cd": "1000044547",
-  "scraped_at": "2026-05-08T05:16:37.086Z",
-  "total": 44,
+  "scraped_at": "2026-08-12T11:13:26.658Z",
+  "total": 50,
   "reviews": [
+    {
+      "id": "622161",
+      "rating": 5,
+      "name": "이****",
+      "content": "역시 장난감은 바잇미 주자마자 난리네요ㅋㅋ사줄맛 납니당💜",
+      "date": "2026-07-21T21:45:56+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/21/61/image1/accddc3581062f69.webp"
+      ],
+      "content_ja": "やっぱりおもちゃは買ってすぐに大騒ぎですねｗｗ買い甲斐がありますｗ💜"
+    },
+    {
+      "id": "622054",
+      "rating": 5,
+      "name": "네****",
+      "content": "넘 기여버여~~~~~~~~",
+      "date": "2026-07-20T23:24:05+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/20/54/image1/b87f78ca30f27965.webp"
+      ],
+      "content_ja": "めっちゃかわいい～～～～～～"
+    },
+    {
+      "id": "621665",
+      "rating": 4,
+      "name": "네****",
+      "content": "강아지가 좋아해요 ~",
+      "date": "2026-07-18T02:16:54+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/16/65/image1/ae41ea51b10991a0.webp"
+      ],
+      "content_ja": "犬が気に入ってます～"
+    },
+    {
+      "id": "616172",
+      "rating": 5,
+      "name": "네****",
+      "content": "배송빠르고 좋아용❤️❤️❤️",
+      "date": "2026-06-16T19:23:15+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/61/72/image1/2939f98225886744.webp"
+      ],
+      "content_ja": "配送が早くて良いです❤️❤️❤️"
+    },
+    {
+      "id": "615688",
+      "rating": 5,
+      "name": "네****",
+      "content": "3킬로 조금안되는 소형견이라 공도 잘물고 다니지 못하는데 요건 납작하고 작아서 인지 잘 물고 다니더라구요.\n곰돌이도 넘 귀엽고 소형견들한텐 딱 인것 같아요.",
+      "date": "2026-06-13T16:21:07+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/56/88/image1/252f1ef53ddc767e.webp"
+      ],
+      "content_ja": "3キロ少し足りない小型犬なので、ボールもうまく咥えて歩けないのですが、これは平らで小さいからか、よく咥えて歩いているんです。\nくまちゃんもとてもかわいくて、小型犬たちにはぴったりな感じです。"
+    },
+    {
+      "id": "611168",
+      "rating": 5,
+      "name": "정****",
+      "content": "아주 좋아하네요 입에 물고는 식구들에게\n자랑하러 다녀요",
+      "date": "2026-05-16T00:58:16+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/11/68/image1/ad555935b1420e0b.webp"
+      ],
+      "content_ja": "とても気に入っていて、口に咥えて家族に自慢して回っています"
+    },
     {
       "id": "592532",
       "rating": 5,

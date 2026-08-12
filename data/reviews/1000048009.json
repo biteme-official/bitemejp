@@ -1,561 +1,557 @@
 {
   "product_cd": "1000048009",
-  "scraped_at": "2026-05-07T11:40:26.085Z",
+  "scraped_at": "2026-08-12T11:08:36.123Z",
   "total": 50,
   "reviews": [
     {
-      "id": "609378",
+      "id": "624816",
+      "rating": 5,
+      "name": "네****",
+      "content": "세개사서 잘쓰다가 향이 약해졌길래 다시삼 \n\n근데 스프레이가 훨편해요 \n\n스프레이 사고나서 이거 안껴도 벌레 안꼬이네요ㅎㅎ",
+      "date": "2026-08-06T23:30:20+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/48/16/image1/a53bafeed5787f5d.webp"
+      ],
+      "content_ja": "3個買って使っていたのですが、香りが弱くなったので再度購入しました。\n\nでもスプレーがめっちゃ便利です。\n\nスプレーを買ってからこれを付けなくても虫が来なくなりますね ^^"
+    },
+    {
+      "id": "624597",
+      "rating": 5,
+      "name": "네****",
+      "content": "깜찍하고 귀여워요.\n냄새도역하지 않고\n은은하게 나니 녀석도\n좋은지 지퍼백을 물고가서\n노네요...싸이즈도 사진에처럼\n크지 않고 가벼워서 잘쓸거 같아요\n3개짜리 세트를 시킬걸 그랬어요...ㅎㅎ",
+      "date": "2026-08-06T14:18:37+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/45/97/image1/ab944abffb6db49f.webp"
+      ],
+      "content_ja": "可愛くて素敵です。\n匂いも不快ではなく\nほのかに香るので、子どもも\n気に入ったのか、ジッパー袋をくわえて持ち歩いてますね...サイズも写真のように\n大きくなく軽いので、よく使いそうです。\n3個セットを買えばよかったな...^^"
+    },
+    {
+      "id": "624309",
+      "rating": 5,
+      "name": "네****",
+      "content": "바잇미는 다 귀엽고 이쁘고.. \n배송도 무지 빨라요 ❤️ \n애기들한테 좋은 제품 너무 많아서 좋아요~~!!",
+      "date": "2026-08-03T20:47:41+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/43/09/image1/c3d888ab0520c15a.webp"
+      ],
+      "content_ja": "バイトミーはみんな可愛くて綺麗で...\n配送もすごく早いです ❤️\n赤ちゃんたちにいい製品がたくさんあるので良いです~~!!"
+    },
+    {
+      "id": "623970",
+      "rating": 5,
+      "name": "네****",
+      "content": "귀에 진드기붙은거보고 깜놀.. 바로 시켰어요 마음이 위안돼요..",
+      "date": "2026-08-02T06:42:29+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/39/70/image1/25398f96c9382d57.webp"
+      ],
+      "content_ja": "耳にダニがついているのを見てびっくり...すぐに注文しました。心が落ち着きます。"
+    },
+    {
+      "id": "624034",
+      "rating": 5,
+      "name": "네****",
+      "content": "색상도 이쁘고 달아주기 편해요.\n다만 잘빠지진 않지만 자꾸 확인하게 됩니다.",
+      "date": "2026-08-01T12:41:43+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/40/34/image1/527c47a511ace1b4.webp"
+      ],
+      "content_ja": "色も綺麗で、付けるのが簡単です。\nただ、簡単には外れませんが、つい確認してしまいます。"
+    },
+    {
+      "id": "624036",
+      "rating": 5,
+      "name": "네****",
+      "content": "향이 있어 벌레가 오지않을거 같아 안심이 됩니다.\n풀있는곳으로 잘가서 불안했었는데 잘산거 같아요.",
+      "date": "2026-08-01T12:39:25+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/40/36/image1/e5768cfc09878582.webp"
+      ],
+      "content_ja": "香りがあるので虫が来ないと思って安心です。\n草がある場所によく行くので不安でしたが、買ってよかったと思います。"
+    },
+    {
+      "id": "623773",
+      "rating": 5,
+      "name": "네****",
+      "content": "맨날 스프레이 뿌리기 힘들것같아서 이걸로 샀는데 확실히 벌레가 피해다니더라고요. 그냥 리드줄에 껴놓으면 되니깐 편리해요",
+      "date": "2026-07-31T18:49:45+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/37/73/image1/3c1f45d4e3c70b01.webp"
+      ],
+      "content_ja": "毎日スプレーを吹きかけるのが大変だと思ったので、これにしましたが、確実に虫が避けていますね。ただ紐に付けるだけでいいので便利です。"
+    },
+    {
+      "id": "623779",
+      "rating": 5,
+      "name": "네****",
+      "content": "배송이 빠르고 효과 있길 바래요",
+      "date": "2026-07-31T18:24:18+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/37/79/image1/3364cc0fc150f2a7.webp"
+      ],
+      "content_ja": "配送が早く、効果があることを期待しています。"
+    },
+    {
+      "id": "623837",
+      "rating": 5,
+      "name": "네****",
+      "content": "향도 좋고 귀여워요!!",
+      "date": "2026-07-31T08:38:08+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/38/37/image1/91c9acb93e459a87.webp"
+      ],
+      "content_ja": "香りも良くて可愛いです!!"
+    },
+    {
+      "id": "623648",
+      "rating": 5,
+      "name": "네****",
+      "content": "착용시 모양도 이쁘고, 향이 은은히 퍼져\n시골에사는 우리에 애에게 최고",
+      "date": "2026-07-30T15:25:00+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/36/48/image1/41e590c01131110d.webp"
+      ],
+      "content_ja": "着用時の見た目も綺麗で、香りがほのかに広がり\n田舎に住んでいるうちの子には最高です。"
+    },
+    {
+      "id": "623475",
+      "rating": 5,
+      "name": "네****",
+      "content": "산책할때 사용할건데 아직 산책이 익숙치않아 추후에 사용할듯요",
+      "date": "2026-07-29T22:30:31+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/34/75/image1/914a8e25cd8fdd0f.webp"
+      ],
+      "content_ja": "散歩する時に使おうと思っていますが、まだ散歩に慣れていないので今後使う予定です"
+    },
+    {
+      "id": "623510",
+      "rating": 5,
+      "name": "네****",
+      "content": "강아지 산책갈때 목에 해주면 맘이 편해요",
+      "date": "2026-07-29T14:49:44+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/35/10/image1/5370702bc3d792f9.webp"
+      ],
+      "content_ja": "犬の散歩に行く時に首に付けると心が楽になります"
+    },
+    {
+      "id": "623160",
+      "rating": 5,
+      "name": "네****",
+      "content": "산책 갈때마다 잘쓰고 있어여 ~",
+      "date": "2026-07-28T00:02:26+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/31/60/image1/044a959a06f2250f.webp"
+      ],
+      "content_ja": "散歩に行く度にしっかり使っています～"
+    },
+    {
+      "id": "622732",
+      "rating": 5,
+      "name": "이****",
+      "content": "아직 사용전입니다 ㅎ 다른거를  사용끝나면 할꺼예요 ㅎ",
+      "date": "2026-07-24T23:45:46+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/27/32/image1/afee9cbb92d42bc5.webp"
+      ],
+      "content_ja": "まだ使用前です ㅎ 他のものを使い終わったら使う予定です ㅎ"
+    },
+    {
+      "id": "622588",
+      "rating": 5,
+      "name": "네****",
+      "content": "넥스가드 먹이고 있긴 하지만.. 해충 들러붙는게 싫고 잔디밭에 가는 걸 좋아하는 아이라 해충방지제 뿌리는거랑 별개로 매달고 다니고 싶어서 구매했어요. 노란색이 귀여워요",
+      "date": "2026-07-24T08:06:41+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/25/88/image1/ebc474a363401069.webp"
+      ],
+      "content_ja": "ネクスガードは与えていますが...害虫が付くのが嫌で、芝生に行くのが好きなワンちゃんなので、害虫防止スプレーとは別に付けて持ち歩きたくて購入しました。黄色がかわいいです"
+    },
+    {
+      "id": "622617",
+      "rating": 5,
+      "name": "네****",
+      "content": "풀냄새 좋아하는 우리 댕댕이에게 꼭 필요한것 같아요~ 효과 좋았으면..!👍🏼",
+      "date": "2026-07-23T21:16:09+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/26/17/image1/91115afd95033e52.webp"
+      ],
+      "content_ja": "草の香りが好きなうちのワンちゃんには必要なものみたいです～効果が良かったらいいな...！👍🏼"
+    },
+    {
+      "id": "622414",
+      "rating": 5,
+      "name": "네****",
+      "content": "아직 효과는 잘 모르겠으나 착용하기 편하고 무엇보다 제 마음이 편해서 좋아요!",
+      "date": "2026-07-22T23:57:28+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/24/14/image1/9b06d81f4fa6f897.webp"
+      ],
+      "content_ja": "まだ効果はよくわかりませんが、装着しやすくて何より自分の心が楽なので良いです！"
+    },
+    {
+      "id": "622287",
+      "rating": 5,
+      "name": "네****",
+      "content": "하네스에\n달고 산책해요 일단 심신안정용으로 좋아요 진드기철에는 꼭 해야 안심됩니다",
+      "date": "2026-07-21T14:13:10+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/22/87/image1/a31bd4f384f08141.webp"
+      ],
+      "content_ja": "ハーネスに付けて散歩しています。まず心身安定用として良いです。ダニの季節には絶対に付けないと安心できません"
+    },
+    {
+      "id": "622295",
+      "rating": 5,
+      "name": "네****",
+      "content": "애견카페가면 벌레모기들이 너무\n많아서 주문했어요",
+      "date": "2026-07-21T12:55:22+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/22/95/image1/2cc671c41d69e79b.webp"
+      ],
+      "content_ja": "犬用カフェに行くと虫や蚊がすごく多いので注文しました"
+    },
+    {
+      "id": "622310",
       "rating": 4,
       "name": "네****",
-      "content": "리드줄에 달고다녀요. 효과가 좋으면 좋겠어요",
-      "date": "2026-05-06T19:21:14+09:00",
+      "content": "하나만 사려다가 색상이 이뻐서 세트구매했어요.",
+      "date": "2026-07-21T11:19:34+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/93/78/image1/37a3e1d72fef2bce.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/23/10/image1/f10a9fc430910eb3.webp"
       ],
-      "content_ja": "リード紐に付けて使っています。効果があるといいな"
+      "content_ja": "1つだけ買おうとしていたのですが、色がきれいなのでセット購入しました。"
     },
     {
-      "id": "609381",
+      "id": "622034",
       "rating": 5,
       "name": "네****",
-      "content": "해마다 여름이면 타사에서 해충방비클립을 구매했었는데 꼭 쓰다보면 잃어버려서 속상했거든요.\n그런데 바잇미는 잃어버리지 않을거 같네요. 고정도 확실하고 가벼워서 부담없고 디자인까지 너무 귀엽네요. 매우 만족합니다.",
-      "date": "2026-05-06T19:08:49+09:00",
+      "content": "우리집 댕댕이의 산책 지킴이 헤잇미 밴드!\n주기적으로 구매해 교체해서 사용중인데 편리하고 좋네용:)",
+      "date": "2026-07-21T09:48:51+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/93/81/image1/122a0198b23237cd.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/20/34/image1/f223791fb25058cd.webp"
       ],
-      "content_ja": "毎年夏になると他社の虫除けクリップを買っていたんですが、使っているうちにいつも失くしてしまうのが残念でした。でもバイトミなら失くしにくそうですね。固定もしっかりしていて軽くて負担がないし、デザインまですごく可愛い。とても満足しています。"
+      "content_ja": "うちのワンちゃんのお散歩の味方ヘイトミバンド！\n定期的に購入して交換して使用中ですが、便利で良いですね:)"
     },
     {
-      "id": "609388",
-      "rating": 4,
+      "id": "621821",
+      "rating": 3,
       "name": "네****",
-      "content": "향이 세서 저는 살짝 눈시리고 강쥐는 재채기. 뭐 약해지겠죠",
-      "date": "2026-05-06T18:52:34+09:00",
+      "content": "조아요~~~~~~~~",
+      "date": "2026-07-18T15:25:28+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/93/88/image1/f7c427780ff413bb.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/18/21/image1/fc956b5cd096fc6b.webp"
       ],
-      "content_ja": "香りが強いので、私は少し目がしみて、ウサギはくしゃみをしています。まあ、そのうち弱くなるでしょう"
+      "content_ja": "いいです~~~~~~~~"
     },
     {
-      "id": "609412",
+      "id": "621694",
       "rating": 5,
       "name": "네****",
-      "content": "여름에 벌레를 피하기 위해 주문했어요",
-      "date": "2026-05-06T15:46:36+09:00",
+      "content": "스티커로 되어있는 제품을 사용하다\n밴드형으로 사용하니 편리하네요. 👍",
+      "date": "2026-07-17T16:16:15+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/94/12/image1/ef66f83ee36cf267.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/16/94/image1/c9018d88a4e255f2.webp"
       ],
-      "content_ja": "夏に虫を避けるために注文しました"
+      "content_ja": "ステッカータイプの製品を使っていましたが\nバンド型で使うと便利ですね。👍"
     },
     {
-      "id": "609422",
-      "rating": 4,
-      "name": "네****",
-      "content": "봄되면 산책에 준비할 것들이 생기죠\n목줄에 끼워서 쓸건데 도움되기를요~",
-      "date": "2026-05-06T14:45:11+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/94/22/image1/4d8f1b761a5080c4.webp"
-      ],
-      "content_ja": "春になると散歩の準備で必要な物が増えますね。首輪に付けて使う予定です。役に立つといいな～"
-    },
-    {
-      "id": "608797",
+      "id": "621706",
       "rating": 5,
       "name": "네****",
-      "content": "벌레가 너무 무서워서 사용중인데..\n효과가 좋으면 좋겠어요",
-      "date": "2026-05-06T00:09:33+09:00",
+      "content": "귀엽고 향이 좋아요",
+      "date": "2026-07-17T14:51:18+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/87/97/image1/691d027137e90dd1.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/17/06/image1/bec5da16b2ae43a3.webp"
       ],
-      "content_ja": "虫がとても怖いので使用中です。効果があるといいなと思います。"
+      "content_ja": "かわいくて香りが良いです"
     },
     {
-      "id": "608806",
+      "id": "621420",
       "rating": 5,
       "name": "네****",
-      "content": "진드기 걱정 조금 덜어낼거같아요",
-      "date": "2026-05-05T23:03:53+09:00",
+      "content": "냄새도 강력하고\n아주 자~알 쓰고 있어요",
+      "date": "2026-07-16T14:20:10+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/88/06/image1/39786e0c8cefff4c.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/14/20/image1/664ef2227e031716.webp"
       ],
-      "content_ja": "ダニの心配が少し軽くなりそうです"
+      "content_ja": "香りも強力で\nとても重宝しています"
     },
     {
-      "id": "608866",
+      "id": "621422",
       "rating": 5,
       "name": "네****",
-      "content": "공휴일인데도 빠른배송 감사드립니다",
-      "date": "2026-05-05T16:49:41+09:00",
+      "content": "작년부터 쓰고 있었는데\n제품 좋아요~",
+      "date": "2026-07-16T14:17:55+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/88/66/image1/7c60b9e28a28359e.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/14/22/image1/57b43b5249aa373a.webp"
       ],
-      "content_ja": "祝日なのに迅速な配送をありがとうございます"
+      "content_ja": "去年から使っていましたが\n製品が良いです~"
     },
     {
-      "id": "608930",
+      "id": "621151",
       "rating": 5,
       "name": "네****",
-      "content": "잘쓰고있어요 손에 냄새좀 베긴하는데 ㄱㅊ",
-      "date": "2026-05-05T11:48:18+09:00",
+      "content": "이거 걸어주면 확실히 맘이 편해지네여",
+      "date": "2026-07-14T21:55:20+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/89/30/image1/8a7cace21698f364.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/11/51/image1/2542639f6b5f1f5b.webp"
       ],
-      "content_ja": "よく使ってます。手に少し匂いが付くのは気になりますが大丈夫です"
+      "content_ja": "これをつけると確実に気持ちが楽になりますね"
     },
     {
-      "id": "608938",
-      "rating": 4,
-      "name": "네****",
-      "content": "향만으로 효과가 있는지는 모르겠는데. 쓰기는 편해요",
-      "date": "2026-05-05T10:51:26+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/89/38/image1/099d58badb905d03.webp"
-      ],
-      "content_ja": "匂いだけで効果があるのかは分かりませんが。使うのは便利です"
-    },
-    {
-      "id": "608985",
+      "id": "621023",
       "rating": 5,
       "name": "네****",
-      "content": "이쁘고 착용하기 편리해요",
-      "date": "2026-05-04T21:43:58+09:00",
+      "content": "스티커만 쓰다가 이것도 구매해봤어요",
+      "date": "2026-07-13T12:15:04+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/89/85/image1/2a1e7b55c702ef2b.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/10/23/image1/2232a7a2a4044f9f.webp"
       ],
-      "content_ja": "可愛くてつけやすいです"
+      "content_ja": "ステッカーだけ使っていたのですが、これも買ってみました"
     },
     {
-      "id": "608986",
+      "id": "621032",
       "rating": 5,
       "name": "네****",
-      "content": "요즘 날씨도 더워지고 진드기가 기승이라길래\n주문해봤어여ㅠㅠ풀숲이나 나무쪽에 냄새맡는걸 좋아해서 필수템이죠~",
-      "date": "2026-05-04T21:30:42+09:00",
+      "content": "기본 쓰던 헤잇미 밴드가 향도 거의 안나서\n새로 구매했어요. 리필형이었으면 좋겠어요..",
+      "date": "2026-07-13T11:32:44+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/89/86/image1/9a75935948f53e74.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/10/32/image1/133b5388decf315d.webp"
       ],
-      "content_ja": "最近気温も上がってきて、ダニが増殖してるって聞いたので注文してみました😭草むらや木の方の匂いを嗅ぐのが好きなので必須アイテムです～"
+      "content_ja": "基本的に使っていたヘイトミバンドは香りがほぼしなくなったので\n新しく購入しました。リフィルタイプだったら良かったのに.."
     },
     {
-      "id": "609032",
+      "id": "620834",
       "rating": 5,
       "name": "네****",
-      "content": "해마다 여름이되면 애용하는 제품입니다^^배송도 너무 빠르고 효과가 좋아 다시 주문했어요 정말  효과 좋고   편하고 좋아요~^^♡♡",
-      "date": "2026-05-04T14:13:14+09:00",
+      "content": "매우 만족스럽습니다 :)",
+      "date": "2026-07-12T22:36:28+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/90/32/image1/792e2112f965b7df.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/08/34/image1/eb5b46e185fec3a3.webp"
       ],
-      "content_ja": "毎年夏になると使う商品です^^配送も本当に早くて効果がいいので、また注文しました。本当に効果がいいし、便利で良いですよ～^^♡♡"
+      "content_ja": "非常に満足しています :)"
     },
     {
-      "id": "609071",
+      "id": "620874",
       "rating": 5,
       "name": "네****",
-      "content": "디자인이 마음에 들어서 선택했어요. 산책 나갈때 진드기나 벌레 신경쓰이는데 효과 있었으면 좋겠어요. 색상은 모두 예쁘네요. 향도 괜찮아요",
-      "date": "2026-05-04T08:32:13+09:00",
+      "content": "조어요 국굿 조아여 굿국",
+      "date": "2026-07-12T15:10:53+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/90/71/image1/699b4ea468136d26.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/08/74/image1/0cbec77c5c99ae9c.webp"
       ],
-      "content_ja": "デザインが気に入ったので選びました。散歩に出かける時にダニや虫が気になるので、効果があるといいなと思ってます。色はどれも可愛いですね。香りも悪くないです。"
+      "content_ja": "好きです 良い商品 好きですね 良い良い"
     },
     {
-      "id": "609168",
+      "id": "620882",
       "rating": 5,
       "name": "네****",
-      "content": "꾸준히 잘 쓰고 있는 해충밴드입니다",
-      "date": "2026-05-03T12:22:50+09:00",
+      "content": "개별포장 되어 있어 좋습니다",
+      "date": "2026-07-12T13:34:53+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/91/68/image1/65c57c32d6ddf992.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/08/82/image1/71f45ef2b170765b.webp"
       ],
-      "content_ja": "ずっと上手に使っている虫よけバンドです。"
+      "content_ja": "個別包装されているので良いです"
     },
     {
-      "id": "608503",
+      "id": "620548",
       "rating": 5,
       "name": "네****",
-      "content": "잘쓰고있어요 귀엽네용",
-      "date": "2026-05-02T16:21:00+09:00",
+      "content": "우리 회사에서 키우는 흙수저 강아디 자유롭게 가고싶은데 다 다녀서 진드기 많이 물려와서 방지하고자 샀어요 디자인도 너무 귀엽고 발향도 좋아요!!",
+      "date": "2026-07-10T16:55:16+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/85/03/image1/907df4d431992a3b.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/05/48/image1/136a9ec6dbf79d96.webp"
       ],
-      "content_ja": "重宝しています かわいいですね"
+      "content_ja": "うちの会社で飼っている雑種犬が自由に行き来するので、たくさんダニに刺されて来るので予防のために買いました。デザインもとてもかわいくて、香りも良いです！"
     },
     {
-      "id": "608540",
+      "id": "620572",
       "rating": 5,
       "name": "네****",
-      "content": "지금 사용중인데 너무 편해서\n옷 시키면서 추가구매했어요!",
-      "date": "2026-05-02T12:25:40+09:00",
+      "content": "더워서 야간 산책시 달고나가니까 좋아요",
+      "date": "2026-07-10T14:46:43+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/85/40/image1/c89c21527bd26c4f.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/05/72/image1/70709619c086fbee.webp"
       ],
-      "content_ja": "今使用中なのですが、とても便利なので洋服を買う時に追加購入しちゃいました！"
+      "content_ja": "暑いので夜間の散歩の時に着けると良いです"
     },
     {
-      "id": "608427",
-      "rating": 5,
-      "name": "김****",
-      "content": "산책할때 필수템인데 디자인까지 귀여워서 맘에 들어요! 좋은향이 솔솔 해충은 바이바이",
-      "date": "2026-05-01T18:02:40+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/84/27/image1/9773391f67ab4a8b.webp",
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/84/27/image2/25409824b9681c17.webp",
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/84/27/image3/cba8b7d2496fdd17.webp"
-      ],
-      "content_ja": "散歩の時の必需品なんですが、デザインまでかわいくて気に入ってます！いい香りがほのかに…虫さんはバイバイ"
-    },
-    {
-      "id": "608058",
+      "id": "620355",
       "rating": 5,
       "name": "네****",
-      "content": "항상 잘쓰고있어요 떨어지지 않아서 좋아요",
-      "date": "2026-04-30T11:56:31+09:00",
+      "content": "해충방지 스프레이만 뿌리고 다니기에는 불안해서 구매해봤어요 조금이라도 더 방지가 됐으면 좋겠네요",
+      "date": "2026-07-09T20:05:41+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/80/58/image1/4b1c66be0ce42078.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/03/55/image1/e00ab7a21892e52f.webp"
       ],
-      "content_ja": "いつも愛用してます。外れないのが良いですね"
+      "content_ja": "虫除けスプレーだけを吹きかけて歩くのは不安だったので購入してみました。もう少し予防効果があればいいなと思います"
     },
     {
-      "id": "608110",
+      "id": "620400",
       "rating": 5,
       "name": "네****",
-      "content": "너무 귀엽네요 바잇미는 디자인이 너무 귀엽고 예뻐요 잘 사용 할께요",
-      "date": "2026-04-30T00:05:15+09:00",
+      "content": "조아요 국굿 조아여 굿굿",
+      "date": "2026-07-09T13:39:21+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/81/10/image1/c6d36a153f042065.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/04/00/image1/40730adc8c9db666.webp"
       ],
-      "content_ja": "すごく可愛いですね。バイトミはデザインがすごく可愛くて素敵です。大切に使いますね"
+      "content_ja": "好きです 良い商品 好きですね 良い良い"
     },
     {
-      "id": "608115",
+      "id": "620109",
       "rating": 5,
       "name": "네****",
-      "content": "타제품은 산책하다 없어지는 경우가 있었는데 바잇미껀 밴드로 고정해서 좋아요! 디자인도 너무 귀엽고ㅎㅎ 보관 잘해서 2개월 잘쓰고 괜찮으면 또 주문하러 올게요",
-      "date": "2026-04-29T23:22:28+09:00",
+      "content": "예뻐서 좋네요 세개로 반년 뚝딱👍",
+      "date": "2026-07-09T00:02:22+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/81/15/image1/9a1c63653627f9e5.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/01/09/image1/f45603d689aaaa5c.webp"
       ],
-      "content_ja": "他の製品は散歩中になくなることがあったのですが、バイトミは バンドで固定されているのが良いです！デザインもとても可愛いし😄 大切に保管して2ヶ月使ってみていいようなら、また注文しに来ます"
+      "content_ja": "かわいくていいですね 3個で半年持ちます👍"
     },
     {
-      "id": "608124",
+      "id": "620116",
       "rating": 5,
       "name": "네****",
-      "content": "정말 귀여워요 선물하려고 구매했는데 기분 좋네요",
-      "date": "2026-04-29T22:21:29+09:00",
+      "content": "하네스랑 깔맞춤으로 사봤는데 가볍고 착용이 쉽네요! 너무 풀에 들어가는걸 좋아해서 털에 벌레도 항상 붙어있고 하는에 여름철엔 필수로 착용을 해줘야할것같아요.\n향은 조금 강하고 견고함은 살짝 아쉽지만 디자인이 귀여워서 맘에듭니다^^",
+      "date": "2026-07-08T22:38:01+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/81/24/image1/0818e44bee721536.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/01/16/image1/8637b2564d5f3d6a.webp"
       ],
-      "content_ja": "本当に可愛いです。プレゼント用に購入したんですが気分が良いですね"
+      "content_ja": "ハーネスとお揃いで買ったのですが軽くて着用が簡単ですね！草むらに入るのが大好きなので毛に虫もいつもついていて、夏場には必須で着用してあげないといけないようです。香りは少し強くて耐久性は少し残念ですがデザインがかわいいので気に入っています^^"
     },
     {
-      "id": "607822",
+      "id": "619939",
       "rating": 5,
       "name": "네****",
-      "content": "작년에 이어 잘쓰고있어요~! 과격한 뛰뛰에도 떨어지지않아 만족합니다~ 해충아 붙지마랏~~!",
-      "date": "2026-04-29T10:05:26+09:00",
+      "content": "아직 미사용중 잘쓸게요...",
+      "date": "2026-07-07T20:12:37+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/78/22/image1/cfdfa8c7fda7f8b5.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/99/39/image1/65f471a2ca373c12.webp"
       ],
-      "content_ja": "去年に引き続き使ってます～！激しく走り回っても落ちないので満足です～ ダニよ、くっつくなよ～！"
+      "content_ja": "まだ未使用中です よく使います..."
     },
     {
-      "id": "607897",
+      "id": "619941",
       "rating": 5,
       "name": "네****",
-      "content": "작년에 사서 쓰보고 좋아서 다시 재구매했어요  잘쓰고 있는데 산책도중 잃어버려서 여름이 다가오니 꼭 필요해서 구매했어요 배송 빠르고 가격 착하게 잘구매했어요",
-      "date": "2026-04-28T20:49:50+09:00",
+      "content": "이것저것 구입  잘쓸게요...",
+      "date": "2026-07-07T20:10:34+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/78/97/image1/df31423442540680.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/99/41/image1/81d0acd8726c54ab.webp"
       ],
-      "content_ja": "去年購入して使ってみたら気に入ったので、また再購入しました。ずっと使っていたんですが、散歩中に失くしてしまって、夏が近づいてきたので必要だと思って購入しました。配送も早くて価格も良心的で、いい買い物ができました。"
+      "content_ja": "あれこれ購入しました よく使います..."
     },
     {
-      "id": "607768",
-      "rating": 5,
-      "name": "홍****",
-      "content": "보라보라한 색감이 매력적인 바잇미 헤잇미 밴드를 새로 샀는데, 디자인이 정말 앙증맞고 귀여워서 볼 때마다 심쿵이에요! 💜ㅋㅋㅋ 산책할 때 착용해주니 확실히 해충들이 안 꼬이는 것 같아 효과도 대만족입니다. 재구매의사 완전 있어요. 덕분에 요즘 벌레 걱정 없이 안심하고 신나게 풀숲 산책을 즐기고 있어요. 스타일과 기능성을 모두 잡은 꿀템이라 산책길이 더 완벽해진 기분이에요! 🐾✨",
-      "date": "2026-04-28T19:13:25+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/77/68/image1/1758fdf944ee9725.webp",
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/77/68/image2/03bc39c41cf4fb79.webp",
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/77/68/image3/a4da93a4ebb245c1.webp"
-      ],
-      "content_ja": "紫色がとても魅力的なバイトミ ヘイトミ バンドを新しく買ったんですが、デザインが本当にかわいくて、見るたびにときめいちゃいます！💜ㅋㅋㅋ 散歩の時に付けてあげたら、確かに虫が寄ってこないみたいで効果にも大満足です。買い直すつもり満々ですよ。おかげで最近は虫の心配をせずに安心して、楽しく草むらの散歩を楽しんでいます。スタイルと機能性の両方を兼ね備えた推し商品なので、散歩がもっと完璧になった気分です！🐾✨"
-    },
-    {
-      "id": "607950",
+      "id": "619401",
       "rating": 5,
       "name": "네****",
-      "content": "몇 년 째 잘 쓰고 있어요! 근데 산책 중에 가끔 빠져서 잃어버려요ㅜㅜ",
-      "date": "2026-04-28T17:27:34+09:00",
+      "content": "여름이라 아무래도 벌레가 걱정돼서 구매했는데 탈부착이 쉽고 편해요 효과 좋길 바래요",
+      "date": "2026-07-05T10:44:50+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/79/50/image1/9ee3b1b00ce59b70.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/94/01/image1/d2c04395c0fb4f4b.webp"
       ],
-      "content_ja": "何年も使ってます！ただ散歩中にたまに外れてなくしちゃうんですよね😭"
+      "content_ja": "夏なので虫が心配で購入しましたが、取り外しが簡単で使いやすいです。効果があるといいな。"
     },
     {
-      "id": "607977",
-      "rating": 4,
-      "name": "네****",
-      "content": "효과가 있기를 바라며 한번 써봅니다 아기강쥐한텐 사이즈 좀 커요",
-      "date": "2026-04-28T14:11:28+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/79/77/image1/c87b5456d6554ae0.webp"
-      ],
-      "content_ja": "効果があることを願いながら試してみます。子ウサギには少しサイズが大きめです"
-    },
-    {
-      "id": "607989",
+      "id": "619543",
       "rating": 5,
       "name": "네****",
-      "content": "디자인도 귀엽고 착용하기 쉬워요",
-      "date": "2026-04-28T12:47:59+09:00",
+      "content": "빠른배송 감사합니다.",
+      "date": "2026-07-04T11:49:23+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/79/89/image1/6b391cf9841ed730.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/95/43/image1/49b2a6ed63f7865e.webp"
       ],
-      "content_ja": "デザインも可愛いし、つけやすいです"
+      "content_ja": "迅速な配送ありがとうございます。"
     },
     {
-      "id": "607993",
+      "id": "619585",
       "rating": 5,
       "name": "네****",
-      "content": "마음에듭니다 감사합니다\n저희강아지가 좋아해요",
-      "date": "2026-04-28T12:40:49+09:00",
+      "content": "잘빠지네요 ㅠㅠ 아슂",
+      "date": "2026-07-04T00:03:31+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/79/93/image1/638b06a1269afe43.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/95/85/image1/b9a4ad944cec0e4c.webp"
       ],
-      "content_ja": "気に入りました。ありがとうございます。うちの犬も気に入っています。"
+      "content_ja": "すぐ外れちゃいますね ㅠㅠ 残念です"
     },
     {
-      "id": "607997",
+      "id": "619615",
       "rating": 5,
       "name": "네****",
-      "content": "마음에듭니다 감사합니다\n저희강아지가 좋아해요",
-      "date": "2026-04-28T12:39:44+09:00",
+      "content": "일년치를 사뒀는데 댕친구들 하나 둘 주다보니 똑 떨어져 재주문합니다~",
+      "date": "2026-07-03T21:03:11+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/79/97/image1/99d3eb13bbe2a165.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/96/15/image1/65f480d30975c37b.webp"
       ],
-      "content_ja": "気に入りました。ありがとうございます。うちの犬も気に入っています。"
+      "content_ja": "1年分買い置きしたのですが、わんちゃん友達に1つ2つあげていたら、ちょうどなくなったので再注文します～"
     },
     {
-      "id": "607597",
+      "id": "619645",
       "rating": 5,
       "name": "네****",
-      "content": "냄새가 강하긴 한데 클립타입으로 아주 유용합니다!! 이번 여름 필수템~!",
-      "date": "2026-04-28T11:20:38+09:00",
+      "content": "작년에도 세개 세트 주문하고 좋아서 올해 또 주문했어요~!!",
+      "date": "2026-07-03T19:12:54+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/75/97/image1/c4e4448d9258a82b.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/96/45/image1/83349d559b58502d.webp"
       ],
-      "content_ja": "香りは強いんですが、クリップタイプでとても便利です！！この夏の必需品～！"
+      "content_ja": "去年も3個セットを注文して良かったので、今年もまた注文しました～!!"
     },
     {
-      "id": "607659",
+      "id": "619155",
       "rating": 5,
       "name": "네****",
-      "content": "빠른 배송 감사합니다.",
-      "date": "2026-04-27T21:17:19+09:00",
+      "content": "잘쓰고있네요,매번 산책에하고 나가요,벌써약발이 다돼가나봐요, 냄새가 약해졌네요,또주문해야겠네요,",
+      "date": "2026-07-02T12:55:41+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/76/59/image1/c5096b89b7a95d4e.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/91/55/image1/ee279f66eaa38c17.webp"
       ],
-      "content_ja": "迅速な配送をありがとうございます。"
+      "content_ja": "よく使っていますが、毎回散歩に付けて出かけています。もう薬の効果が切れかけてるみたいですね。匂いが弱くなりました。また注文しないとですね。"
     },
     {
-      "id": "607660",
+      "id": "619164",
       "rating": 5,
       "name": "네****",
-      "content": "가격도 저렴하고 배송도 빨랐어요😍😍 다음에 또 구매할게요 많이파세요🔥🔥🔥",
-      "date": "2026-04-27T21:15:57+09:00",
+      "content": "구매해서 잘 사용중이에요\n이것 덕분에 강아지는 안물리고 저만 물리고 다녀요",
+      "date": "2026-07-02T12:43:34+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/76/60/image1/7f28e72c45fa97e9.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/91/64/image1/bd68952e4111641e.webp"
       ],
-      "content_ja": "価格も安いし配送も早かったです😍😍 次もまた購入しますね たくさん売ってください🔥🔥🔥"
+      "content_ja": "購入して今も使っていますが\nこのおかげで愛犬は刺されず、私だけ刺されて帰ってきます"
     },
     {
-      "id": "607459",
-      "rating": 4,
-      "name": "네****",
-      "content": "잘고정되고 해충도 예방되는거 같아요",
-      "date": "2026-04-26T17:47:51+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/74/59/image1/afab62ac8b25566a.webp"
-      ],
-      "content_ja": "しっかり固定されて虫よけ効果もありそうです"
-    },
-    {
-      "id": "607499",
+      "id": "619170",
       "rating": 5,
       "name": "네****",
-      "content": "하루만에 와서 깜놀 오자마자 하네스에 끼었어요",
-      "date": "2026-04-26T12:42:58+09:00",
+      "content": "바잇미는 강아지 용품이 예뻐요 \n냄새도 좋고 \n끼우기도 편해요 \n여름 산책용으로 필수 입니다.\n다들 얼른 구입하세요",
+      "date": "2026-07-02T12:14:56+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/74/99/image1/1e0923cc40d37078.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/91/70/image1/fcd8ccc1ccb4d95e.webp"
       ],
-      "content_ja": "一日で届いてびっくり。届いたらすぐハーネスに付けちゃいました"
+      "content_ja": "バイトミは犬用品が可愛いです\n匂いも良くて\n付けるのも簡単です\n夏の散歩に必須アイテムです。\n皆さんお早めにご購入ください"
     },
     {
-      "id": "607535",
+      "id": "619177",
       "rating": 5,
       "name": "네****",
-      "content": "여름\n되면 항상\n구매해요 패치랑요!",
-      "date": "2026-04-26T08:22:42+09:00",
+      "content": "좋아요 잘 안빠질거 같아요~^^",
+      "date": "2026-07-02T10:48:02+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/75/35/image1/478ceb8379bc572f.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/91/77/image1/9244669d03a9f189.webp"
       ],
-      "content_ja": "夏になるたびに必ず購入してます。パッチとセットで！"
+      "content_ja": "良いです。すぐには外れなさそうですね～^^"
     },
     {
-      "id": "607123",
+      "id": "618863",
       "rating": 5,
       "name": "네****",
-      "content": "가볍게 잘 쓰고있어요",
-      "date": "2026-04-25T21:56:41+09:00",
+      "content": "산책하여할때 사용하려고 삿는데 만족합니다~",
+      "date": "2026-07-01T21:00:45+09:00",
       "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/71/23/image1/53ac0959d63b0b28.webp"
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/88/63/image1/af90d57c956d73f5.webp"
       ],
-      "content_ja": "軽くていい感じで使っています"
-    },
-    {
-      "id": "607170",
-      "rating": 5,
-      "name": "네****",
-      "content": "뿌리는거살려다가 이런게 더 낫다고해서 함사봤어요",
-      "date": "2026-04-25T17:49:44+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/71/70/image1/f6586efdfcb9a8b5.webp"
-      ],
-      "content_ja": "スプレータイプを買おうとしていたのですが、これの方が良いと言われたので試してみました。"
-    },
-    {
-      "id": "607192",
-      "rating": 5,
-      "name": "네****",
-      "content": "색깔도 부담스럽지않고 냄새도 그렇게 심하지않아서좋아요",
-      "date": "2026-04-25T14:54:05+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/71/92/image1/57a1e6d63f698399.webp"
-      ],
-      "content_ja": "色も負担にならず、匂いもそんなに強くないので良いです"
-    },
-    {
-      "id": "607000",
-      "rating": 5,
-      "name": "네****",
-      "content": "여름마다 아주 잘 쓰고있습니다",
-      "date": "2026-04-24T14:09:31+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/70/00/image1/c78daf14757b2882.webp"
-      ],
-      "content_ja": "毎年夏は本当によく使ってます"
-    },
-    {
-      "id": "606710",
-      "rating": 5,
-      "name": "방****",
-      "content": "향이 좀 오래갔으면 좋겠어요",
-      "date": "2026-04-23T22:06:36+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/67/10/image1/e2e35576bcfe29ba.webp"
-      ],
-      "content_ja": "香りがもっと長く続いたら良いのに"
-    },
-    {
-      "id": "606789",
-      "rating": 5,
-      "name": "네****",
-      "content": "색깔도 귀여워서 좋아요",
-      "date": "2026-04-23T18:13:58+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/67/89/image1/ec4cbaf53040b52e.webp"
-      ],
-      "content_ja": "色もかわいくて良いです"
-    },
-    {
-      "id": "606790",
-      "rating": 5,
-      "name": "네****",
-      "content": "하네스에 달기 편해요~~",
-      "date": "2026-04-23T18:13:24+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/67/90/image1/28682557fb2c9f72.webp"
-      ],
-      "content_ja": "ハーネスに付けやすいです~~"
-    },
-    {
-      "id": "606827",
-      "rating": 5,
-      "name": "네****",
-      "content": "향이 강하지읺고 편아게 잘사용이 되어서 좋습니다",
-      "date": "2026-04-23T15:21:50+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/68/27/image1/335fdda0debae78e.webp"
-      ],
-      "content_ja": "匂いが強くなく、使いやすくて良いです"
-    },
-    {
-      "id": "606845",
-      "rating": 5,
-      "name": "네****",
-      "content": "진드기방지에 최고예요~~~",
-      "date": "2026-04-23T14:14:35+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/68/45/image1/2800627b5b7363ea.webp"
-      ],
-      "content_ja": "ダニ予防に最高です~~~"
-    },
-    {
-      "id": "605780",
-      "rating": 5,
-      "name": "권****",
-      "content": "여름산책을 위햐 준비해여",
-      "date": "2026-04-23T01:43:38+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/57/80/image1/d193763328d17a0a.webp"
-      ],
-      "content_ja": "夏の散歩に向けて準備しました。"
-    },
-    {
-      "id": "605874",
-      "rating": 5,
-      "name": "네****",
-      "content": "아직 사용 안해봤는데 귀욥습니다",
-      "date": "2026-04-23T00:35:07+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/58/74/image1/558299c913f49b2c.webp"
-      ],
-      "content_ja": "まだ使ってみてないんですけど、かわいいです"
-    },
-    {
-      "id": "606211",
-      "rating": 5,
-      "name": "네****",
-      "content": "향이 일단 너무 조아여!!",
-      "date": "2026-04-22T08:38:29+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/62/11/image1/3d7c1ad5e183cc8c.webp"
-      ],
-      "content_ja": "香りがとにかくすごく好きです!!"
-    },
-    {
-      "id": "606220",
-      "rating": 5,
-      "name": "네****",
-      "content": "진드기가 하도 난리라길래 효과있길 바라며 구매했어요 바잇미 하네스랑 깔맞춤 하니까 귀엽네요 냄새는\n센 편이에요 약국에서 파는 모기기피 팔찌(사람용) 이랑 똑같은 냄새 나요 강아지가 별 신경 안쓰고 평소처럼 산책 잘하는거 보니 냄새가 불편하진 않은거같아서 다행이에요",
-      "date": "2026-04-22T01:30:23+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/62/20/image1/df3f57c040a8213f.webp"
-      ],
-      "content_ja": "ダニがすごく多いということで、効果があればいいなと思って買いました。バイトミのハーネスとコーディネートしたら可愛いですね。匂いは結構強めです。薬局で売っている蚊よけリストバンド（人用）と同じ匂いがします。ワンちゃんが特に気にしていなくて、いつも通り散歩をしているのを見ると、匂いが不快ではないみたいで安心しました"
-    },
-    {
-      "id": "606226",
-      "rating": 5,
-      "name": "네****",
-      "content": "아직 사용전인데 너무 귀엽게 생겨서 만족스럽습니당 \n잘사용하겠숩니다",
-      "date": "2026-04-21T23:59:27+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/60/62/26/image1/e261b58c38638caf.webp"
-      ],
-      "content_ja": "まだ使う前ですが、見た目がすごく可愛らしくて満足です\n大切に使わせていただきます"
+      "content_ja": "散歩する時に使おうと思って買いましたが満足しています～"
     }
   ]
 }
