@@ -1,8 +1,74 @@
 {
   "product_cd": "1000003654",
-  "scraped_at": "2026-05-08T05:19:06.230Z",
+  "scraped_at": "2026-08-12T11:16:03.427Z",
   "total": 50,
   "reviews": [
+    {
+      "id": "622931",
+      "rating": 5,
+      "name": "네****",
+      "content": "울강쥐 인형어부바 시켰더니 넘 귀여워요\n여름에는 더울꺼 같아요",
+      "date": "2026-07-25T16:01:37+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/29/31/image1/2d9cc3dc8d4d1528.webp"
+      ],
+      "content_ja": "灰色のネズミのおもちゃでおんぶをさせたらすごく可愛いです\n夏は暑そうな気がします"
+    },
+    {
+      "id": "621515",
+      "rating": 5,
+      "name": "네****",
+      "content": "강아지가 노즈워크를 좋아하는데 바잇미 제품들이 가장 품질이 좋아요",
+      "date": "2026-07-15T19:06:20+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/15/15/image1/3df8ffdb546ea93b.webp"
+      ],
+      "content_ja": "犬がノーズワークが好きなのですが、バイトミーの製品が一番品質が良いです"
+    },
+    {
+      "id": "618105",
+      "rating": 5,
+      "name": "네****",
+      "content": "지인 선물로 구매했습니다!",
+      "date": "2026-06-26T11:01:57+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/81/05/image1/73f7ce927ff0dd1a.webp"
+      ],
+      "content_ja": "知人へのプレゼント用に購入しました！"
+    },
+    {
+      "id": "617628",
+      "rating": 5,
+      "name": "네****",
+      "content": "동생도 생겼는데 어부바 해주다가 포대기 끈 풀고 동생 내려놓으몬 간식도 나오니 재밌어서 환장 중",
+      "date": "2026-06-24T21:33:47+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/76/28/image1/5b70f9acc026a738.webp"
+      ],
+      "content_ja": "弟もできたのですが、おんぶをしてからおくるみの紐を解いて弟を下ろすとおやつも出てくるので楽しくてはまっています"
+    },
+    {
+      "id": "614056",
+      "rating": 5,
+      "name": "네****",
+      "content": "사이즈가 딱 좋아요 ㅎㅎ 너무 귀여워요",
+      "date": "2026-06-05T00:58:24+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/40/56/image1/7b0d9db00384ce9d.webp"
+      ],
+      "content_ja": "サイズがちょうど良いです ㅎㅎ すごく可愛いです"
+    },
+    {
+      "id": "610471",
+      "rating": 5,
+      "name": "네****",
+      "content": "가격대비 좋아요 우리 로이한테 동생이 생겼어요",
+      "date": "2026-05-12T13:30:19+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/04/71/image1/4c1cf9661d8f1456.webp"
+      ],
+      "content_ja": "価格の割に良いです 我が家のロイに弟ができました"
+    },
     {
       "id": "604718",
       "rating": 5,
@@ -514,77 +580,6 @@
         "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/36/55/67/image1/4f1581c4a45f45f0.webp"
       ],
       "content_ja": "おんぶひもにノーズワークも付いていて、わんちゃんが気に入ってます\nただ、わんちゃんのぬいぐるみのお腹の部分の仕上げがきちんとされていません\nペットが遊ぶおもちゃなので、気を付けていただきたいです"
-    },
-    {
-      "id": "364917",
-      "rating": 5,
-      "name": "Y****",
-      "content": "넘 좋아하고 잘 놀아요~",
-      "date": "2022-11-23T08:51:11+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/36/49/17/image1/45fe14e7781c134f.webp",
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/36/49/17/image2/069491e9f8cdd832.webp",
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/36/49/17/image3/ed525372abb35dcd.webp"
-      ],
-      "content_ja": "すごく気に入って、よく遊んでますよ～"
-    },
-    {
-      "id": "354835",
-      "rating": 5,
-      "name": "박****",
-      "content": "ㅋㅋ 귀여워요~ 노즈워크도있어서 좋아요~",
-      "date": "2022-11-04T19:29:14+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/35/48/35/image1/b0a0c3480601cbe3.webp"
-      ],
-      "content_ja": "ㅋㅋ 可愛いですね～ノーズワークもあるので良いです～"
-    },
-    {
-      "id": "272937",
-      "rating": 5,
-      "name": "김****",
-      "content": "귀엽고 좋았어요\n포대기가 노즈워크도 할수 있어 좋아요",
-      "date": "2022-08-15T16:10:11+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/27/29/37/image1/25125701d16f7302.webp",
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/27/29/37/image2/ba2f729bb5875863.webp",
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/27/29/37/image3/57addb015a63237d.webp"
-      ],
-      "content_ja": "かわいくていいですね😊\nおくるみがノーズワークもできるので良いです"
-    },
-    {
-      "id": "266299",
-      "rating": 5,
-      "name": "이****",
-      "content": "배송은 좀 걸렸지만 애기들이 잘가지고놀아요",
-      "date": "2022-08-04T20:44:55+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/26/62/99/image1/f522430261343e8f.webp"
-      ],
-      "content_ja": "配送は少し時間がかかりましたが、子たちがよく遊んでます"
-    },
-    {
-      "id": "256720",
-      "rating": 5,
-      "name": "j****",
-      "content": "걍 너무 귀여워요ㅠㅠ 말해모해!!",
-      "date": "2022-07-24T08:08:03+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/25/67/20/image1/65f573cee06a80ac.webp",
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/25/67/20/image2/69d8bbf9b1a86265.webp"
-      ],
-      "content_ja": "本当に可愛すぎます😭😭 どうしようもない!!"
-    },
-    {
-      "id": "254594",
-      "rating": 5,
-      "name": "김****",
-      "content": "너무너무너무너무너무 기여워용 좀 더 빨리 살껄 후회중입니당ㅋㅋ",
-      "date": "2022-07-21T11:43:50+09:00",
-      "images": [
-        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/25/45/94/image1/3e9f5ad928104901.webp"
-      ],
-      "content_ja": "超超超超超かわいいです〜もっと早く買えばよかったと後悔中ですㅋㅋ"
     }
   ]
 }

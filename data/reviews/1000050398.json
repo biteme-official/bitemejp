@@ -1,8 +1,19 @@
 {
   "product_cd": "1000050398",
-  "scraped_at": "2026-05-08T05:11:44.865Z",
-  "total": 1,
+  "scraped_at": "2026-08-12T11:07:49.609Z",
+  "total": 2,
   "reviews": [
+    {
+      "id": "621743",
+      "rating": 5,
+      "name": "한****",
+      "content": "강애쥐옷만 샀었다가 기어코 커플룩 완성햇어요",
+      "date": "2026-07-19T08:23:25+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/17/43/image1/b6764ac984121959.webp"
+      ],
+      "content_ja": "最初は1人分だけ購入していましたが、結局カップルルックを完成させました"
+    },
     {
       "id": "587805",
       "rating": 5,

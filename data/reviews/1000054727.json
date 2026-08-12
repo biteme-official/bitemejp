@@ -1,8 +1,19 @@
 {
   "product_cd": "1000054727",
-  "scraped_at": "2026-05-08T04:58:58.591Z",
-  "total": 5,
+  "scraped_at": "2026-08-12T11:02:06.625Z",
+  "total": 6,
   "reviews": [
+    {
+      "id": "612678",
+      "rating": 5,
+      "name": "다****",
+      "content": "강아지가 잘 가지고 놀아요 배송 빨랐어요!",
+      "date": "2026-05-26T11:33:36+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/26/78/image1/de149146ef687577.webp"
+      ],
+      "content_ja": "犬がよく持って遊びます。配送が早かったです！"
+    },
     {
       "id": "595733",
       "rating": 5,

@@ -1,8 +1,19 @@
 {
   "product_cd": "1000037464",
-  "scraped_at": "2026-05-08T05:15:11.138Z",
-  "total": 38,
+  "scraped_at": "2026-08-12T11:11:04.233Z",
+  "total": 39,
   "reviews": [
+    {
+      "id": "618183",
+      "rating": 5,
+      "name": "네****",
+      "content": "너무 귀여워서 구매했어요. \n튼튼하고 내구성이 좋네요! ^^",
+      "date": "2026-06-27T23:09:17+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/81/83/image1/9715eb30a5fd60c6.webp"
+      ],
+      "content_ja": "とても可愛いので購入しました。\n丈夫で耐久性が良いですね！^^"
+    },
     {
       "id": "536868",
       "rating": 5,

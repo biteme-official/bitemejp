@@ -15,6 +15,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const REVIEWS_DIR = join(__dirname, '..', 'data', 'reviews');
 const MAX = 50;
 
+/**
+ * 트림 제외 상품 (kr_product_cd)
+ * - 1000018319 コンフォートハンズフリーリード: 리뷰 건수 자체가 마케팅 자산이라
+ *   전량 유지하기로 결정 (2026-08-12). 파일이 커지므로 추가는 신중히.
+ */
+const EXEMPT = new Set(['1000018319']);
+
 interface Review {
   id: string;
   rating: number;
@@ -43,6 +50,12 @@ let skipped = 0;
 for (const file of targets) {
   const path = join(REVIEWS_DIR, file);
   const data: ProductReviewData = JSON.parse(readFileSync(path, 'utf-8'));
+
+  if (EXEMPT.has(data.product_cd)) {
+    console.log(`  [${data.product_cd}] 트림 제외 (${data.reviews.length}건 유지)`);
+    skipped++;
+    continue;
+  }
 
   if (data.reviews.length <= MAX) {
     skipped++;

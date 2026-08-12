@@ -1,8 +1,64 @@
 {
   "product_cd": "1000050199",
-  "scraped_at": "2026-05-08T05:11:40.409Z",
-  "total": 29,
+  "scraped_at": "2026-08-12T11:07:47.958Z",
+  "total": 34,
   "reviews": [
+    {
+      "id": "623300",
+      "rating": 5,
+      "name": "네****",
+      "content": "패키징 너무 예쁘구요🩷 원래 그냥 수건 썼는데 다른제품 선물 받아서 써보니 너무 좋아서 바잇미에서 구매해용~ 일반 수건이랑 다르게 보드라와서 너무 좋으네요🌸🩷",
+      "date": "2026-07-29T03:14:10+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/33/00/image1/5e09fbf4eb461e4e.webp"
+      ],
+      "content_ja": "パッケージがとても可愛いです🩷 元々タオルを使ってたんですが、別の製品をもらって使ってみたらすごく良くて、バイトミーで購入しました~ 普通のタオルと違ってふわふわで本当に良いですね🌸🩷"
+    },
+    {
+      "id": "622783",
+      "rating": 4,
+      "name": "네****",
+      "content": "사용전이지만 예쁘네요",
+      "date": "2026-07-24T17:44:23+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/27/83/image1/26de60700b910abc.webp"
+      ],
+      "content_ja": "使用前ですが可愛いです"
+    },
+    {
+      "id": "622784",
+      "rating": 4,
+      "name": "네****",
+      "content": "사용전이지만 예쁘네요",
+      "date": "2026-07-24T17:44:02+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/27/84/image1/54186e8226588515.webp"
+      ],
+      "content_ja": "使用前ですが可愛いです"
+    },
+    {
+      "id": "622701",
+      "rating": 5,
+      "name": "김****",
+      "content": "처음목욕시켰네요^^\n확실히극세사라 물도흡수잘하고\n아이가따뜻하니 좋아하네요~~ \n금방말릴수있어서 좋네요~~",
+      "date": "2026-07-24T17:04:30+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/27/01/image1/4716fa23eb79e7db.webp",
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/62/27/01/image2/849c169a65122727.webp"
+      ],
+      "content_ja": "初めてお風呂に使ってみました^^\nやはりマイクロファイバーなので水もよく吸収するし\n子どもが温かくて気に入ってますね~~ \nすぐに乾くから良いですね~~"
+    },
+    {
+      "id": "615939",
+      "rating": 5,
+      "name": "네****",
+      "content": "패키지가 넘 예뻐서 놀랐어여",
+      "date": "2026-06-15T20:30:27+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/59/39/image1/b44b1ba3ff763399.webp"
+      ],
+      "content_ja": "パッケージがすごく可愛くてびっくりしました"
+    },
     {
       "id": "588796",
       "rating": 5,

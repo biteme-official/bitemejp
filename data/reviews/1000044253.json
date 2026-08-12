@@ -1,8 +1,21 @@
 {
   "product_cd": "1000044253",
-  "scraped_at": "2026-05-07T12:57:06.310Z",
-  "total": 15,
+  "scraped_at": "2026-08-12T11:11:45.673Z",
+  "total": 16,
   "reviews": [
+    {
+      "id": "615424",
+      "rating": 5,
+      "name": "박****",
+      "content": "큰 사이즈로 사길 잘 한것 같아요! 여유롭게 들어가요. 작은 미니 헤어퍼퓸제품이랑 같이 넣음 좋을것 같아요! 핑크색은 사랑입니다 ♡",
+      "date": "2026-06-13T00:25:45+09:00",
+      "images": [
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/54/24/image1/19ad35508896567d.webp",
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/54/24/image2/1400d1fef0a96a16.webp",
+        "https://assets6.cre.ma/p/biteme-co-kr/reviews/00/00/61/54/24/image3/26439f656c64ea37.webp"
+      ],
+      "content_ja": "大きいサイズを買ってよかったと思います！ゆとりを持って入ります。小さいミニヘアパフューム製品と一緒に入れるといいと思います！ピンク色は最高です ♡"
+    },
     {
       "id": "565599",
       "rating": 5,
