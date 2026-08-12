@@ -58,15 +58,30 @@ export function judgemeReviewsMiddleware(): Connect.NextHandleFunction {
       return;
     }
 
-    const params = new URLSearchParams({
-      api_token: token,
-      shop_domain: SHOP_DOMAIN,
-      product_external_id: numericId,
-      per_page: String(PER_PAGE),
-      page: '1',
-    });
-
     try {
+      // /reviews 는 Judge.me 내부 product_id 로만 필터된다 (external id 는 무시됨)
+      const pRes = await fetch(
+        `${BASE_URL}/products/-1?${new URLSearchParams({
+          api_token: token,
+          shop_domain: SHOP_DOMAIN,
+          external_id: numericId,
+        })}`
+      );
+      const productId = pRes.ok
+        ? ((await pRes.json()) as { product?: { id?: number } }).product?.id
+        : null;
+      if (!productId) {
+        res.end(JSON.stringify({ reviews: [], total: 0 }));
+        return;
+      }
+
+      const params = new URLSearchParams({
+        api_token: token,
+        shop_domain: SHOP_DOMAIN,
+        product_id: String(productId),
+        per_page: String(PER_PAGE),
+        page: '1',
+      });
       const jRes = await fetch(`${BASE_URL}/reviews?${params}`);
       if (!jRes.ok) {
         res.end(JSON.stringify({ reviews: [], total: 0, error: `judgeme_${jRes.status}` }));

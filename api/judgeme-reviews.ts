@@ -70,6 +70,30 @@ function toPublicReview(r: JudgemeReview): PublicReview {
   };
 }
 
+/** Shopify 상품 ID → Judge.me 내부 상품 ID (람다 재사용 구간 동안 캐시) */
+const productIdCache = new Map<string, number | null>();
+
+async function resolveJudgemeProductId(externalId: string): Promise<number | null> {
+  const cached = productIdCache.get(externalId);
+  if (cached !== undefined) return cached;
+
+  const params = new URLSearchParams({
+    api_token: PRIVATE_TOKEN,
+    shop_domain: SHOP_DOMAIN,
+    external_id: externalId,
+  });
+  const res = await fetch(`${BASE_URL}/products/-1?${params}`);
+  if (!res.ok) {
+    // 미등록 상품(404)만 캐시. 5xx 는 다음 요청에서 재시도.
+    if (res.status === 404) productIdCache.set(externalId, null);
+    return null;
+  }
+  const data = (await res.json()) as { product?: { id?: number } };
+  const id = data.product?.id ?? null;
+  productIdCache.set(externalId, id);
+  return id;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const corsOrigin = getCorsOrigin(req);
   res.setHeader('Access-Control-Allow-Origin', corsOrigin);
@@ -91,16 +115,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const numericId = String(shopify_product_id).split('/').pop()!;
 
-  const params = new URLSearchParams({
-    api_token: PRIVATE_TOKEN,
-    shop_domain: SHOP_DOMAIN,
-    product_external_id: numericId,
-    per_page: String(PER_PAGE),
-    page: '1',
-  });
-
   let raw: JudgemeReview[];
   try {
+    // 1단계: Shopify 상품 ID → Judge.me 내부 상품 ID
+    // ⚠️ /reviews 는 product_id(내부 ID)로만 필터된다. product_external_id 를 넘기면
+    //    조용히 무시되고 "샵 전체 리뷰"가 돌아오므로 반드시 이 변환을 거칠 것.
+    const productId = await resolveJudgemeProductId(numericId);
+    if (!productId) {
+      return res.status(200).json({ reviews: [], total: 0 });
+    }
+
+    // 2단계: 해당 상품의 리뷰만 조회
+    const params = new URLSearchParams({
+      api_token: PRIVATE_TOKEN,
+      shop_domain: SHOP_DOMAIN,
+      product_id: String(productId),
+      per_page: String(PER_PAGE),
+      page: '1',
+    });
     const jRes = await fetch(`${BASE_URL}/reviews?${params}`);
     if (!jRes.ok) {
       return res.status(200).json({ reviews: [], total: 0, error: `judgeme_${jRes.status}` });
