@@ -9,6 +9,8 @@ import {
   Package, Truck, ExternalLink, MapPin, CreditCard,
 } from 'lucide-react';
 import { LineLoginButton } from '@/components/auth/LineLoginButton';
+import { EmailSettingsCard } from '@/components/auth/EmailSettingsCard';
+import { isPlaceholderEmail } from '@/lib/line-auth';
 import { fetchCustomerOrdersViaAdmin, ShopifyOrder, formatPrice } from '@/lib/shopify';
 import { useWishlistStore } from '@/stores/wishlistStore';
 
@@ -196,7 +198,10 @@ export default function MyPage() {
             )}
             <div className="flex-1 min-w-0">
               <h2 className="text-lg font-bold truncate">{user.displayName}</h2>
-              {user.email && <p className="text-xs text-muted-foreground truncate">{user.email}</p>}
+              {/* 자리표시자 이메일은 실제 주소가 아니므로 감춘다 (아래 카드에서 등록을 안내) */}
+              {user.email && !isPlaceholderEmail(user.email) && (
+                <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+              )}
               <div className="flex items-center gap-3 mt-1.5">
                 {orders.length > 0 && (
                   <span className="text-[10px] text-muted-foreground flex items-center gap-1">
@@ -218,6 +223,9 @@ export default function MyPage() {
             </div>
           )}
         </div>
+
+        {/* Email */}
+        <EmailSettingsCard />
 
         {/* Menu */}
         <div className="bg-card rounded-xl border border-border divide-y divide-border px-4">
