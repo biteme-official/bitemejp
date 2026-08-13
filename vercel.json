@@ -53,7 +53,6 @@
     { "source": "/sitemap.xml", "destination": "/api/sitemap" },
     { "source": "/api/shopify", "destination": "/api/shopify" },
     { "source": "/api/line-callback", "destination": "/api/line-callback" },
-    { "source": "/api/wishlist", "destination": "/api/wishlist" },
     { "source": "/api/customer-orders", "destination": "/api/customer-orders" },
     { "source": "/api/refresh-customer-token", "destination": "/api/refresh-customer-token" },
     { "source": "/api/instagram-reels", "destination": "/api/instagram-reels" },
