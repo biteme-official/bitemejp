@@ -9,6 +9,7 @@ import {
   Package, Truck, ExternalLink, MapPin, CreditCard,
 } from 'lucide-react';
 import { LineLoginButton } from '@/components/auth/LineLoginButton';
+import { EmailSettingsCard } from '@/components/auth/EmailSettingsCard';
 import { fetchCustomerOrdersViaAdmin, ShopifyOrder, formatPrice } from '@/lib/shopify';
 import { useWishlistStore } from '@/stores/wishlistStore';
 
@@ -196,7 +197,8 @@ export default function MyPage() {
             )}
             <div className="flex-1 min-w-0">
               <h2 className="text-lg font-bold truncate">{user.displayName}</h2>
-              {user.email && <p className="text-xs text-muted-foreground truncate">{user.email}</p>}
+              {/* 이메일은 바로 아래 카드가 보여준다. 여기서 user.email(=LINE 이 준 주소)을
+                  같이 띄우면 Shopify 에 등록된 실제 발송 주소와 어긋나 보인다. */}
               <div className="flex items-center gap-3 mt-1.5">
                 {orders.length > 0 && (
                   <span className="text-[10px] text-muted-foreground flex items-center gap-1">
@@ -218,6 +220,9 @@ export default function MyPage() {
             </div>
           )}
         </div>
+
+        {/* Email */}
+        <EmailSettingsCard />
 
         {/* Menu */}
         <div className="bg-card rounded-xl border border-border divide-y divide-border px-4">

@@ -9,7 +9,11 @@
  *
  * 인증 (둘 중 하나): Storefront customerAccessToken, 또는 /api/line-callback 이
  *       서명한 lineSessionToken. 어느 쪽이든 서버가 검증하며, 클라이언트가 보낸
- *       고객 ID 는 신뢰하지 않는다. 자리표시자 이메일인 경우에만 변경을 허용한다.
+ *       고객 ID 는 신뢰하지 않는다.
+ *
+ * 2026-08-13: 자리표시자 이메일일 때만 허용하던 제한을 풀었다. 그 제한 때문에
+ * 한 번 등록한 유저는 오타를 쳐도 스스로 고칠 수단이 없었다(마이페이지에서
+ * 변경 — Issue #122). 대신 본인 확인을 고객 레코드의 line_id 로 강화했다.
  *
  * 세션 토큰을 함께 받는 이유: 초기 가입자 일부는 결정론적 비밀번호로
  * customerAccessToken 이 발급되지 않아(UNIDENTIFIED_CUSTOMER) 토큰만 요구하면
@@ -69,13 +73,16 @@ function generatePassword(lineUserId: string): string {
   return createHmac('sha256', secret).update(lineUserId).digest('hex').substring(0, 32);
 }
 
+const LINE_USER_ID_RE = /^U[0-9a-f]{32}$/;
+const LINE_ID_TAG_PREFIX = 'line_id:';
+
 /** 자리표시자 이메일에서 LINE userId 를 복원 (비밀번호 재생성용) */
 function extractLineUserId(email: string): string | null {
   if (!email.endsWith(PLACEHOLDER_EMAIL_DOMAIN)) return null;
   const localPart = email.slice(0, -PLACEHOLDER_EMAIL_DOMAIN.length);
   if (!localPart.startsWith('line_')) return null;
   const userId = localPart.slice('line_'.length);
-  return /^U[0-9a-f]{32}$/.test(userId) ? userId : null;
+  return LINE_USER_ID_RE.test(userId) ? userId : null;
 }
 
 async function getStorefrontToken(): Promise<string> {
@@ -130,6 +137,85 @@ async function adminGraphQL(token: string, query: string, variables: Record<stri
     body: JSON.stringify({ query, variables }),
   });
   return res.json();
+}
+
+/**
+ * 고객 레코드에 저장된 LINE userId 를 읽는다. 메타필드 → 태그 → 자리표시자
+ * 이메일 순으로 본다. 실제 이메일로 바꾼 뒤에는 이메일에 userId 가 남지 않으므로
+ * 이메일만 보고 판단하면 안 된다.
+ *
+ * `stored` 는 그 값이 메타필드·태그에서 나왔는지를 말한다. 이메일에서 복원한
+ * 것뿐이라면 이메일을 바꾸는 순간 연결고리가 사라지므로, 호출부가 이 값을 보고
+ * 매핑을 함께 저장해야 한다.
+ *
+ * tags 는 함께 돌려준다 — customerUpdate(input.tags) 는 병합이 아니라 전체 교체라,
+ * 태그를 새로 붙이려면 기존 목록을 알아야 한다. 읽기에 실패했으면 null 이므로
+ * 호출부는 tags 를 아예 보내지 않는 쪽을 택해야 기존 태그가 날아가지 않는다.
+ */
+async function readCustomerLineIdentity(
+  adminToken: string,
+  customerId: string
+): Promise<{ lineUserId: string | null; stored: boolean; tags: string[] } | null> {
+  const result = await adminGraphQL(adminToken, `
+    query LineIdentity($id: ID!) {
+      customer(id: $id) {
+        email
+        tags
+        metafield(namespace: "custom", key: "line_id") { value }
+      }
+    }
+  `, { id: customerId });
+
+  const customer = result?.data?.customer;
+  if (!customer) {
+    console.error('[Update Email] line_id 조회 실패:', JSON.stringify(result?.errors ?? result));
+    return null;
+  }
+
+  const tags: string[] = Array.isArray(customer.tags) ? customer.tags.filter((t: unknown) => typeof t === 'string') : [];
+
+  const fromMetafield = typeof customer.metafield?.value === 'string' ? customer.metafield.value.trim() : '';
+  if (LINE_USER_ID_RE.test(fromMetafield)) return { lineUserId: fromMetafield, stored: true, tags };
+
+  const fromTag = tags.find((t) => t.startsWith(LINE_ID_TAG_PREFIX))?.slice(LINE_ID_TAG_PREFIX.length).trim() ?? '';
+  if (LINE_USER_ID_RE.test(fromTag)) return { lineUserId: fromTag, stored: true, tags };
+
+  return { lineUserId: extractLineUserId(customer.email ?? ''), stored: false, tags };
+}
+
+/**
+ * 이메일이 바뀌면 기존 customerAccessToken 이 무효화될 수 있으므로 재발급한다.
+ * 비밀번호는 LINE userId 기반 결정론적 생성이라 그대로 유효하다.
+ * 재발급 실패는 치명적이지 않다(세션 토큰 인증이 남는다) — null 을 돌려준다.
+ */
+async function issueCustomerAccessToken(
+  sfToken: string,
+  email: string,
+  lineUserId: string
+): Promise<string | null> {
+  try {
+    const tokenResult = await storefrontQuery(sfToken, `
+      mutation Refresh($input: CustomerAccessTokenCreateInput!) {
+        customerAccessTokenCreate(input: $input) {
+          customerAccessToken { accessToken }
+          customerUserErrors { code message }
+        }
+      }
+    `, { input: { email, password: generatePassword(lineUserId) } });
+
+    const token: string | null =
+      tokenResult?.data?.customerAccessTokenCreate?.customerAccessToken?.accessToken ?? null;
+    if (!token) {
+      console.error(
+        '[Update Email] 토큰 재발급 실패:',
+        JSON.stringify(tokenResult?.data?.customerAccessTokenCreate?.customerUserErrors)
+      );
+    }
+    return token;
+  } catch (err) {
+    console.error('[Update Email] 토큰 재발급 중 예외:', err);
+    return null;
+  }
 }
 
 // 서버측 최소 검증. 최종 유효성은 Shopify 가 판단한다.
@@ -196,35 +282,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           `, { query: `tag:"line_id:${session.lineUserId}"` });
 
       me = lookup?.data?.customer ?? lookup?.data?.customers?.edges?.[0]?.node ?? null;
-
-      // 서명된 고객 ID 가 그 LINE 유저의 것인지 확인한다. 자리표시자 이메일이면
-      // 로컬파트의 userId 로, 실제 이메일로 바뀐 뒤라면 line_id 태그로 대조한다.
-      if (me?.id) {
-        const emailUserId = extractLineUserId(me.email ?? '');
-        if (emailUserId && emailUserId !== session.lineUserId) {
-          console.error('[Update Email] 🔴 세션의 userId 와 고객 이메일의 userId 불일치');
-          me = null;
-        }
-      }
     }
 
     if (!me?.id) {
       return res.status(401).json({ message: 'ログイン情報が無効です。もう一度ログインしてください。' });
     }
 
-    // 2. 자리표시자 이메일일 때만 허용 (이미 실제 이메일이면 변경 대상 아님)
+    // 2. 같은 주소면 Shopify 를 건드리지 않는다.
     const currentEmail: string = me.email ?? '';
-    if (!currentEmail.endsWith(PLACEHOLDER_EMAIL_DOMAIN)) {
-      return res.status(200).json({ email: currentEmail, alreadySet: true });
+    if (currentEmail.toLowerCase() === newEmail) {
+      return res.status(200).json({ email: currentEmail, unchanged: true });
     }
 
-    const lineUserId = extractLineUserId(currentEmail);
-    if (!lineUserId) {
-      console.error('[Update Email] 🔴 자리표시자 이메일에서 userId 추출 실패:', currentEmail);
-      return res.status(500).json({ message: 'アカウント情報の確認に失敗しました。' });
+    // 3. 본인 확인 + 토큰 재발급용 LINE userId 확보.
+    //    세션 토큰 경로로 찾은 고객은 서명된 토큰 자체가 본인 증명이지만,
+    //    레코드에 다른 유저의 line_id 가 붙어 있다면 조회가 틀어진 것이므로 중단한다.
+    const identity = await readCustomerLineIdentity(adminToken, me.id);
+
+    if (session && identity?.lineUserId && identity.lineUserId !== session.lineUserId) {
+      console.error('[Update Email] 🔴 세션의 userId 와 고객 레코드의 line_id 불일치');
+      return res.status(401).json({ message: 'ログイン情報が無効です。もう一度ログインしてください。' });
     }
 
-    // 3. Admin API 로 이메일 교체
+    const lineUserId = identity?.lineUserId ?? session?.lineUserId ?? null;
+
+    // 자리표시자 이메일을 실제 이메일로 바꾸면 로컬파트의 userId 가 사라진다.
+    // 메타필드·태그에 매핑이 없는 계정은 지금 붙여두지 않으면 연결 수단이 영영
+    // 없어지고, 다음 로그인에서 고객을 못 찾아 중복 고객이 생긴다.
+    // ⚠️ userId 를 이메일에서 복원했을 뿐인 경우(stored=false)가 바로 그 상황이다.
+    // ⚠️ input.tags 는 병합이 아니라 전체 교체다. 태그 읽기가 실패했으면(identity=null)
+    //    보내지 않아야 기존 태그(joy_tag_member 등)가 지워지지 않는다.
+    const needsMappingBackfill = !!lineUserId && !!identity && !identity.stored;
+
+    const updateInput: Record<string, unknown> = { id: me.id, email: newEmail };
+    if (needsMappingBackfill) {
+      // api/line-callback.ts 의 매핑 저장과 같은 형태로 맞춘다 (line_member 포함).
+      updateInput.tags = Array.from(new Set([
+        ...identity!.tags.filter((t) => !t.startsWith(LINE_ID_TAG_PREFIX)),
+        `${LINE_ID_TAG_PREFIX}${lineUserId}`,
+        'line_member',
+      ]));
+      updateInput.metafields = [
+        { namespace: 'custom', key: 'line_id', type: 'single_line_text_field', value: lineUserId },
+      ];
+    }
+
+    // 4. Admin API 로 이메일 교체
     const updateResult = await adminGraphQL(adminToken, `
       mutation UpdateEmail($input: CustomerInput!) {
         customerUpdate(input: $input) {
@@ -232,7 +335,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           userErrors { field message }
         }
       }
-    `, { input: { id: me.id, email: newEmail } });
+    `, { input: updateInput });
 
     if (updateResult?.errors) {
       console.error(
@@ -249,6 +352,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const taken = userErrors.some((e) => /taken|已|すでに/i.test(e.message));
       console.error('[Update Email] 🔴 이메일 변경 userErrors:', JSON.stringify(userErrors));
       return res.status(taken ? 409 : 400).json({
+        // 프론트가 충돌을 따로 안내할 수 있게 코드를 함께 준다. 병합은 API 로 불가
+        // (read/write_customer_merge 스코프 없음) 하므로 문의 안내로 이어진다.
+        code: taken ? 'EMAIL_TAKEN' : 'UPDATE_FAILED',
         message: taken
           ? 'このメールアドレスは既に別のアカウントで使用されています。'
           : 'メールアドレスの登録に失敗しました。',
@@ -257,29 +363,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const updatedEmail: string = updateResult?.data?.customerUpdate?.customer?.email ?? newEmail;
 
-    // 4. 이메일이 바뀌면 기존 customerAccessToken 이 무효화될 수 있으므로 재발급한다.
+    // 5. 이메일이 바뀌면 기존 customerAccessToken 이 무효화될 수 있으므로 재발급한다.
     //    비밀번호는 LINE userId 기반 결정론적 생성이라 그대로 유효하다.
     let refreshedToken: string | null = null;
-    try {
-      const tokenResult = await storefrontQuery(sfToken, `
-        mutation Refresh($input: CustomerAccessTokenCreateInput!) {
-          customerAccessTokenCreate(input: $input) {
-            customerAccessToken { accessToken }
-            customerUserErrors { code message }
-          }
-        }
-      `, { input: { email: updatedEmail, password: generatePassword(lineUserId) } });
-
-      refreshedToken =
-        tokenResult?.data?.customerAccessTokenCreate?.customerAccessToken?.accessToken ?? null;
-      if (!refreshedToken) {
-        console.error(
-          '[Update Email] 토큰 재발급 실패:',
-          JSON.stringify(tokenResult?.data?.customerAccessTokenCreate?.customerUserErrors)
-        );
-      }
-    } catch (err) {
-      console.error('[Update Email] 토큰 재발급 중 예외:', err);
+    if (lineUserId) {
+      refreshedToken = await issueCustomerAccessToken(sfToken, updatedEmail, lineUserId);
+    } else {
+      // 매핑이 없으면 비밀번호를 만들 수 없다. 세션 토큰 인증은 계속 동작하므로
+      // 주문 조회·재변경은 그대로 가능하다.
+      console.error('[Update Email] line_id 를 찾지 못해 토큰 재발급을 건너뜁니다:', me.id);
     }
 
     console.log('[Update Email] 이메일 등록 완료:', me.id);

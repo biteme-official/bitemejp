@@ -117,16 +117,43 @@ export async function handleLineCallback(code: string, state: string): Promise<L
   return response.json();
 }
 
+/**
+ * LINE 이 이메일을 주지 않은 유저에게 붙는 자리표시자 이메일의 도메인.
+ * 이 도메인은 MX 레코드가 없어 어떤 메일도 도달하지 않으므로,
+ * 화면에서는 "미등록" 으로 다뤄야 한다.
+ */
+export const PLACEHOLDER_EMAIL_DOMAIN = '@line-user.biteme.co.jp';
+
+export function isPlaceholderEmail(email: string | undefined | null): boolean {
+  return !!email && email.endsWith(PLACEHOLDER_EMAIL_DOMAIN);
+}
+
 export interface SubmitEmailResult {
   email: string;
   /** 이메일 변경으로 재발급된 토큰. null 이면 기존 토큰을 유지한다. */
   customerAccessToken?: string | null;
+  /** 기존과 같은 주소라 Shopify 를 건드리지 않은 경우 */
+  unchanged?: boolean;
+}
+
+/** 서버가 준 코드를 화면 분기에 쓰기 위해 그대로 실어 나른다 (예: EMAIL_TAKEN) */
+export class EmailUpdateError extends Error {
+  readonly code: string | null;
+  readonly status: number;
+
+  constructor(message: string, code: string | null, status: number) {
+    super(message);
+    this.name = 'EmailUpdateError';
+    this.code = code;
+    this.status = status;
+  }
 }
 
 /**
- * LINE이 이메일을 주지 않은 유저의 실제 이메일을 등록한다.
+ * LINE 로그인 유저의 실제 이메일을 등록하거나 변경한다.
  * 자리표시자 이메일(@line-user.biteme.co.jp)은 메일이 도달하지 않아
- * 주문 확인·배송 알림을 받지 못하므로 로그인 직후 수집한다.
+ * 주문 확인·배송 알림을 받지 못하므로 로그인 직후 수집하고,
+ * 그 뒤에는 마이페이지에서 언제든 고칠 수 있다(오타 구제 — Issue #122).
  */
 export async function submitCustomerEmail(
   customerAccessToken: string | null | undefined,
@@ -142,7 +169,11 @@ export async function submitCustomerEmail(
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.message || 'メールアドレスの登録に失敗しました。');
+    throw new EmailUpdateError(
+      data.message || 'メールアドレスの登録に失敗しました。',
+      typeof data.code === 'string' ? data.code : null,
+      response.status
+    );
   }
 
   return data;
