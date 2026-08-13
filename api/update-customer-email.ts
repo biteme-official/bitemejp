@@ -144,6 +144,10 @@ async function adminGraphQL(token: string, query: string, variables: Record<stri
  * 이메일 순으로 본다. 실제 이메일로 바꾼 뒤에는 이메일에 userId 가 남지 않으므로
  * 이메일만 보고 판단하면 안 된다.
  *
+ * `stored` 는 그 값이 메타필드·태그에서 나왔는지를 말한다. 이메일에서 복원한
+ * 것뿐이라면 이메일을 바꾸는 순간 연결고리가 사라지므로, 호출부가 이 값을 보고
+ * 매핑을 함께 저장해야 한다.
+ *
  * tags 는 함께 돌려준다 — customerUpdate(input.tags) 는 병합이 아니라 전체 교체라,
  * 태그를 새로 붙이려면 기존 목록을 알아야 한다. 읽기에 실패했으면 null 이므로
  * 호출부는 tags 를 아예 보내지 않는 쪽을 택해야 기존 태그가 날아가지 않는다.
@@ -151,7 +155,7 @@ async function adminGraphQL(token: string, query: string, variables: Record<stri
 async function readCustomerLineIdentity(
   adminToken: string,
   customerId: string
-): Promise<{ lineUserId: string | null; tags: string[] } | null> {
+): Promise<{ lineUserId: string | null; stored: boolean; tags: string[] } | null> {
   const result = await adminGraphQL(adminToken, `
     query LineIdentity($id: ID!) {
       customer(id: $id) {
@@ -171,12 +175,12 @@ async function readCustomerLineIdentity(
   const tags: string[] = Array.isArray(customer.tags) ? customer.tags.filter((t: unknown) => typeof t === 'string') : [];
 
   const fromMetafield = typeof customer.metafield?.value === 'string' ? customer.metafield.value.trim() : '';
-  if (LINE_USER_ID_RE.test(fromMetafield)) return { lineUserId: fromMetafield, tags };
+  if (LINE_USER_ID_RE.test(fromMetafield)) return { lineUserId: fromMetafield, stored: true, tags };
 
   const fromTag = tags.find((t) => t.startsWith(LINE_ID_TAG_PREFIX))?.slice(LINE_ID_TAG_PREFIX.length).trim() ?? '';
-  if (LINE_USER_ID_RE.test(fromTag)) return { lineUserId: fromTag, tags };
+  if (LINE_USER_ID_RE.test(fromTag)) return { lineUserId: fromTag, stored: true, tags };
 
-  return { lineUserId: extractLineUserId(customer.email ?? ''), tags };
+  return { lineUserId: extractLineUserId(customer.email ?? ''), stored: false, tags };
 }
 
 /**
@@ -303,15 +307,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const lineUserId = identity?.lineUserId ?? session?.lineUserId ?? null;
 
     // 자리표시자 이메일을 실제 이메일로 바꾸면 로컬파트의 userId 가 사라진다.
-    // 매핑이 없는 계정이라면 지금 붙여두지 않으면 연결 수단이 영영 없어진다.
+    // 메타필드·태그에 매핑이 없는 계정은 지금 붙여두지 않으면 연결 수단이 영영
+    // 없어지고, 다음 로그인에서 고객을 못 찾아 중복 고객이 생긴다.
+    // ⚠️ userId 를 이메일에서 복원했을 뿐인 경우(stored=false)가 바로 그 상황이다.
     // ⚠️ input.tags 는 병합이 아니라 전체 교체다. 태그 읽기가 실패했으면(identity=null)
     //    보내지 않아야 기존 태그(joy_tag_member 등)가 지워지지 않는다.
-    const needsMappingBackfill =
-      !!lineUserId && !!identity && !identity.lineUserId && currentEmail.endsWith(PLACEHOLDER_EMAIL_DOMAIN);
+    const needsMappingBackfill = !!lineUserId && !!identity && !identity.stored;
 
     const updateInput: Record<string, unknown> = { id: me.id, email: newEmail };
     if (needsMappingBackfill) {
-      updateInput.tags = [...identity!.tags, `${LINE_ID_TAG_PREFIX}${lineUserId}`];
+      // api/line-callback.ts 의 매핑 저장과 같은 형태로 맞춘다 (line_member 포함).
+      updateInput.tags = Array.from(new Set([
+        ...identity!.tags.filter((t) => !t.startsWith(LINE_ID_TAG_PREFIX)),
+        `${LINE_ID_TAG_PREFIX}${lineUserId}`,
+        'line_member',
+      ]));
       updateInput.metafields = [
         { namespace: 'custom', key: 'line_id', type: 'single_line_text_field', value: lineUserId },
       ];

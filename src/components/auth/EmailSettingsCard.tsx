@@ -25,12 +25,16 @@ export function EmailSettingsCard() {
 
   if (!user) return null;
 
-  const unregistered = isPlaceholderEmail(user.email);
+  // ⚠️ user.email 은 LINE 이 준 주소라 이메일 미동의 유저는 아예 비어 있다.
+  //    실제로 메일이 나가는 곳은 Shopify 고객의 주소(shopifyEmail) 이므로
+  //    등록 여부는 반드시 이쪽으로 판단해야 한다.
+  const contactEmail = user.shopifyEmail ?? user.email ?? '';
+  const unregistered = !contactEmail || isPlaceholderEmail(contactEmail);
   // 서버가 인정하는 인증 수단. 둘 다 없으면 변경 요청이 401 로 막힌다.
   const canEdit = !!(user.shopifyCustomerToken || user.lineSessionToken);
 
   function startEditing() {
-    setValue(unregistered ? '' : user!.email ?? '');
+    setValue(unregistered ? '' : contactEmail);
     setError(null);
     setEditing(true);
   }
@@ -49,7 +53,10 @@ export function EmailSettingsCard() {
       );
       updateEmail(result.email, result.customerAccessToken);
       setEditing(false);
-      if (!result.unchanged) {
+      // 무변경도 반드시 알린다 — 아무 말 없이 폼이 닫히면 조용히 실패한 것과 구별되지 않는다.
+      if (result.unchanged) {
+        toast('現在のメールアドレスと同じです');
+      } else {
         toast.success(unregistered ? 'メールアドレスを登録しました' : 'メールアドレスを変更しました');
       }
     } catch (err) {
@@ -136,7 +143,7 @@ export function EmailSettingsCard() {
               </div>
             </div>
           ) : (
-            <p className="text-sm break-all">{user.email}</p>
+            <p className="text-sm break-all">{contactEmail}</p>
           )}
 
           {canEdit ? (
