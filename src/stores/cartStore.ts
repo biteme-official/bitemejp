@@ -1,7 +1,10 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { ShopifyProduct, createStorefrontCheckoutWithDiscount, fetchProductById, fetchCartPreview } from '@/lib/shopify';
-import { GIFT_THRESHOLD, GIFT_PRODUCT_ID, GIFT_DISCOUNT_CODE } from '@/config/giftConfig';
+import {
+  GIFT_THRESHOLD, GIFT_PRODUCT_ID, GIFT_DISCOUNT_CODE,
+  isGiftLine, shouldSendGiftCode,
+} from '@/config/giftConfig';
 import { LINE_WELCOME_DISCOUNT_KEY } from '@/lib/lineWelcomeDiscount';
 
 export interface CartItem {
@@ -139,7 +142,9 @@ export const useCartStore = create<CartStore>()(
 
         try {
           const { items } = get();
-          const nonGiftItems = items.filter(i => !i.isGift);
+          // 플래그가 유실된 증정품 라인도 증정품으로 본다 — 안 그러면 임계값을
+          // 넘길 때 증정 라인을 하나 더 붙여 うちわ 가 두 개가 된다 (Issue #126).
+          const nonGiftItems = items.filter(i => !isGiftLine(i));
 
           // 할인가 기준으로 임계값 판단 — fetchCartPreview로 실제 결제금액 조회
           let effectiveTotal: number;
@@ -159,7 +164,7 @@ export const useCartStore = create<CartStore>()(
             );
           }
 
-          const hasGift = items.some(i => i.isGift);
+          const hasGift = items.some(isGiftLine);
           const shouldHaveGift = effectiveTotal >= GIFT_THRESHOLD;
 
           if (shouldHaveGift && !hasGift) {
@@ -196,11 +201,12 @@ export const useCartStore = create<CartStore>()(
           // 어필리에이트 코드가 있으면 그쪽을 우선한다. 둘 다 넣으면 Shopify 가
           // 하나만 적용해 파트너 성과가 유실될 수 있다.
           const welcomeCode = affiliateCode ? null : localStorage.getItem(LINE_WELCOME_DISCOUNT_KEY);
-          const hasGift = items.some(i => i.isGift);
+          // ⚠️ isGift 플래그만 보고 판단하면 안 된다 — 플래그가 유실된 카트에서
+          //    증정 코드가 통째로 누락돼 고객이 정가를 냈다 (Issue #126).
           const discountCodes = [
             affiliateCode,
             welcomeCode,
-            hasGift ? GIFT_DISCOUNT_CODE : null,
+            shouldSendGiftCode(items) ? GIFT_DISCOUNT_CODE : null,
           ].filter((c): c is string => !!c);
 
           const checkoutUrl = await createStorefrontCheckoutWithDiscount(checkoutItems, discountCodes, email);
