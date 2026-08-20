@@ -14,7 +14,7 @@ export function LineLoginButton({ className }: LineLoginButtonProps) {
       onClick={() => {
         if (starting) return;
         setStarting(true);
-        initiateLineLogin().catch(() => setStarting(false));
+        initiateLineLogin({ src: 'button' }).catch(() => setStarting(false));
       }}
       disabled={starting}
       className={`flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-md text-white font-medium text-sm transition-colors hover:opacity-90 disabled:opacity-70 ${className ?? ''}`}

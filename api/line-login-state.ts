@@ -40,11 +40,39 @@ function sanitizeReturnTo(value: unknown): string {
   return value;
 }
 
-export function signState(returnTo: string, secret: string): string {
+/**
+ * 로그인 진입 경로(유입경로) 화이트리스트.
+ *
+ * 어느 입구가 연결을 만들었는지 고객 태그로 남기는데(`line_src:*`), 값을 그대로
+ * 받으면 임의 문자열이 태그로 쌓인다. Shopify 고객 태그는 세그먼트 조건으로 쓰는
+ * 자산이라 오염되면 되돌리기 어려우므로 여기서만 늘린다.
+ */
+export const LOGIN_SOURCES = [
+  'welcome',    // LINE 웰컴(あいさつ) 메시지
+  'richmenu',   // LINE 리치메뉴
+  'broadcast',  // LINE 발송 메시지
+  'banner',     // 사이트 상단 로그인 유도 배너
+  'floating',   // 사이트 우하단 플로팅 버튼
+  'button',     // 그 외 화면 내 로그인 버튼
+  'other',
+] as const;
+
+export type LoginSource = (typeof LOGIN_SOURCES)[number];
+
+export function sanitizeSource(value: unknown): LoginSource | null {
+  return typeof value === 'string' && (LOGIN_SOURCES as readonly string[]).includes(value)
+    ? (value as LoginSource)
+    : null;
+}
+
+export function signState(returnTo: string, secret: string, src?: LoginSource | null): string {
   const payload = {
     n: randomBytes(16).toString('hex'),
     e: Date.now() + STATE_TTL_MS,
     r: returnTo,
+    // ⚠️ src 를 localStorage 로 나르면 안 된다. LINE 앱을 거쳐 돌아올 때 브라우저
+    //    컨텍스트가 바뀌어 값이 사라진다 (#106 과 같은 함정). 서명에 실어 보낸다.
+    ...(src ? { s: src } : {}),
   };
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const sig = createHmac('sha256', secret).update(body).digest('base64url');
@@ -66,6 +94,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const returnTo = sanitizeReturnTo(req.body?.returnTo);
+  const src = sanitizeSource(req.body?.src);
 
-  return res.status(200).json({ state: signState(returnTo, secret), returnTo });
+  return res.status(200).json({ state: signState(returnTo, secret, src), returnTo, src });
 }

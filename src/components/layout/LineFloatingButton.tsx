@@ -54,7 +54,7 @@ export function LineFloatingButton() {
     if (starting) return;
     setStarting(true);
     track("line_float_login_click");
-    initiateLineLogin().catch(() => setStarting(false));
+    initiateLineLogin({ src: 'floating' }).catch(() => setStarting(false));
   };
 
   const dismissTooltip = (e: React.MouseEvent) => {

@@ -21,12 +21,12 @@ function generateRandomState(): string {
  * 발급에 실패하면 기존 난수 state 로 폴백한다. 이 경우 서버는 서명 검증을
  * 건너뛰고 아래 localStorage 대조가 CSRF 방어를 담당한다.
  */
-async function issueState(returnTo: string): Promise<string> {
+async function issueState(returnTo: string, src?: LoginSource): Promise<string> {
   try {
     const res = await fetch('/api/line-login-state', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ returnTo }),
+      body: JSON.stringify({ returnTo, src }),
     });
     if (!res.ok) throw new Error(`state 발급 실패: ${res.status}`);
     const data = await res.json();
@@ -38,9 +38,29 @@ async function issueState(returnTo: string): Promise<string> {
   }
 }
 
-export async function initiateLineLogin(): Promise<void> {
-  const returnTo = window.location.pathname + window.location.search;
-  const state = await issueState(returnTo);
+/**
+ * 로그인 진입 경로. 어느 입구가 연결을 만들었는지 고객 태그(`line_src:*`)로 남긴다.
+ * 값은 서버(api/line-login-state.ts LOGIN_SOURCES)와 반드시 같이 움직여야 한다.
+ */
+export type LoginSource =
+  | 'welcome'
+  | 'richmenu'
+  | 'broadcast'
+  | 'banner'
+  | 'floating'
+  | 'button'
+  | 'other';
+
+interface InitiateLineLoginOptions {
+  /** 로그인 후 돌아갈 사이트 내부 경로. 생략하면 현재 페이지. */
+  returnTo?: string;
+  /** 유입경로 */
+  src?: LoginSource;
+}
+
+export async function initiateLineLogin(options?: InitiateLineLoginOptions): Promise<void> {
+  const returnTo = options?.returnTo ?? window.location.pathname + window.location.search;
+  const state = await issueState(returnTo, options?.src);
 
   localStorage.setItem('line_login_state', state);
   // Save the current page so we can return after login

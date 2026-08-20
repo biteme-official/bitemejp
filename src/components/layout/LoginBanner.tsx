@@ -81,7 +81,7 @@ export function LoginBanner() {
     setStarting(true);
     track("login_banner_click");
     // 로그인 후 복귀 경로는 initiateLineLogin 이 현재 URL 로 알아서 잡는다.
-    initiateLineLogin().catch(() => setStarting(false));
+    initiateLineLogin({ src: 'banner' }).catch(() => setStarting(false));
   };
 
   const handleClose = () => {
