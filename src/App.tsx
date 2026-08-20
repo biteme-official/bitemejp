@@ -13,6 +13,7 @@ import NotFound from "./pages/NotFound";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfUse from "./pages/TermsOfUse";
 import LineCallback from "./pages/LineCallback";
+import LineLoginEntry from "./pages/LineLoginEntry";
 import MyPage from "./pages/MyPage";
 import WishlistPage from "./pages/WishlistPage";
 import Checkout from "./pages/Checkout";
@@ -69,6 +70,8 @@ const App = () => (
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/terms" element={<TermsOfUse />} />
           <Route path="/auth/line/callback" element={<LineCallback />} />
+          {/* LINE 리치메뉴·웰컴 메시지 CTA 가 여는 로그인 진입 경로 */}
+          <Route path="/line-login" element={<LineLoginEntry />} />
           <Route path="/mypage" element={<MyPage />} />
           <Route path="/wishlist" element={<WishlistPage />} />
           <Route path="/admin" element={<AdminDashboard />} />

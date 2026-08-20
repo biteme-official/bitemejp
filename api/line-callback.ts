@@ -1,7 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
+import { sanitizeSource, type LoginSource } from './line-login-state';
 
 const SHOPIFY_API_VERSION = '2025-07';
+
+/** 유입경로 태그 접두사 — `line_src:welcome` 형태로 붙는다 */
+const SOURCE_TAG_PREFIX = 'line_src:';
 
 /**
  * api/line-login-state.ts 가 서명한 state 를 검증한다.
@@ -11,7 +15,10 @@ const SHOPIFY_API_VERSION = '2025-07';
  *
  * 반환값: 검증 성공 시 돌아갈 경로, 실패 시 null.
  */
-function verifySignedState(state: string, secret: string): { returnTo: string } | null {
+function verifySignedState(
+  state: string,
+  secret: string
+): { returnTo: string; src: LoginSource | null } | null {
   const dot = state.indexOf('.');
   if (dot <= 0) return null;
 
@@ -29,7 +36,7 @@ function verifySignedState(state: string, secret: string): { returnTo: string } 
     const r = typeof payload.r === 'string' ? payload.r : '/';
     // 오픈 리다이렉트 방지 — 서명되어 있어도 한 번 더 확인한다.
     const returnTo = r.startsWith('/') && !r.startsWith('//') ? r : '/';
-    return { returnTo };
+    return { returnTo, src: sanitizeSource(payload.s) };
   } catch {
     return null;
   }
@@ -213,7 +220,10 @@ async function findCustomerIdByEmail(
   return null;
 }
 
-async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncResult> {
+async function syncLineUserToShopify(
+  profile: LineProfile,
+  loginSource: LoginSource | null
+): Promise<ShopifySyncResult> {
   const empty: ShopifySyncResult = {
     customerAccessToken: null,
     shopifyEmail: '',
@@ -372,8 +382,19 @@ async function syncLineUserToShopify(profile: LineProfile): Promise<ShopifySyncR
       };
 
       if (Array.isArray(existingTags)) {
+        // 유입경로 태그는 **처음 연결될 때만** 남긴다(first-touch). 재로그인마다 덮어쓰면
+        // "무엇이 이 고객을 데려왔나"가 마지막 클릭으로 바뀌어, 웰컴 메시지·리치메뉴가
+        // 만든 연결의 기여가 통째로 사라진다.
+        const alreadyTagged = existingTags.some((t: string) => t.startsWith(SOURCE_TAG_PREFIX));
+        const sourceTag = loginSource && !alreadyTagged ? [`${SOURCE_TAG_PREFIX}${loginSource}`] : [];
+
         updateInput.tags = Array.from(
-          new Set([...existingTags.filter((t: string) => !t.startsWith('line_id:')), lineTag, memberTag])
+          new Set([
+            ...existingTags.filter((t: string) => !t.startsWith('line_id:')),
+            lineTag,
+            memberTag,
+            ...sourceTag,
+          ])
         );
       } else {
         console.error(
@@ -481,6 +502,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 서명된 state 검증. 서명이 없는 state(구버전 클라이언트/서명 발급 실패 시 폴백)는
   // 클라이언트의 localStorage 대조로 보호되므로 통과시킨다.
   let returnTo = '/';
+  let loginSource: LoginSource | null = null;
   if (typeof state === 'string' && state.includes('.')) {
     const verified = verifySignedState(state, channelSecret);
     if (!verified) {
@@ -488,6 +510,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ message: 'ログインの有効期限が切れました。もう一度お試しください。' });
     }
     returnTo = verified.returnTo;
+    loginSource = verified.src;
   }
 
   try {
@@ -537,12 +560,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 4. Sync to Shopify & get customer access token
-    const shopifyResult = await syncLineUserToShopify({
-      userId: profile.userId,
-      displayName: profile.displayName,
-      pictureUrl: profile.pictureUrl,
-      email,
-    });
+    const shopifyResult = await syncLineUserToShopify(
+      {
+        userId: profile.userId,
+        displayName: profile.displayName,
+        pictureUrl: profile.pictureUrl,
+        email,
+      },
+      loginSource
+    );
 
     // 5. Return profile + Shopify token
     res.setHeader('Access-Control-Allow-Origin', corsOrigin);
