@@ -1,0 +1,605 @@
+/**
+ * /api/line-campaign — LINE 타겟 발송 (관리자 전용)
+ *
+ * LINE 공식계정 매니저의 브로드캐스트는 LINE 이 가진 속성(성별·연령·지역·친구기간)으로만
+ * 대상을 나눌 수 있다. "구매한 적 있는 사람", "가입만 하고 안 산 사람" 같은 **우리 데이터
+ * 기준 세그먼트**는 거기서 만들 수 없어서, 연결된 고객(`line_member`)을 Shopify 에서
+ * 추출해 Messaging API 의 multicast 로 직접 보낸다.
+ *
+ * ⚠️ 이 엔드포인트는 사람에게 메시지를 실제로 보낸다. 되돌릴 수 없다.
+ *    - 실발송은 `confirm: true` 를 명시해야만 실행된다
+ *    - `testUserIds` 를 주면 그 사람들에게만 간다 (문안·링크 눈으로 확인용)
+ *    - 남은 쿼터보다 대상이 많으면 보내지 않는다
+ *    - 같은 campaignId 로 두 번 보내지 않는다
+ *
+ * ⚠️ LINE userId 는 개인식별자다. preview 응답에 절대 싣지 않는다.
+ *    발송 시에도 프론트가 보낸 대상 목록을 믿지 않고 서버가 조건으로 다시 추출한다.
+ */
+import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { createHash } from 'crypto';
+import { createClient } from '@supabase/supabase-js';
+
+const SHOPIFY_API_VERSION = '2025-07';
+const PLACEHOLDER_EMAIL_DOMAIN = '@line-user.biteme.co.jp';
+const SOURCE_TAG_PREFIX = 'line_src:';
+const LINE_ID_TAG_PREFIX = 'line_id:';
+
+/** LINE multicast 1회 최대 수신자 */
+const MULTICAST_CHUNK = 500;
+/** 실수로 대량 발송하는 것을 막는 상한. 늘려야 하면 코드에서 올린다(화면에서 못 넘긴다). */
+const MAX_RECIPIENTS = 2000;
+/** 발송 이력을 남기는 이벤트 타입 (Supabase `events` 테이블 재사용) */
+const CAMPAIGN_EVENT = 'line_campaign';
+
+const ALLOWED_ORIGINS = [
+  'https://biteme.co.jp',
+  'https://www.biteme.co.jp',
+  'http://localhost:5173',
+];
+
+// ─── 세그먼트 ────────────────────────────────────────────────────────────────
+
+interface Segment {
+  /** 구매 이력 */
+  purchase?: 'any' | 'buyers' | 'non_buyers';
+  /** 가입 N일 이내 (신규) */
+  signupWithinDays?: number | null;
+  /** 가입 N일 경과 (휴면 후보) */
+  signupBeforeDays?: number | null;
+  /** 실제 이메일 보유 여부. placeholder = 주문 확인 메일이 도달하지 않는 사람들 */
+  email?: 'any' | 'real' | 'placeholder';
+  /** 유입경로 태그(`line_src:*`)의 값. 'none' 이면 태그가 없는 사람 */
+  source?: string | null;
+  /** 누적 구매액 하한 (엔) */
+  minSpent?: number | null;
+}
+
+interface Member {
+  gid: string;
+  lineUserId: string | null;
+  createdAt: string;
+  orders: number;
+  spent: number;
+  hasRealEmail: boolean;
+  source: string | null;
+}
+
+function matchesSegment(m: Member, s: Segment, now: number): boolean {
+  const purchase = s.purchase ?? 'any';
+  if (purchase === 'buyers' && m.orders <= 0) return false;
+  if (purchase === 'non_buyers' && m.orders > 0) return false;
+
+  const email = s.email ?? 'any';
+  if (email === 'real' && !m.hasRealEmail) return false;
+  if (email === 'placeholder' && m.hasRealEmail) return false;
+
+  if (typeof s.minSpent === 'number' && m.spent < s.minSpent) return false;
+
+  const ageDays = (now - new Date(m.createdAt).getTime()) / 86_400_000;
+  if (typeof s.signupWithinDays === 'number' && ageDays > s.signupWithinDays) return false;
+  if (typeof s.signupBeforeDays === 'number' && ageDays < s.signupBeforeDays) return false;
+
+  if (s.source) {
+    if (s.source === 'none' ? m.source !== null : m.source !== s.source) return false;
+  }
+
+  return true;
+}
+
+// ─── Shopify ─────────────────────────────────────────────────────────────────
+
+async function getAdminToken(): Promise<string> {
+  const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN;
+  const clientId = process.env.REPORT_SHOPIFY_CLIENT_ID;
+  const clientSecret = process.env.REPORT_SHOPIFY_CLIENT_SECRET;
+  if (!shop || !clientId || !clientSecret) throw new Error('Missing Admin API env vars');
+
+  const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: clientId,
+      client_secret: clientSecret,
+    }),
+  });
+  if (!res.ok) throw new Error(`Admin token failed: ${res.status}`);
+  return (await res.json()).access_token;
+}
+
+async function adminGraphQL<T>(
+  token: string,
+  query: string,
+  variables: Record<string, unknown> = {},
+): Promise<T> {
+  const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN;
+  const res = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
+    body: JSON.stringify({ query, variables }),
+  });
+  return (await res.json()) as T;
+}
+
+interface AudienceNode {
+  id: string;
+  createdAt: string;
+  tags: string[];
+  email: string | null;
+  /** Admin API 의 UnsignedInt64 는 문자열로 온다 */
+  numberOfOrders: string;
+  amountSpent: { amount: string } | null;
+  metafield: { value: string } | null;
+}
+
+interface AudienceResponse {
+  data?: {
+    customers?: {
+      pageInfo: { hasNextPage: boolean; endCursor: string };
+      edges: { node: AudienceNode }[];
+    };
+  };
+  errors?: unknown;
+}
+
+const AUDIENCE_QUERY = `
+  query LineAudience($cursor: String) {
+    customers(first: 250, after: $cursor, query: "tag:line_member") {
+      pageInfo { hasNextPage endCursor }
+      edges {
+        node {
+          id
+          createdAt
+          tags
+          email
+          numberOfOrders
+          amountSpent { amount }
+          metafield(namespace: "custom", key: "line_id") { value }
+        }
+      }
+    }
+  }
+`;
+
+/**
+ * LINE userId 를 찾는다.
+ *
+ * ⚠️ 셋 다 봐야 한다. 메타필드가 정본이지만, 매핑 이전에 가입한 사람은 태그에만 있고,
+ *    태그도 없으면 자리표시자 이메일의 로컬파트(`line_{userId}@…`)가 마지막 단서다.
+ *    실제 이메일을 등록하면 이 마지막 단서는 사라진다.
+ */
+function resolveLineUserId(node: {
+  metafield?: { value?: string } | null;
+  tags?: string[];
+  email?: string | null;
+}): string | null {
+  const fromMetafield = node.metafield?.value?.trim();
+  if (fromMetafield) return fromMetafield;
+
+  const tag = (node.tags ?? []).find((t) => t.startsWith(LINE_ID_TAG_PREFIX));
+  if (tag) return tag.slice(LINE_ID_TAG_PREFIX.length);
+
+  const email = node.email ?? '';
+  if (email.endsWith(PLACEHOLDER_EMAIL_DOMAIN) && email.startsWith('line_')) {
+    return email.slice('line_'.length, email.length - PLACEHOLDER_EMAIL_DOMAIN.length);
+  }
+  return null;
+}
+
+async function fetchAudience(): Promise<Member[]> {
+  const token = await getAdminToken();
+  const members: Member[] = [];
+  let cursor: string | null = null;
+
+  for (;;) {
+    const res = await adminGraphQL<AudienceResponse>(token, AUDIENCE_QUERY, { cursor });
+    const conn = res?.data?.customers;
+    if (!conn) throw new Error(`고객 조회 실패: ${JSON.stringify(res?.errors ?? res).slice(0, 300)}`);
+
+    for (const edge of conn.edges) {
+      const n = edge.node;
+      const tags: string[] = n.tags ?? [];
+      const src = tags.find((t: string) => t.startsWith(SOURCE_TAG_PREFIX));
+      members.push({
+        gid: n.id,
+        lineUserId: resolveLineUserId(n),
+        createdAt: n.createdAt,
+        orders: Number(n.numberOfOrders ?? 0),
+        spent: Number(n.amountSpent?.amount ?? 0),
+        hasRealEmail: !!n.email && !String(n.email).endsWith(PLACEHOLDER_EMAIL_DOMAIN),
+        source: src ? src.slice(SOURCE_TAG_PREFIX.length) : null,
+      });
+    }
+
+    if (!conn.pageInfo.hasNextPage) break;
+    cursor = conn.pageInfo.endCursor;
+  }
+
+  return members;
+}
+
+// ─── LINE ────────────────────────────────────────────────────────────────────
+
+function lineToken(): string {
+  const token = process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN;
+  if (!token) throw new Error('LINE_MESSAGING_CHANNEL_ACCESS_TOKEN 미설정');
+  return token;
+}
+
+async function lineGet<T>(path: string): Promise<T> {
+  const res = await fetch(`https://api.line.me${path}`, {
+    headers: { Authorization: `Bearer ${lineToken()}` },
+  });
+  if (!res.ok) throw new Error(`LINE ${path} ${res.status}`);
+  return (await res.json()) as T;
+}
+
+interface FollowerInsight {
+  followers?: number;
+  targetedReaches?: number;
+  blocks?: number;
+}
+
+interface QuotaInfo {
+  limit: number | null;
+  used: number;
+  remaining: number | null;
+}
+
+async function fetchQuota(): Promise<QuotaInfo> {
+  const [quota, consumption] = await Promise.all([
+    lineGet<{ type?: string; value?: number }>('/v2/bot/message/quota'),
+    lineGet<{ totalUsage?: number }>('/v2/bot/message/quota/consumption'),
+  ]);
+  // type:'none' 이면 무제한 플랜이라 value 가 없다
+  const limit = typeof quota?.value === 'number' ? quota.value : null;
+  const used = Number(consumption?.totalUsage ?? 0);
+  return { limit, used, remaining: limit === null ? null : Math.max(0, limit - used) };
+}
+
+/**
+ * 재시도 키. 같은 캠페인·같은 묶음이면 항상 같은 값이라, 네트워크 오류로 다시 쏴도
+ * LINE 이 중복 발송을 막아준다. UUID 형식이어야 받아준다.
+ */
+function retryKey(campaignId: string, chunkIndex: number): string {
+  const h = createHash('sha256').update(`${campaignId}#${chunkIndex}`).digest('hex');
+  return [h.slice(0, 8), h.slice(8, 12), `4${h.slice(13, 16)}`, `8${h.slice(17, 20)}`, h.slice(20, 32)].join('-');
+}
+
+async function multicast(
+  userIds: string[],
+  text: string,
+  campaignId: string,
+  chunkIndex: number,
+): Promise<{ ok: boolean; status: number; body: string }> {
+  const res = await fetch('https://api.line.me/v2/bot/message/multicast', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${lineToken()}`,
+      'X-Line-Retry-Key': retryKey(campaignId, chunkIndex),
+    },
+    body: JSON.stringify({ to: userIds, messages: [{ type: 'text', text }] }),
+  });
+  const body = res.ok ? '' : (await res.text()).slice(0, 300);
+  return { ok: res.ok, status: res.status, body };
+}
+
+// ─── 메시지 ──────────────────────────────────────────────────────────────────
+
+/**
+ * 링크에 UTM 을 붙인다.
+ *
+ * 규칙은 이미 쓰고 있는 실측 형식을 그대로 따른다 — `line / line / YYMMDD_line_<소재>`.
+ * 이걸 지켜야 index.html 이 sessionStorage 에 담고 → 체크아웃 장바구니 속성 →
+ * Shopify 주문 `customAttributes` 까지 이어져서 **발송이 만든 매출**이 잡힌다.
+ */
+function withUtm(rawUrl: string, campaign: string): string {
+  const url = new URL(rawUrl);
+  url.searchParams.set('utm_source', 'line');
+  url.searchParams.set('utm_medium', 'line');
+  url.searchParams.set('utm_campaign', campaign);
+  return url.toString();
+}
+
+/** 발송 기준 시간대는 일본(JST). UTC 로 만들면 밤 발송이 하루 전 날짜가 된다. */
+function jstDate(d: Date): string {
+  return new Date(d.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
+}
+
+/** 캠페인 ID·UTM 용 (260821) */
+function yymmdd(d = new Date()): string {
+  return jstDate(d).slice(2).replace(/-/g, '');
+}
+
+/** LINE 인사이트 API 용 (20260821). ⚠️ 6자리를 넘기면 조용히 빈 응답이 온다. */
+function yyyymmdd(d: Date): string {
+  return jstDate(d).replace(/-/g, '');
+}
+
+function slugify(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9가-힣ぁ-んァ-ン一-龯-]/g, '').slice(0, 40);
+}
+
+interface MessageInput {
+  /** 소재명 — 캠페인 ID·UTM campaign 에 쓰인다 */
+  name?: string;
+  text?: string;
+  /** 본문 끝에 붙일 링크. UTM 은 서버가 붙인다 */
+  url?: string;
+}
+
+function buildMessage(input: MessageInput): { text: string; campaignId: string; campaign: string } {
+  const text = (input.text ?? '').trim();
+  if (!text) throw new Error('본문(text)이 비어 있습니다');
+  if (text.length > 900) throw new Error('본문이 900자를 넘습니다');
+
+  const slug = slugify(input.name ?? '') || 'campaign';
+  const date = yymmdd();
+  const campaign = `${date}_line_${slug}`;
+  const campaignId = `${date}_${slug}`;
+
+  let full = text;
+  if (input.url) {
+    let link: string;
+    try {
+      link = withUtm(input.url, campaign);
+    } catch {
+      throw new Error('링크 형식이 올바르지 않습니다');
+    }
+    full = `${text}\n\n${link}`;
+  }
+  if (full.length > 1000) throw new Error('링크를 붙인 본문이 1,000자를 넘습니다');
+
+  return { text: full, campaignId, campaign };
+}
+
+// ─── 발송 이력 (Supabase `events` 재사용) ────────────────────────────────────
+
+function supabase() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key);
+}
+
+async function recentCampaigns(limit = 20) {
+  const db = supabase();
+  if (!db) return [];
+  const { data, error } = await db
+    .from('events')
+    .select('created_at, properties')
+    .eq('event_type', CAMPAIGN_EVENT)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error('[LINE Campaign] 이력 조회 실패:', error.message);
+    return [];
+  }
+  const rows = (data ?? []) as { created_at: string; properties: Record<string, unknown> | null }[];
+  return rows.map((row) => ({ sentAt: row.created_at, ...(row.properties ?? {}) }));
+}
+
+async function alreadySent(campaignId: string): Promise<boolean> {
+  const db = supabase();
+  if (!db) return false;
+  const { data, error } = await db
+    .from('events')
+    .select('id')
+    .eq('event_type', CAMPAIGN_EVENT)
+    .eq('session_id', `campaign:${campaignId}`)
+    .limit(1);
+  if (error) {
+    // 확인이 안 되면 막지 않는다 — 대신 로그로 남긴다. 여기서 막으면 이력 장애가 발송을 막는다.
+    console.error('[LINE Campaign] 중복 확인 실패:', error.message);
+    return false;
+  }
+  return (data ?? []).length > 0;
+}
+
+async function logCampaign(campaignId: string, properties: Record<string, unknown>): Promise<void> {
+  const db = supabase();
+  if (!db) {
+    console.error('[LINE Campaign] 🔴 SUPABASE 미설정 — 발송 이력이 남지 않았습니다:', campaignId);
+    return;
+  }
+  const { error } = await db.from('events').insert({
+    event_type: CAMPAIGN_EVENT,
+    session_id: `campaign:${campaignId}`,
+    properties,
+    page_path: '/admin',
+    referrer: null,
+  });
+  // 이력 실패가 발송 결과를 뒤집지는 않는다. 메시지는 이미 나갔다.
+  if (error) console.error('[LINE Campaign] 🔴 이력 기록 실패(중복 발송 위험):', error.message);
+}
+
+// ─── 집계 ────────────────────────────────────────────────────────────────────
+
+function summarize(members: Member[]) {
+  const bySource: Record<string, number> = {};
+  const byMonth: Record<string, number> = {};
+  let buyers = 0;
+  let realEmail = 0;
+  let spent = 0;
+  let unreachable = 0;
+
+  for (const m of members) {
+    if (m.orders > 0) buyers++;
+    if (m.hasRealEmail) realEmail++;
+    if (!m.lineUserId) unreachable++;
+    spent += m.spent;
+    const src = m.source ?? '(없음)';
+    bySource[src] = (bySource[src] ?? 0) + 1;
+    const month = m.createdAt.slice(0, 7);
+    byMonth[month] = (byMonth[month] ?? 0) + 1;
+  }
+
+  return {
+    count: members.length,
+    buyers,
+    nonBuyers: members.length - buyers,
+    realEmail,
+    placeholderEmail: members.length - realEmail,
+    /** userId 를 못 찾아 보낼 수 없는 사람 */
+    unreachable,
+    totalSpent: Math.round(spent),
+    bySource,
+    byMonth,
+  };
+}
+
+// ─── 핸들러 ──────────────────────────────────────────────────────────────────
+
+function unauthorized(req: VercelRequest): boolean {
+  const secret = process.env.ADMIN_SECRET;
+  return !secret || req.headers.authorization !== `Bearer ${secret}`;
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const origin = req.headers.origin || '';
+  if (ALLOWED_ORIGINS.includes(origin)) res.setHeader('Access-Control-Allow-Origin', origin);
+
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    return res.status(200).end();
+  }
+
+  if (unauthorized(req)) return res.status(401).json({ error: 'Unauthorized' });
+
+  try {
+    if (req.method === 'GET') {
+      const [quota, followers, history] = await Promise.all([
+        fetchQuota(),
+        // 인사이트는 2일 지연된다 — 오늘 날짜로 부르면 항상 비어 있다
+        lineGet<FollowerInsight>(
+          `/v2/bot/insight/followers?date=${yyyymmdd(new Date(Date.now() - 3 * 86_400_000))}`,
+        ).catch(() => null),
+        recentCampaigns(),
+      ]);
+      const audience = await fetchAudience();
+      return res.status(200).json({
+        ok: true,
+        quota,
+        followers: followers
+          ? {
+              followers: followers.followers,
+              targetedReaches: followers.targetedReaches,
+              blocks: followers.blocks,
+            }
+          : null,
+        audience: summarize(audience),
+        history,
+      });
+    }
+
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+    const { action, segment = {}, message = {}, confirm, testUserIds } = (req.body ?? {}) as {
+      action?: string;
+      segment?: Segment;
+      message?: MessageInput;
+      confirm?: boolean;
+      testUserIds?: string[];
+    };
+
+    const now = Date.now();
+    const audience = await fetchAudience();
+    const matched = audience.filter((m) => matchesSegment(m, segment, now));
+
+    if (action === 'preview') {
+      let preview: { text: string; campaign: string; campaignId: string } | null = null;
+      let messageError: string | null = null;
+      try {
+        preview = buildMessage(message);
+      } catch (err) {
+        messageError = err instanceof Error ? err.message : '본문 확인 실패';
+      }
+      return res.status(200).json({
+        ok: true,
+        total: audience.length,
+        matched: summarize(matched),
+        preview,
+        messageError,
+      });
+    }
+
+    if (action !== 'send') return res.status(400).json({ error: 'action 은 preview 또는 send 입니다' });
+
+    // ── 여기부터는 실제로 사람에게 메시지가 나간다 ──
+    const built = buildMessage(message);
+    const isTest = Array.isArray(testUserIds) && testUserIds.length > 0;
+
+    if (!confirm) {
+      return res.status(400).json({ error: '실발송에는 confirm: true 가 필요합니다' });
+    }
+
+    const recipients = isTest
+      ? Array.from(new Set(testUserIds.filter((id) => typeof id === 'string' && id.startsWith('U'))))
+      : Array.from(new Set(matched.map((m) => m.lineUserId).filter((id): id is string => !!id)));
+
+    if (recipients.length === 0) {
+      return res.status(400).json({ error: '보낼 대상이 없습니다' });
+    }
+    if (recipients.length > MAX_RECIPIENTS) {
+      return res
+        .status(400)
+        .json({ error: `1회 발송 상한(${MAX_RECIPIENTS}명)을 넘었습니다: ${recipients.length}명` });
+    }
+
+    const quota = await fetchQuota();
+    if (quota.remaining !== null && quota.remaining < recipients.length) {
+      return res.status(400).json({
+        error: `남은 쿼터가 부족합니다 — 잔여 ${quota.remaining}통 / 대상 ${recipients.length}명`,
+      });
+    }
+
+    // 테스트 발송은 같은 문안을 여러 번 보내는 게 정상이라 중복 검사에서 뺀다
+    const campaignId = isTest ? `${built.campaignId}_test` : built.campaignId;
+    if (!isTest && (await alreadySent(campaignId))) {
+      return res
+        .status(409)
+        .json({ error: `이미 보낸 캠페인입니다: ${campaignId}. 소재명을 바꾸면 새 캠페인이 됩니다` });
+    }
+
+    const chunks: string[][] = [];
+    for (let i = 0; i < recipients.length; i += MULTICAST_CHUNK) {
+      chunks.push(recipients.slice(i, i + MULTICAST_CHUNK));
+    }
+
+    let sent = 0;
+    const failures: { chunk: number; status: number; body: string }[] = [];
+    for (let i = 0; i < chunks.length; i++) {
+      // 직렬로 보낸다. 병렬은 레이트리밋에 걸리고, 어디까지 나갔는지도 흐려진다.
+      const result = await multicast(chunks[i], built.text, campaignId, i);
+      if (result.ok) {
+        sent += chunks[i].length;
+      } else {
+        failures.push({ chunk: i, status: result.status, body: result.body });
+        console.error(`[LINE Campaign] 🔴 묶음 ${i} 실패 ${result.status}: ${result.body}`);
+      }
+    }
+
+    const record = {
+      campaignId,
+      campaign: built.campaign,
+      name: message.name ?? null,
+      test: isTest,
+      segment,
+      recipients: recipients.length,
+      sent,
+      failedChunks: failures.length,
+      url: message.url ?? null,
+      textLength: built.text.length,
+    };
+    await logCampaign(campaignId, record);
+
+    return res.status(failures.length > 0 ? 207 : 200).json({ ok: failures.length === 0, ...record, failures });
+  } catch (error) {
+    console.error('[LINE Campaign] Error:', error);
+    return res
+      .status(500)
+      .json({ error: error instanceof Error ? error.message : '발송 처리 중 오류가 발생했습니다' });
+  }
+}
