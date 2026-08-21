@@ -259,12 +259,16 @@ async function pushLine(userId: string, text: string): Promise<'sent' | 'not-fri
   return 'failed';
 }
 
+/**
+ * ⚠️ `x-vercel-cron` 헤더를 인증으로 쓰지 않는다. 아무나 붙여 보낼 수 있는 평범한 헤더라
+ *    그것만 보면 이 발송 엔드포인트가 외부에 통째로 열린다(실측으로 확인, #147).
+ *    Vercel 크론은 `CRON_SECRET` 이 설정돼 있을 때 `Authorization: Bearer <secret>` 를 붙여 온다.
+ */
 function authorized(req: VercelRequest): boolean {
   const auth = req.headers.authorization;
   if (process.env.ADMIN_SECRET && auth === `Bearer ${process.env.ADMIN_SECRET}`) return true;
   if (process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`) return true;
-  // Vercel 크론은 인증 헤더 없이 이 헤더를 붙여 온다 (기존 크론과 같은 규칙)
-  return !!req.headers['x-vercel-cron'];
+  return false;
 }
 
 interface RunResult {
