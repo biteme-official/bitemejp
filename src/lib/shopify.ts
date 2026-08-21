@@ -832,6 +832,43 @@ const GET_BANNERS_QUERY = `
 `;
 
 
+/**
+ * 배너 노출 예약.
+ *
+ * 메타오브젝트에 `start_at` / `end_at`(날짜 및 시간)을 넣으면 그 기간에만 노출된다.
+ * **두 칸을 다 비우면 상시 노출**이라 날짜를 안 쓰던 기존 배너는 그대로 동작한다.
+ * 시작만 넣으면 그때부터 계속, 종료만 넣으면 그때까지.
+ *
+ * ⚠️ 쇼피파이가 시간대 없이 값을 주는 경우가 있다(`2026-08-24T11:00:00`).
+ *    그대로 Date.parse 에 넣으면 UTC 로 읽혀 **9시간 일찍** 뜬다.
+ *    시간대가 안 붙어 있으면 스토어 시간대(UTC+9)로 읽는다.
+ *    (스토어 설정은 Asia/Seoul 이지만 일본과 같은 UTC+9 라 어느 쪽 기준으로 적어도 같은 시각이다.)
+ */
+const SHOP_UTC_OFFSET = '+09:00';
+
+function parseShopDateTime(value: string | undefined): number | null {
+  if (!value) return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(raw);
+  const parsed = Date.parse(hasZone ? raw : `${raw}${SHOP_UTC_OFFSET}`);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * 지금 이 배너를 보여줄 때인지.
+ *
+ * 필드 이름은 `start_at`/`end_at` 을 쓰되, 어드민에서 `start_date`/`end_date` 로 만들었을 때도
+ * 조용히 무시되지 않도록 함께 받는다 — 이름이 어긋나면 예약이 안 걸린 채로 그냥 계속 노출된다.
+ */
+export function isBannerLive(banner: ShopifyBanner, now: number = Date.now()): boolean {
+  const start = parseShopDateTime(banner.fields['start_at'] ?? banner.fields['start_date']);
+  const end = parseShopDateTime(banner.fields['end_at'] ?? banner.fields['end_date']);
+  if (start !== null && now < start) return false;
+  if (end !== null && now > end) return false;
+  return true;
+}
+
 export async function fetchBanners(first: number = 10): Promise<ShopifyBanner[]> {
   const data = await storefrontApiRequest(GET_BANNERS_QUERY, { first });
   if (!data) return [];
@@ -860,7 +897,7 @@ export async function fetchBanners(first: number = 10): Promise<ShopifyBanner[]>
     }
 
     return { id: node.id, handle: node.handle, image, linkUrl, fields };
-  }).sort((a, b) => {
+  }).filter((b: ShopifyBanner) => isBannerLive(b)).sort((a, b) => {
     const aOrder = parseInt(a.fields['sort_order'] ?? '9999', 10);
     const bOrder = parseInt(b.fields['sort_order'] ?? '9999', 10);
     return aOrder - bOrder;

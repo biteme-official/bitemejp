@@ -13,7 +13,7 @@ export function HeroBanner() {
   const bannersLengthRef = useRef(0);
 
   useEffect(() => {
-    fetchBanners(10)
+    fetchBanners(25)
       .then((data) => {
         setBanners(data.filter((b) => b.image));
       })
