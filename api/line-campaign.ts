@@ -107,14 +107,39 @@ async function getAdminToken(): Promise<string> {
   return (await res.json()).access_token;
 }
 
-async function adminGraphQL(token: string, query: string, variables: Record<string, unknown> = {}) {
+async function adminGraphQL<T>(
+  token: string,
+  query: string,
+  variables: Record<string, unknown> = {},
+): Promise<T> {
   const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN;
   const res = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
     body: JSON.stringify({ query, variables }),
   });
-  return res.json();
+  return (await res.json()) as T;
+}
+
+interface AudienceNode {
+  id: string;
+  createdAt: string;
+  tags: string[];
+  email: string | null;
+  /** Admin API 의 UnsignedInt64 는 문자열로 온다 */
+  numberOfOrders: string;
+  amountSpent: { amount: string } | null;
+  metafield: { value: string } | null;
+}
+
+interface AudienceResponse {
+  data?: {
+    customers?: {
+      pageInfo: { hasNextPage: boolean; endCursor: string };
+      edges: { node: AudienceNode }[];
+    };
+  };
+  errors?: unknown;
 }
 
 const AUDIENCE_QUERY = `
@@ -167,7 +192,7 @@ async function fetchAudience(): Promise<Member[]> {
   let cursor: string | null = null;
 
   for (;;) {
-    const res: any = await adminGraphQL(token, AUDIENCE_QUERY, { cursor });
+    const res = await adminGraphQL<AudienceResponse>(token, AUDIENCE_QUERY, { cursor });
     const conn = res?.data?.customers;
     if (!conn) throw new Error(`고객 조회 실패: ${JSON.stringify(res?.errors ?? res).slice(0, 300)}`);
 
@@ -201,12 +226,18 @@ function lineToken(): string {
   return token;
 }
 
-async function lineGet(path: string): Promise<any> {
+async function lineGet<T>(path: string): Promise<T> {
   const res = await fetch(`https://api.line.me${path}`, {
     headers: { Authorization: `Bearer ${lineToken()}` },
   });
   if (!res.ok) throw new Error(`LINE ${path} ${res.status}`);
-  return res.json();
+  return (await res.json()) as T;
+}
+
+interface FollowerInsight {
+  followers?: number;
+  targetedReaches?: number;
+  blocks?: number;
 }
 
 interface QuotaInfo {
@@ -217,8 +248,8 @@ interface QuotaInfo {
 
 async function fetchQuota(): Promise<QuotaInfo> {
   const [quota, consumption] = await Promise.all([
-    lineGet('/v2/bot/message/quota'),
-    lineGet('/v2/bot/message/quota/consumption'),
+    lineGet<{ type?: string; value?: number }>('/v2/bot/message/quota'),
+    lineGet<{ totalUsage?: number }>('/v2/bot/message/quota/consumption'),
   ]);
   // type:'none' 이면 무제한 플랜이라 value 가 없다
   const limit = typeof quota?.value === 'number' ? quota.value : null;
@@ -271,10 +302,19 @@ function withUtm(rawUrl: string, campaign: string): string {
   return url.toString();
 }
 
+/** 발송 기준 시간대는 일본(JST). UTC 로 만들면 밤 발송이 하루 전 날짜가 된다. */
+function jstDate(d: Date): string {
+  return new Date(d.getTime() + 9 * 3600_000).toISOString().slice(0, 10);
+}
+
+/** 캠페인 ID·UTM 용 (260821) */
 function yymmdd(d = new Date()): string {
-  // 발송 기준 시간대는 일본(JST). UTC 로 만들면 밤 발송이 하루 전 날짜가 된다.
-  const jst = new Date(d.getTime() + 9 * 3600_000);
-  return jst.toISOString().slice(2, 10).replace(/-/g, '');
+  return jstDate(d).slice(2).replace(/-/g, '');
+}
+
+/** LINE 인사이트 API 용 (20260821). ⚠️ 6자리를 넘기면 조용히 빈 응답이 온다. */
+function yyyymmdd(d: Date): string {
+  return jstDate(d).replace(/-/g, '');
 }
 
 function slugify(name: string): string {
@@ -336,7 +376,8 @@ async function recentCampaigns(limit = 20) {
     console.error('[LINE Campaign] 이력 조회 실패:', error.message);
     return [];
   }
-  return (data ?? []).map((row: any) => ({ sentAt: row.created_at, ...(row.properties ?? {}) }));
+  const rows = (data ?? []) as { created_at: string; properties: Record<string, unknown> | null }[];
+  return rows.map((row) => ({ sentAt: row.created_at, ...(row.properties ?? {}) }));
 }
 
 async function alreadySent(campaignId: string): Promise<boolean> {
@@ -432,9 +473,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const [quota, followers, history] = await Promise.all([
         fetchQuota(),
         // 인사이트는 2일 지연된다 — 오늘 날짜로 부르면 항상 비어 있다
-        lineGet(`/v2/bot/insight/followers?date=${yymmdd(new Date(Date.now() - 3 * 86_400_000))}`).catch(
-          () => null,
-        ),
+        lineGet<FollowerInsight>(
+          `/v2/bot/insight/followers?date=${yyyymmdd(new Date(Date.now() - 3 * 86_400_000))}`,
+        ).catch(() => null),
         recentCampaigns(),
       ]);
       const audience = await fetchAudience();
