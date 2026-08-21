@@ -385,7 +385,20 @@ export function supabase() {
  */
 export async function recordSends(
   userIds: string[],
-  meta: { campaignId: string; journey?: string; kind: 'marketing' | 'transactional'; ref?: string },
+  meta: {
+    campaignId: string;
+    journey?: string;
+    kind: 'marketing' | 'transactional';
+    ref?: string;
+    /** 화면에 보여줄 이름. 없으면 campaignId 로 대체된다 */
+    name?: string | null;
+    /**
+     * 이 발송이 심은 `utm_campaign` 값.
+     * ⚠️ 발송할 때 같이 남겨야 나중에 주문과 맞출 수 있다. 나중에 캠페인 이력에서
+     *    유추하려 하면 소재명이 겹치거나 바뀐 캠페인에서 어긋난다.
+     */
+    utm?: string | null;
+  },
 ): Promise<void> {
   if (userIds.length === 0) return;
   const db = supabase();
@@ -538,63 +551,48 @@ async function logCampaign(campaignId: string, properties: Record<string, unknow
 // ─── 저니 회수 성과 ──────────────────────────────────────────────────────────
 
 /**
- * 발송이 실제로 매출을 만들었는지.
+ * 캠페인이 실제로 매출을 만들었는지.
  *
- * 수신자 단위 기록이 있으니 "보낸 뒤 며칠 안에 그 사람이 샀는가"를 맞춰볼 수 있다.
- * 이게 없으면 저니는 발송 건수만 늘어나고 돈을 벌었는지는 아무도 모른다.
+ * 기여를 **두 가지로 나눠 센다.** 하나만 쓰면 둘 다 거짓말이 된다.
  *
- * ⚠️ 인과가 아니라 상관이다. 메시지를 안 봤어도 그 사이에 샀으면 회수로 잡힌다.
- *    특히 장바구니 이탈은 원래 돌아올 사람이 섞인다 — 절대 수치보다 추세로 볼 것.
+ *   회수  = 발송 후 72시간 안에 그 사람이 주문했다.
+ *           원래 살 사람이 섞이므로 **상한**이다. 특히 장바구니 이탈은 그냥 돌아올 사람이 많다.
+ *   클릭  = 그 캠페인이 심은 UTM 을 달고 들어와 주문했다.
+ *           확실히 이 발송이 데려온 것이므로 **하한**이다. 링크 없는 발송은 셀 수 없다(null).
+ *
+ * 진짜 값은 둘 사이에 있다. 한 숫자만 보여주면 과대평가하거나 과소평가하게 된다.
  */
 const ATTRIBUTION_HOURS = 72;
 
-interface JourneyStat {
-  journey: string;
+interface CampaignStat {
+  key: string;
+  kind: 'journey' | 'manual';
+  label: string;
+  firstSentAt: string;
   sent: number;
+  /** 발송 후 72시간 내 주문 (상한) */
   recovered: number;
   revenue: number;
   /** 회수율 (%) */
   rate: number;
+  /** UTM 을 달고 들어온 주문 (하한). 링크가 없던 발송은 null */
+  clicked: number | null;
+  clickRevenue: number | null;
 }
 
-async function journeyStats(members: Member[], days = 30): Promise<JourneyStat[]> {
-  const db = supabase();
-  if (!db) return [];
+interface OrderRow {
+  at: number;
+  total: number;
+  customerGid: string | null;
+  utm: string | null;
+}
 
-  const since = Date.now() - days * 86_400_000;
-  const { data, error } = await db
-    .from('events')
-    .select('session_id, created_at, properties')
-    .eq('event_type', SEND_EVENT)
-    .gte('created_at', new Date(since).toISOString());
-  if (error) {
-    console.error('[LINE Campaign] 저니 성과 조회 실패:', error.message);
-    return [];
-  }
-
-  const sends = ((data ?? []) as {
-    session_id: string;
-    created_at: string;
-    properties: { journey?: string } | null;
-  }[])
-    .filter((r) => !!r.properties?.journey)
-    .map((r) => ({
-      journey: r.properties!.journey!,
-      userId: r.session_id.startsWith('line:') ? r.session_id.slice(5) : r.session_id,
-      at: new Date(r.created_at).getTime(),
-    }));
-
-  if (sends.length === 0) return [];
-
-  // LINE userId → Shopify 고객 GID
-  const gidByUser = new Map<string, string>();
-  for (const m of members) if (m.lineUserId) gidByUser.set(m.lineUserId, m.gid);
-
-  // 기간 내 주문을 고객별로 모은다
+async function fetchOrders(sinceMs: number): Promise<OrderRow[]> {
   const token = await getAdminToken();
-  const sinceDay = new Date(since).toISOString().slice(0, 10);
-  const ordersByCustomer = new Map<string, { at: number; total: number }[]>();
+  const sinceDay = new Date(sinceMs).toISOString().slice(0, 10);
+  const out: OrderRow[] = [];
   let cursor: string | null = null;
+
   for (;;) {
     const res = await adminGraphQL<{
       data?: {
@@ -605,19 +603,21 @@ async function journeyStats(members: Member[], days = 30): Promise<JourneyStat[]
               createdAt: string;
               customer: { id: string } | null;
               currentTotalPriceSet: { shopMoney: { amount: string } } | null;
+              customAttributes: { key: string; value: string | null }[];
             };
           }[];
         };
       };
     }>(
       token,
-      `query JourneyOrders($cursor: String, $q: String) {
+      `query CampaignOrders($cursor: String, $q: String) {
         orders(first: 250, after: $cursor, query: $q, sortKey: CREATED_AT, reverse: true) {
           pageInfo { hasNextPage endCursor }
           edges { node {
             createdAt
             customer { id }
             currentTotalPriceSet { shopMoney { amount } }
+            customAttributes { key value }
           } }
         }
       }`,
@@ -626,23 +626,110 @@ async function journeyStats(members: Member[], days = 30): Promise<JourneyStat[]
     const conn = res?.data?.orders;
     if (!conn) break;
     for (const e of conn.edges) {
-      const gid = e.node.customer?.id;
-      if (!gid) continue;
-      const list = ordersByCustomer.get(gid) ?? [];
-      list.push({
+      const utm = (e.node.customAttributes ?? []).find((a) => a.key === 'utm_campaign')?.value ?? null;
+      out.push({
         at: new Date(e.node.createdAt).getTime(),
         total: Number(e.node.currentTotalPriceSet?.shopMoney?.amount ?? 0),
+        customerGid: e.node.customer?.id ?? null,
+        utm,
       });
-      ordersByCustomer.set(gid, list);
     }
     if (!conn.pageInfo.hasNextPage) break;
     cursor = conn.pageInfo.endCursor;
   }
 
-  const byJourney = new Map<string, { sent: number; recovered: number; revenue: number }>();
+  return out;
+}
+
+async function campaignStats(members: Member[], days = 30): Promise<CampaignStat[]> {
+  const db = supabase();
+  if (!db) return [];
+
+  const since = Date.now() - days * 86_400_000;
+  const { data, error } = await db
+    .from('events')
+    .select('session_id, created_at, properties')
+    .eq('event_type', SEND_EVENT)
+    .gte('created_at', new Date(since).toISOString());
+  if (error) {
+    console.error('[LINE Campaign] 발송 성과 조회 실패:', error.message);
+    return [];
+  }
+
+  interface SendRow {
+    journey?: string;
+    campaignId?: string;
+    name?: string | null;
+    utm?: string | null;
+    kind?: string;
+  }
+
+  const sends = ((data ?? []) as {
+    session_id: string;
+    created_at: string;
+    properties: SendRow | null;
+  }[])
+    .filter((r) => {
+      const p = r.properties;
+      if (!p) return false;
+      if (p.kind === 'transactional') return false;
+      // 테스트 발송은 문안 확인용이라 성과에서 뺀다 — 넣으면 전환율이 흐려진다
+      return !p.campaignId?.endsWith('_test');
+    })
+    .map((r) => ({
+      p: r.properties!,
+      userId: r.session_id.startsWith('line:') ? r.session_id.slice(5) : r.session_id,
+      at: new Date(r.created_at).getTime(),
+    }));
+
+  if (sends.length === 0) return [];
+
+  const gidByUser = new Map<string, string>();
+  for (const m of members) if (m.lineUserId) gidByUser.set(m.lineUserId, m.gid);
+
+  const orders = await fetchOrders(since);
+  const ordersByCustomer = new Map<string, OrderRow[]>();
+  const ordersByUtm = new Map<string, { count: number; revenue: number }>();
+  for (const o of orders) {
+    if (o.customerGid) {
+      const list = ordersByCustomer.get(o.customerGid) ?? [];
+      list.push(o);
+      ordersByCustomer.set(o.customerGid, list);
+    }
+    if (o.utm) {
+      const agg = ordersByUtm.get(o.utm) ?? { count: 0, revenue: 0 };
+      agg.count++;
+      agg.revenue += o.total;
+      ordersByUtm.set(o.utm, agg);
+    }
+  }
+
+  interface Agg {
+    kind: 'journey' | 'manual';
+    label: string;
+    firstSentAt: number;
+    sent: number;
+    recovered: number;
+    revenue: number;
+    utms: Set<string>;
+  }
+  const byCampaign = new Map<string, Agg>();
+
   for (const s of sends) {
-    const agg = byJourney.get(s.journey) ?? { sent: 0, recovered: 0, revenue: 0 };
+    const key = s.p.journey ?? s.p.campaignId ?? 'unknown';
+    const agg: Agg = byCampaign.get(key) ?? {
+      kind: s.p.journey ? 'journey' : 'manual',
+      label: s.p.journey ?? s.p.name ?? s.p.campaignId ?? key,
+      firstSentAt: s.at,
+      sent: 0,
+      recovered: 0,
+      revenue: 0,
+      utms: new Set<string>(),
+    };
     agg.sent++;
+    agg.firstSentAt = Math.min(agg.firstSentAt, s.at);
+    if (s.p.utm) agg.utms.add(s.p.utm);
+
     const gid = gidByUser.get(s.userId);
     const hit = gid
       ? (ordersByCustomer.get(gid) ?? []).find(
@@ -653,18 +740,40 @@ async function journeyStats(members: Member[], days = 30): Promise<JourneyStat[]
       agg.recovered++;
       agg.revenue += hit.total;
     }
-    byJourney.set(s.journey, agg);
+    byCampaign.set(key, agg);
   }
 
-  return [...byJourney.entries()]
-    .map(([journey, v]) => ({
-      journey,
-      sent: v.sent,
-      recovered: v.recovered,
-      revenue: Math.round(v.revenue),
-      rate: v.sent > 0 ? Math.round((v.recovered / v.sent) * 1000) / 10 : 0,
-    }))
-    .sort((a, b) => b.sent - a.sent);
+  return [...byCampaign.entries()]
+    .map(([key, v]) => {
+      // 링크를 심지 않은 발송은 클릭 기여를 셀 방법이 없다. 0 이 아니라 null 이어야
+      // 화면에서 "0건"과 "셀 수 없음"이 구분된다.
+      let clicked: number | null = null;
+      let clickRevenue: number | null = null;
+      if (v.utms.size > 0) {
+        clicked = 0;
+        clickRevenue = 0;
+        for (const u of v.utms) {
+          const agg = ordersByUtm.get(u);
+          if (agg) {
+            clicked += agg.count;
+            clickRevenue += agg.revenue;
+          }
+        }
+      }
+      return {
+        key,
+        kind: v.kind,
+        label: v.label,
+        firstSentAt: new Date(v.firstSentAt).toISOString(),
+        sent: v.sent,
+        recovered: v.recovered,
+        revenue: Math.round(v.revenue),
+        rate: v.sent > 0 ? Math.round((v.recovered / v.sent) * 1000) / 10 : 0,
+        clicked,
+        clickRevenue: clickRevenue === null ? null : Math.round(clickRevenue),
+      };
+    })
+    .sort((a, b) => b.firstSentAt.localeCompare(a.firstSentAt));
 }
 
 // ─── 집계 ────────────────────────────────────────────────────────────────────
@@ -732,8 +841,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         recentCampaigns(),
       ]);
       const audience = await fetchAudience();
-      const journeys = await journeyStats(audience).catch((err) => {
-        console.error('[LINE Campaign] 저니 성과 계산 실패:', err);
+      const campaigns = await campaignStats(audience).catch((err) => {
+        console.error('[LINE Campaign] 발송 성과 계산 실패:', err);
         return [];
       });
       return res.status(200).json({
@@ -747,7 +856,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           : null,
         audience: summarize(audience),
-        journeys,
+        campaigns,
         attributionHours: ATTRIBUTION_HOURS,
         journeyEnabled: !!process.env.LINE_JOURNEY_ENABLED,
         history,
@@ -853,7 +962,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // 실제로 나간 사람만 기록한다 — 실패한 묶음까지 세면 다음 발송에서 애먼 사람이 한도에 걸린다
-    await recordSends(delivered, { campaignId, kind: 'marketing' });
+    await recordSends(delivered, {
+      campaignId,
+      kind: 'marketing',
+      name: message.name ?? null,
+      utm: message.url ? built.campaign : null,
+    });
 
     const record = {
       campaignId,
