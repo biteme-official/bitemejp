@@ -605,6 +605,12 @@ const GET_COLLECTION_PRODUCTS_QUERY = `
       id
       title
       handle
+      image {
+        url
+        altText
+        width
+        height
+      }
       products(first: $first, after: $after, sortKey: COLLECTION_DEFAULT) {
         pageInfo {
           hasNextPage
@@ -1018,21 +1024,48 @@ export function extractHandleFromUrl(url: string): string | null {
   }
 }
 
+/** 쇼피파이 컬렉션에 등록된 대표 이미지. 등록 안 한 컬렉션이 대부분이라 없을 수 있다. */
+export interface CollectionImage {
+  url: string;
+  altText: string | null;
+  /** 원본 크기. 미리 자리를 잡아 레이아웃이 튀지 않게 하고, 세로로 긴 이미지를 가려내는 데 쓴다 */
+  width: number | null;
+  height: number | null;
+}
+
 export interface CollectionProductsResponse extends ProductsResponse {
   collectionTitle: string | null;
+  collectionImage: CollectionImage | null;
 }
 
 export async function fetchCollectionProducts(handle: string, first: number = 20, after?: string): Promise<CollectionProductsResponse> {
+  const empty: CollectionProductsResponse = {
+    products: [],
+    pageInfo: { hasNextPage: false, endCursor: null },
+    collectionTitle: null,
+    collectionImage: null,
+  };
+
   const data = await storefrontApiRequest(GET_COLLECTION_PRODUCTS_QUERY, { handle, first, after });
-  if (!data) return { products: [], pageInfo: { hasNextPage: false, endCursor: null }, collectionTitle: null };
+  if (!data) return empty;
 
   const collection = data.data?.collection;
-  if (!collection) return { products: [], pageInfo: { hasNextPage: false, endCursor: null }, collectionTitle: null };
+  if (!collection) return empty;
+
+  const image = collection.image?.url
+    ? {
+        url: collection.image.url as string,
+        altText: (collection.image.altText as string | null) ?? null,
+        width: (collection.image.width as number | null) ?? null,
+        height: (collection.image.height as number | null) ?? null,
+      }
+    : null;
 
   return {
     products: collection.products?.edges || [],
     pageInfo: collection.products?.pageInfo || { hasNextPage: false, endCursor: null },
     collectionTitle: collection.title || null,
+    collectionImage: image,
   };
 }
 

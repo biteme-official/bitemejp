@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { ShopifyProduct, fetchProducts, fetchCollectionProducts, fetchBestSellingProducts, fetchNewProducts, formatPrice, getPreorderDate, fetchProductDiscounts } from '@/lib/shopify';
+import { ShopifyProduct, CollectionImage, fetchProducts, fetchCollectionProducts, fetchBestSellingProducts, fetchNewProducts, formatPrice, getPreorderDate, fetchProductDiscounts } from '@/lib/shopify';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ShoppingCart, Loader2, Heart } from 'lucide-react';
@@ -27,6 +27,37 @@ const ProductSkeleton = () => (
     </div>
   </div>
 );
+
+/**
+ * 쇼피파이 컬렉션에 등록된 대표 이미지.
+ *
+ * 자르지 않고 원본 비율 그대로 보여준다(하영 결정) — 기획전 이미지에는 글자가 박혀 있는 경우가
+ * 많아서 잘라내면 내용이 사라진다.
+ *
+ * ⚠️ 다만 비율이 제각각이다(실측 724x2172 세로형 ↔ 1110x1000 정사각). 세로로 긴 이미지를
+ *    컨테이너 폭에 맞추면 화면 몇 개 분량으로 늘어나 상품이 한참 아래로 밀린다.
+ *    그래서 세로형만 폭을 좁혀 세운다. 잘라내는 게 아니라 작게 놓는 것이라 내용은 다 남는다.
+ *
+ * width/height 를 지정해 이미지가 늦게 떠도 자리가 미리 잡히게 한다(레이아웃 튐 방지).
+ */
+const CollectionBanner = ({ image }: { image: CollectionImage | null }) => {
+  if (!image) return null;
+
+  const isTall = !!image.width && !!image.height && image.height / image.width > 1.3;
+
+  return (
+    <div className="mb-4 flex justify-center">
+      <img
+        src={image.url}
+        alt={image.altText ?? ''}
+        width={image.width ?? undefined}
+        height={image.height ?? undefined}
+        loading="lazy"
+        className={`h-auto w-full rounded-xl ${isTall ? 'max-w-sm' : 'max-w-full'}`}
+      />
+    </div>
+  );
+};
 
 interface ProductGridProps {
   searchQuery?: string;
@@ -198,6 +229,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
         if (collectionHandle) {
           response = await fetchCollectionProducts(collectionHandle, PRODUCTS_PER_PAGE);
           setCollectionTitle(response.collectionTitle);
+          setCollectionImage(response.collectionImage);
         } else if (initialSort === 'best_selling') {
           const products = await fetchBestSellingProducts(50);
           setAllProducts(products);
@@ -287,11 +319,13 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
   const getNoFilterResultsText = () => 'フィルター条件に一致する商品がありません';
 
   const [collectionTitle, setCollectionTitle] = useState<string | null>(null);
+  const [collectionImage, setCollectionImage] = useState<CollectionImage | null>(null);
 
   // Fetch collection title when collection changes
   useEffect(() => {
     if (!collectionHandle) {
       setCollectionTitle(null);
+      setCollectionImage(null);
     }
   }, [collectionHandle]);
 
@@ -299,9 +333,13 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
     ? getSearchText()
     : collectionTitle || (collectionHandle ? collectionHandle.replace(/-/g, ' ') : "ALL");
 
+  // 검색 중에는 컬렉션 배너를 내린다 — 검색 결과 위에 엉뚱한 컬렉션 이미지가 남는다
+  const banner = searchQuery ? null : collectionImage;
+
   if (loading) {
     return (
       <section className="py-8 px-4">
+        <CollectionBanner image={banner} />
         <h2 className="text-2xl font-bold mb-4">{displayTitle}</h2>
         <div className="flex items-center gap-2 mb-4">
           <Skeleton className="h-9 w-[140px]" />
@@ -319,6 +357,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
   if (allProducts.length === 0) {
     return (
       <section className="py-8 px-4">
+        <CollectionBanner image={banner} />
         <h2 className="text-2xl font-bold mb-6">{displayTitle}</h2>
         <div className="bg-muted/50 rounded-xl p-12 text-center">
           <p className="text-muted-foreground text-lg mb-4">
