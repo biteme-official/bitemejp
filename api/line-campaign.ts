@@ -535,6 +535,138 @@ async function logCampaign(campaignId: string, properties: Record<string, unknow
   if (error) console.error('[LINE Campaign] 🔴 이력 기록 실패(중복 발송 위험):', error.message);
 }
 
+// ─── 저니 회수 성과 ──────────────────────────────────────────────────────────
+
+/**
+ * 발송이 실제로 매출을 만들었는지.
+ *
+ * 수신자 단위 기록이 있으니 "보낸 뒤 며칠 안에 그 사람이 샀는가"를 맞춰볼 수 있다.
+ * 이게 없으면 저니는 발송 건수만 늘어나고 돈을 벌었는지는 아무도 모른다.
+ *
+ * ⚠️ 인과가 아니라 상관이다. 메시지를 안 봤어도 그 사이에 샀으면 회수로 잡힌다.
+ *    특히 장바구니 이탈은 원래 돌아올 사람이 섞인다 — 절대 수치보다 추세로 볼 것.
+ */
+const ATTRIBUTION_HOURS = 72;
+
+interface JourneyStat {
+  journey: string;
+  sent: number;
+  recovered: number;
+  revenue: number;
+  /** 회수율 (%) */
+  rate: number;
+}
+
+async function journeyStats(members: Member[], days = 30): Promise<JourneyStat[]> {
+  const db = supabase();
+  if (!db) return [];
+
+  const since = Date.now() - days * 86_400_000;
+  const { data, error } = await db
+    .from('events')
+    .select('session_id, created_at, properties')
+    .eq('event_type', SEND_EVENT)
+    .gte('created_at', new Date(since).toISOString());
+  if (error) {
+    console.error('[LINE Campaign] 저니 성과 조회 실패:', error.message);
+    return [];
+  }
+
+  const sends = ((data ?? []) as {
+    session_id: string;
+    created_at: string;
+    properties: { journey?: string } | null;
+  }[])
+    .filter((r) => !!r.properties?.journey)
+    .map((r) => ({
+      journey: r.properties!.journey!,
+      userId: r.session_id.startsWith('line:') ? r.session_id.slice(5) : r.session_id,
+      at: new Date(r.created_at).getTime(),
+    }));
+
+  if (sends.length === 0) return [];
+
+  // LINE userId → Shopify 고객 GID
+  const gidByUser = new Map<string, string>();
+  for (const m of members) if (m.lineUserId) gidByUser.set(m.lineUserId, m.gid);
+
+  // 기간 내 주문을 고객별로 모은다
+  const token = await getAdminToken();
+  const sinceDay = new Date(since).toISOString().slice(0, 10);
+  const ordersByCustomer = new Map<string, { at: number; total: number }[]>();
+  let cursor: string | null = null;
+  for (;;) {
+    const res = await adminGraphQL<{
+      data?: {
+        orders?: {
+          pageInfo: { hasNextPage: boolean; endCursor: string };
+          edges: {
+            node: {
+              createdAt: string;
+              customer: { id: string } | null;
+              currentTotalPriceSet: { shopMoney: { amount: string } } | null;
+            };
+          }[];
+        };
+      };
+    }>(
+      token,
+      `query JourneyOrders($cursor: String, $q: String) {
+        orders(first: 250, after: $cursor, query: $q, sortKey: CREATED_AT, reverse: true) {
+          pageInfo { hasNextPage endCursor }
+          edges { node {
+            createdAt
+            customer { id }
+            currentTotalPriceSet { shopMoney { amount } }
+          } }
+        }
+      }`,
+      { cursor, q: `created_at:>=${sinceDay}` },
+    );
+    const conn = res?.data?.orders;
+    if (!conn) break;
+    for (const e of conn.edges) {
+      const gid = e.node.customer?.id;
+      if (!gid) continue;
+      const list = ordersByCustomer.get(gid) ?? [];
+      list.push({
+        at: new Date(e.node.createdAt).getTime(),
+        total: Number(e.node.currentTotalPriceSet?.shopMoney?.amount ?? 0),
+      });
+      ordersByCustomer.set(gid, list);
+    }
+    if (!conn.pageInfo.hasNextPage) break;
+    cursor = conn.pageInfo.endCursor;
+  }
+
+  const byJourney = new Map<string, { sent: number; recovered: number; revenue: number }>();
+  for (const s of sends) {
+    const agg = byJourney.get(s.journey) ?? { sent: 0, recovered: 0, revenue: 0 };
+    agg.sent++;
+    const gid = gidByUser.get(s.userId);
+    const hit = gid
+      ? (ordersByCustomer.get(gid) ?? []).find(
+          (o) => o.at > s.at && o.at <= s.at + ATTRIBUTION_HOURS * 3600_000,
+        )
+      : undefined;
+    if (hit) {
+      agg.recovered++;
+      agg.revenue += hit.total;
+    }
+    byJourney.set(s.journey, agg);
+  }
+
+  return [...byJourney.entries()]
+    .map(([journey, v]) => ({
+      journey,
+      sent: v.sent,
+      recovered: v.recovered,
+      revenue: Math.round(v.revenue),
+      rate: v.sent > 0 ? Math.round((v.recovered / v.sent) * 1000) / 10 : 0,
+    }))
+    .sort((a, b) => b.sent - a.sent);
+}
+
 // ─── 집계 ────────────────────────────────────────────────────────────────────
 
 function summarize(members: Member[]) {
@@ -600,6 +732,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         recentCampaigns(),
       ]);
       const audience = await fetchAudience();
+      const journeys = await journeyStats(audience).catch((err) => {
+        console.error('[LINE Campaign] 저니 성과 계산 실패:', err);
+        return [];
+      });
       return res.status(200).json({
         ok: true,
         quota,
@@ -611,6 +747,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           : null,
         audience: summarize(audience),
+        journeys,
+        attributionHours: ATTRIBUTION_HOURS,
+        journeyEnabled: !!process.env.LINE_JOURNEY_ENABLED,
         history,
       });
     }

@@ -11,7 +11,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import LineCampaignTab from "@/components/admin/LineCampaignTab";
 
 // Admin API base URL — 별도 Vercel 프로젝트로 분리된 경우 해당 URL, 동일 origin이면 빈 문자열
 const ADMIN_API_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL as string) ?? '';
@@ -2492,7 +2491,6 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               <TabsTrigger value="utm" className="text-xs px-4">UTM 분석</TabsTrigger>
               <TabsTrigger value="members" className="text-xs px-4">회원 분석</TabsTrigger>
               <TabsTrigger value="weekly" className="text-xs px-4">주간회고</TabsTrigger>
-              <TabsTrigger value="line" className="text-xs px-4">LINE 발송</TabsTrigger>
             </TabsList>
 
             {/* ══ 대시보드 탭 ══ */}
@@ -2739,15 +2737,6 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               <WeeklyReviewTab secret={secret} isActive={activeTab === "weekly"} />
               <p className="text-center text-xs text-muted-foreground pb-4">
                 GA4 + Shopify + Instagram · {RANGE_LABELS[range]} 데이터
-              </p>
-            </TabsContent>
-
-            {/* ══ LINE 발송 탭 ══ */}
-            <TabsContent value="line" className="space-y-5 mt-0">
-              {/* 탭을 열기 전에는 마운트하지 않는다 — 고객 전수 조회가 딸려 들어간다 */}
-              {activeTab === "line" && <LineCampaignTab secret={secret} />}
-              <p className="text-center text-xs text-muted-foreground pb-4">
-                LINE Messaging API + Shopify 고객 태그 `line_member` 기준
               </p>
             </TabsContent>
           </Tabs>
