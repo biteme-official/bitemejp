@@ -566,19 +566,29 @@ const ATTRIBUTION_HOURS = 72;
 
 interface CampaignStat {
   key: string;
-  kind: 'journey' | 'manual';
+  /** broadcast = 공식계정 매니저에서 보낸 것. 우리 발송 기록이 없어 UTM 으로만 잡힌다 */
+  kind: 'journey' | 'manual' | 'broadcast';
   label: string;
   firstSentAt: string;
-  sent: number;
+  /** 보낸 인원. 매니저 발송은 통수를 알 수 없어 null */
+  sent: number | null;
   /** 발송 후 72시간 내 주문 (상한) */
   recovered: number;
   revenue: number;
   /** 회수율 (%) */
-  rate: number;
+  rate: number | null;
   /** UTM 을 달고 들어온 주문 (하한). 링크가 없던 발송은 null */
   clicked: number | null;
   clickRevenue: number | null;
 }
+
+/**
+ * 공식계정 매니저에서 보낸 브로드캐스트를 알아보는 규칙.
+ *
+ * 매니저 발송은 우리 기록에 남지 않지만 링크에 `YYMMDD_line_<소재>` 형식의 UTM 을 달고 있어서
+ * 주문 쪽에서 역으로 잡힌다. 월 21,000통을 쓰는 채널인데 지금까지 성과가 어디에도 없었다.
+ */
+const BROADCAST_UTM = /^\d{6}_line_/;
 
 interface OrderRow {
   at: number;
@@ -743,8 +753,31 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     byCampaign.set(key, agg);
   }
 
+  // 우리 기록에 없는데 UTM 만 있는 라인 캠페인 = 매니저에서 보낸 브로드캐스트.
+  // 발송 통수는 알 수 없지만 그게 만든 주문은 셀 수 있다.
+  const ownUtms = new Set<string>();
+  for (const v of byCampaign.values()) for (const u of v.utms) ownUtms.add(u);
+
+  const broadcasts: CampaignStat[] = [];
+  for (const [utm, agg] of ordersByUtm) {
+    if (ownUtms.has(utm) || !BROADCAST_UTM.test(utm)) continue;
+    broadcasts.push({
+      key: utm,
+      kind: 'broadcast',
+      label: utm.replace(/^(\d{2})(\d{2})(\d{2})_line_/, ''),
+      // 발송일은 UTM 앞 6자리(YYMMDD)로 읽는다 — 우리가 보낸 게 아니라 기록이 없다
+      firstSentAt: `20${utm.slice(0, 2)}-${utm.slice(2, 4)}-${utm.slice(4, 6)}T00:00:00.000Z`,
+      sent: null,
+      recovered: 0,
+      revenue: 0,
+      rate: null,
+      clicked: agg.count,
+      clickRevenue: Math.round(agg.revenue),
+    });
+  }
+
   return [...byCampaign.entries()]
-    .map(([key, v]) => {
+    .map(([key, v]): CampaignStat => {
       // 링크를 심지 않은 발송은 클릭 기여를 셀 방법이 없다. 0 이 아니라 null 이어야
       // 화면에서 "0건"과 "셀 수 없음"이 구분된다.
       let clicked: number | null = null;
@@ -773,6 +806,7 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
         clickRevenue: clickRevenue === null ? null : Math.round(clickRevenue),
       };
     })
+    .concat(broadcasts)
     .sort((a, b) => b.firstSentAt.localeCompare(a.firstSentAt));
 }
 
