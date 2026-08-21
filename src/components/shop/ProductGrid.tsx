@@ -34,9 +34,13 @@ const ProductSkeleton = () => (
  * 자르지 않고 원본 비율 그대로 보여준다(하영 결정) — 기획전 이미지에는 글자가 박혀 있는 경우가
  * 많아서 잘라내면 내용이 사라진다.
  *
- * ⚠️ 다만 비율이 제각각이다(실측 724x2172 세로형 ↔ 1110x1000 정사각). 세로로 긴 이미지를
+ * ⚠️ 다만 비율이 제각각이다(실측 1080x4936 세로형 ↔ 1110x1000 정사각). 세로로 긴 이미지를
  *    컨테이너 폭에 맞추면 화면 몇 개 분량으로 늘어나 상품이 한참 아래로 밀린다.
  *    그래서 세로형만 폭을 좁혀 세운다. 잘라내는 게 아니라 작게 놓는 것이라 내용은 다 남는다.
+ *
+ * PC 표시 폭 720px 는 두 가지 사이의 타협이다 — 더 넓히면 세로가 그만큼 길어져 상품이 밀리고,
+ * 좁히면 상세 이미지의 글자가 안 읽힌다. 1080px(원본 폭)을 넘기지 않아 늘려 찍히지도 않는다.
+ * 모바일은 원래 화면을 꽉 채우므로 이 상한과 무관하다.
  *
  * width/height 를 지정해 이미지가 늦게 떠도 자리가 미리 잡히게 한다(레이아웃 튐 방지).
  */
@@ -53,7 +57,7 @@ const CollectionBanner = ({ image }: { image: CollectionImage | null }) => {
         width={image.width ?? undefined}
         height={image.height ?? undefined}
         loading="lazy"
-        className={`h-auto w-full rounded-xl ${isTall ? 'max-w-sm' : 'max-w-full'}`}
+        className={`h-auto w-full rounded-xl ${isTall ? 'md:max-w-[720px]' : 'max-w-full'}`}
       />
     </div>
   );
