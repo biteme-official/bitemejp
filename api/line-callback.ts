@@ -1,6 +1,10 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { sanitizeSource, type LoginSource } from './line-login-state';
+// ⚠️ 상대경로 import 는 반드시 `.js` 확장자까지 적는다. package.json 이 `"type": "module"` 이라
+//    서버리스 함수가 ESM 으로 실행되는데, ESM 은 확장자 생략을 허용하지 않아
+//    모듈 로드 단계에서 ERR_MODULE_NOT_FOUND 로 함수가 통째로 죽는다 (#130).
+//    그 경우 응답이 JSON 이 아니라 500 text/plain 이라 화면에는 'Unknown error' 만 보인다.
+import { sanitizeSource, type LoginSource } from './line-login-state.js';
 
 const SHOPIFY_API_VERSION = '2025-07';
 
