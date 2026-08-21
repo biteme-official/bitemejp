@@ -1,21 +1,27 @@
 /**
  * /api/line-journey — 트리거로 도는 LINE 자동 발송
  *
- * 지금은 저니가 하나다: **장바구니(체크아웃) 이탈 복구.**
- * 최근 30일 실측에서 LINE 연결 고객의 이탈이 120건, 주문이 103건이었다 —
- * 결제창까지 온 사람이 산 사람보다 많다. 일곱 갈래 중 여기가 가장 크게 샌다.
+ * 저니 두 갈래가 우선순위 순으로 돈다.
+ *   1. cart_recovery      장바구니 이탈 복구 — 최근 30일 연결 고객 이탈 120건 > 주문 103건.
+ *                         결제창까지 온 사람이 산 사람보다 많아서 여기가 가장 크게 샌다.
+ *   2. first_purchase_d1  연결 다음날 첫 구매 유도 — 볼륨이 가장 크다(월 약 300통).
+ *
+ * ⚠️ 순서가 곧 우선순위다. 빈도 제한이 하루 1통이라 같은 사람에게 둘 다 나가지 않고,
+ *    **먼저 도는 쪽이 가져간다.** 진 쪽은 지금 그냥 사라진다 — 설계의 "3일 대기 후 폐기"는
+ *    아직 구현하지 않았다. 저니가 늘어나면 그때 만들어야 한다.
  *
  * ⚠️ 사람에게 메시지가 나가는 크론이다. 기본은 꺼져 있다.
- *    - `LINE_JOURNEY_ENABLED` 가 없으면 아무것도 보내지 않는다 (킬스위치)
+ *    - `LINE_JOURNEY_ENABLED` 에 적힌 저니만 돈다 (예: `cart_recovery,first_purchase_d1` · `all`)
  *    - `?dryRun=1` 은 "지금 켜면 누구에게 무엇이 나가는지" 만 돌려준다
  *    - 조용한 시간(JST 21~09시)에는 보내지 않고 다음 실행으로 넘긴다
- *    - 인당 수신 한도와 체크아웃당 1회 규칙을 지킨다
+ *    - 인당 수신 한도와 대상당 1회 규칙을 지킨다
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   SEND_EVENT,
   adminGraphQL,
   applyFrequencyCap,
+  fetchAudience,
   getAdminToken,
   inQuietHours,
   lineToken,
@@ -23,7 +29,26 @@ import {
   supabase,
 } from './line-campaign.js';
 
-const JOURNEY = 'cart_recovery';
+const CART_RECOVERY = 'cart_recovery';
+const FIRST_PURCHASE = 'first_purchase_d1';
+
+/** 순서 = 우선순위. 앞에 있는 저니가 먼저 대상을 가져간다. */
+const JOURNEY_ORDER = [CART_RECOVERY, FIRST_PURCHASE] as const;
+
+/** 연결 후 이만큼 지난 사람에게 첫 구매를 권한다. 24시간을 안 두면 가입 직후에 또 말을 건다. */
+const FIRST_PURCHASE_MIN_H = 24;
+const FIRST_PURCHASE_MAX_H = 48;
+
+/**
+ * 첫 구매 유도 링크.
+ *
+ * `/discount/<코드>` 는 클릭 시점에 코드를 심어주므로, 로그인 때 심긴 쿠폰이 사라진
+ * 기기에서도 결제창에서 자동 적용된다. UTM 은 날짜를 넣지 않는다 — 상시로 도는 저니라
+ * 날짜를 넣으면 성과가 하루 단위로 잘게 쪼개진다.
+ */
+const FIRST_PURCHASE_UTM = 'line_firstbuy_d1';
+const FIRST_PURCHASE_URL =
+  `https://biteme.co.jp/discount/WELCOME10?utm_source=line&utm_medium=line&utm_campaign=${FIRST_PURCHASE_UTM}`;
 
 /**
  * 이탈로 인정하는 구간.
@@ -177,8 +202,8 @@ async function fetchRecentBuyers(token: string, now: number): Promise<Set<string
   return set;
 }
 
-/** 이미 이 체크아웃으로 보낸 적 있는지 (체크아웃당 1회) */
-async function alreadyHandled(): Promise<Set<string>> {
+/** 이 저니로 이미 보낸 대상(ref) 집합. 체크아웃당·사람당 1회를 이걸로 지킨다. */
+async function alreadyHandled(journey: string): Promise<Set<string>> {
   const db = supabase();
   if (!db) return new Set();
   const since = new Date(Date.now() - 5 * 86_400_000).toISOString();
@@ -193,7 +218,7 @@ async function alreadyHandled(): Promise<Set<string>> {
   }
   const set = new Set<string>();
   for (const row of (data ?? []) as { properties: { journey?: string; ref?: string } | null }[]) {
-    if (row.properties?.journey === JOURNEY && row.properties.ref) set.add(row.properties.ref);
+    if (row.properties?.journey === journey && row.properties.ref) set.add(row.properties.ref);
   }
   return set;
 }
@@ -242,14 +267,189 @@ function authorized(req: VercelRequest): boolean {
   return !!req.headers['x-vercel-cron'];
 }
 
+interface RunResult {
+  journey: string;
+  found: number;
+  willSend: number;
+  sent: number;
+  notFriend: number;
+  failed: number;
+  capped: number;
+  excluded: Record<string, number>;
+  samples: { text: string; note?: string }[];
+}
+
+/** 저니 1 — 장바구니 이탈 복구 */
+async function runCartRecovery(token: string, now: number, dryRun: boolean): Promise<RunResult> {
+  const [candidates, buyers, handled] = await Promise.all([
+    fetchCandidates(token, now),
+    fetchRecentBuyers(token, now),
+    alreadyHandled(CART_RECOVERY),
+  ]);
+
+  const fresh = candidates.filter((c) => !buyers.has(c.customerGid) && !handled.has(c.checkoutId));
+
+  // 같은 사람이 여러 번 이탈했으면 가장 최근 것 하나만
+  const perUser = new Map<string, Candidate>();
+  for (const c of fresh) {
+    const prev = perUser.get(c.lineUserId);
+    if (!prev || new Date(c.createdAt) > new Date(prev.createdAt)) perUser.set(c.lineUserId, c);
+  }
+
+  const cap = await applyFrequencyCap([...perUser.keys()], now);
+  const targets = cap.allowed.map((id) => perUser.get(id)!).slice(0, MAX_PER_RUN);
+
+  const base: RunResult = {
+    journey: CART_RECOVERY,
+    found: candidates.length,
+    willSend: targets.length,
+    sent: 0,
+    notFriend: 0,
+    failed: 0,
+    capped: cap.capped.length,
+    excluded: {
+      구매함: candidates.filter((c) => buyers.has(c.customerGid)).length,
+      이미발송: candidates.filter((c) => handled.has(c.checkoutId)).length,
+      수신한도: cap.capped.length,
+    },
+    // userId 는 싣지 않는다. 문안은 실제로 나갈 것 그대로 보여준다.
+    samples: targets.slice(0, 2).map((c) => ({ text: buildMessage(c), note: `이탈 ${c.createdAt}` })),
+  };
+  if (dryRun) return base;
+
+  const delivered: { userId: string; ref: string }[] = [];
+  for (const c of targets) {
+    // 직렬로 보낸다. 병렬은 레이트리밋에 걸리고 어디까지 나갔는지도 흐려진다.
+    const result = await pushLine(c.lineUserId, buildMessage(c));
+    if (result === 'sent') {
+      base.sent++;
+      delivered.push({ userId: c.lineUserId, ref: c.checkoutId });
+    } else if (result === 'not-friend') {
+      base.notFriend++;
+      // 친구가 아니면 다시 시도해도 같은 결과다. 재시도하지 않도록 기록은 남긴다.
+      delivered.push({ userId: c.lineUserId, ref: c.checkoutId });
+    } else {
+      base.failed++;
+    }
+  }
+
+  for (const d of delivered) {
+    await recordSends([d.userId], {
+      campaignId: `journey_${CART_RECOVERY}`,
+      journey: CART_RECOVERY,
+      kind: 'marketing',
+      ref: d.ref,
+      name: '장바구니 이탈 복구',
+      // 복구 링크는 Shopify 도메인이라 UTM 을 붙여도 우리 프론트를 거치지 않는다.
+      // 이 저니의 기여는 시간 기준(회수)으로만 잡힌다.
+      utm: null,
+    });
+  }
+  return base;
+}
+
+/**
+ * 저니 2 — 연결 다음날 첫 구매 유도.
+ *
+ * 문안은 2026-08-21 테스트 발송으로 확인한 것을 그대로 쓴다.
+ * ⚠️ 「初回」라고 단정하지 않는다. 예전에 게스트로 산 사람이 섞일 수 있는데 그 이력은
+ *    LINE 으로 만든 고객 레코드에 안 붙어 있어 우리가 알 방법이 없다. 「まだお使いでない方に」와
+ *    「お一人さま1回限り」로 조건을 문장 안에 넣어, 이미 쓴 사람이 받아도 거짓이 되지 않게 한다.
+ */
+const FIRST_PURCHASE_TEXT = [
+  'こんにちは、BITE ME JAPANです🐾',
+  '',
+  'ご登録ありがとうございます！',
+  'まだクーポンをお使いでない方に',
+  '10%OFFをご用意しています🎁',
+  '',
+  '下のリンクからお進みいただくと',
+  'お会計時に自動で入ります。',
+  '（お一人さま1回限り）',
+  '',
+  'いま人気のアイテムを見る👇',
+  FIRST_PURCHASE_URL,
+].join('\n');
+
+async function runFirstPurchase(now: number, dryRun: boolean): Promise<RunResult> {
+  const [members, handled] = await Promise.all([fetchAudience(), alreadyHandled(FIRST_PURCHASE)]);
+
+  const inWindow = members.filter((m) => {
+    const ageH = (now - new Date(m.createdAt).getTime()) / 3600_000;
+    return ageH >= FIRST_PURCHASE_MIN_H && ageH < FIRST_PURCHASE_MAX_H;
+  });
+  const eligible = inWindow.filter((m) => m.orders === 0 && !!m.lineUserId && !handled.has(m.gid));
+
+  const cap = await applyFrequencyCap(
+    eligible.map((m) => m.lineUserId as string),
+    now,
+  );
+  const allowed = new Set(cap.allowed);
+  const targets = eligible.filter((m) => allowed.has(m.lineUserId as string)).slice(0, MAX_PER_RUN);
+
+  const base: RunResult = {
+    journey: FIRST_PURCHASE,
+    found: inWindow.length,
+    willSend: targets.length,
+    sent: 0,
+    notFriend: 0,
+    failed: 0,
+    capped: cap.capped.length,
+    excluded: {
+      구매함: inWindow.filter((m) => m.orders > 0).length,
+      발송불가: inWindow.filter((m) => !m.lineUserId).length,
+      이미발송: inWindow.filter((m) => handled.has(m.gid)).length,
+      수신한도: cap.capped.length,
+    },
+    samples: targets.length > 0 ? [{ text: FIRST_PURCHASE_TEXT }] : [],
+  };
+  if (dryRun) return base;
+
+  const delivered: { userId: string; ref: string }[] = [];
+  for (const m of targets) {
+    const result = await pushLine(m.lineUserId as string, FIRST_PURCHASE_TEXT);
+    if (result === 'sent') {
+      base.sent++;
+      delivered.push({ userId: m.lineUserId as string, ref: m.gid });
+    } else if (result === 'not-friend') {
+      base.notFriend++;
+      delivered.push({ userId: m.lineUserId as string, ref: m.gid });
+    } else {
+      base.failed++;
+    }
+  }
+
+  for (const d of delivered) {
+    await recordSends([d.userId], {
+      campaignId: `journey_${FIRST_PURCHASE}`,
+      journey: FIRST_PURCHASE,
+      kind: 'marketing',
+      ref: d.ref,
+      name: '연결 직후 첫 구매 유도',
+      utm: FIRST_PURCHASE_UTM,
+    });
+  }
+  return base;
+}
+
+/** `LINE_JOURNEY_ENABLED` 에 적힌 저니만 돈다. `all` 이면 전부. 값이 없으면 아무것도 안 보낸다. */
+function enabledJourneys(): string[] {
+  const raw = (process.env.LINE_JOURNEY_ENABLED ?? '').trim();
+  if (!raw) return [];
+  if (raw === 'all') return [...JOURNEY_ORDER];
+  const set = new Set(raw.split(',').map((v) => v.trim()));
+  return JOURNEY_ORDER.filter((j) => set.has(j));
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!authorized(req)) return res.status(401).json({ error: 'Unauthorized' });
 
   const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
   const now = Date.now();
+  const enabled = enabledJourneys();
 
   try {
-    if (!dryRun && !process.env.LINE_JOURNEY_ENABLED) {
+    if (!dryRun && enabled.length === 0) {
       return res.status(200).json({ ok: true, skipped: 'LINE_JOURNEY_ENABLED 미설정' });
     }
 
@@ -266,89 +466,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const token = await getAdminToken();
-    const [candidates, buyers, handled] = await Promise.all([
-      fetchCandidates(token, now),
-      fetchRecentBuyers(token, now),
-      alreadyHandled(),
-    ]);
+    const results: RunResult[] = [];
 
-    const fresh = candidates.filter((c) => !buyers.has(c.customerGid) && !handled.has(c.checkoutId));
-
-    // 같은 사람이 여러 번 이탈했으면 가장 최근 것 하나만
-    const perUser = new Map<string, Candidate>();
-    for (const c of fresh) {
-      const prev = perUser.get(c.lineUserId);
-      if (!prev || new Date(c.createdAt) > new Date(prev.createdAt)) perUser.set(c.lineUserId, c);
+    // ⚠️ 순서대로 돈다. 빈도 제한이 하루 1통이라 앞 저니가 보낸 사람은 뒤 저니에서 빠진다.
+    //    즉 이 배열의 순서가 곧 우선순위다.
+    for (const j of JOURNEY_ORDER) {
+      // 드라이런은 꺼져 있어도 "켜면 어떻게 되는지"를 보여줘야 하므로 전부 돈다
+      if (!dryRun && !enabled.includes(j)) continue;
+      if (j === CART_RECOVERY) results.push(await runCartRecovery(token, now, dryRun));
+      if (j === FIRST_PURCHASE) results.push(await runFirstPurchase(now, dryRun));
     }
 
-    const cap = await applyFrequencyCap([...perUser.keys()], now);
-    const targets = cap.allowed.map((id) => perUser.get(id)!).slice(0, MAX_PER_RUN);
-
-    if (dryRun) {
-      return res.status(200).json({
-        ok: true,
-        dryRun: true,
-        enabled: !!process.env.LINE_JOURNEY_ENABLED,
-        quietHours: inQuietHours(new Date(now)),
-        found: candidates.length,
-        excluded: {
-          구매함: candidates.filter((c) => buyers.has(c.customerGid)).length,
-          이미발송: candidates.filter((c) => handled.has(c.checkoutId)).length,
-          수신한도: cap.capped.length,
-        },
-        willSend: targets.length,
-        // userId 는 싣지 않는다. 문안은 실제로 나갈 것 그대로 하나만 보여준다.
-        samples: targets.slice(0, 3).map((c) => ({
-          abandonedAt: c.createdAt,
-          item: c.itemTitle,
-          text: buildMessage(c),
-        })),
-      });
-    }
-
-    let sent = 0;
-    let notFriend = 0;
-    let failed = 0;
-    const delivered: { userId: string; checkoutId: string }[] = [];
-
-    for (const c of targets) {
-      // 직렬로 보낸다. 병렬은 레이트리밋에 걸리고 어디까지 나갔는지도 흐려진다.
-      const result = await pushLine(c.lineUserId, buildMessage(c));
-      if (result === 'sent') {
-        sent++;
-        delivered.push({ userId: c.lineUserId, checkoutId: c.checkoutId });
-      } else if (result === 'not-friend') {
-        notFriend++;
-        // 친구가 아니면 다시 시도해도 같은 결과다. 재시도하지 않도록 기록은 남긴다.
-        delivered.push({ userId: c.lineUserId, checkoutId: c.checkoutId });
-      } else {
-        failed++;
+    if (!dryRun) {
+      for (const r of results) {
+        console.log(
+          `[LINE Journey] ${r.journey} 발송 ${r.sent}건 · 친구아님 ${r.notFriend} · 실패 ${r.failed}`,
+        );
       }
     }
 
-    for (const d of delivered) {
-      await recordSends([d.userId], {
-        campaignId: `journey_${JOURNEY}`,
-        journey: JOURNEY,
-        kind: 'marketing',
-        ref: d.checkoutId,
-        name: '장바구니 이탈 복구',
-        // 복구 링크는 Shopify 도메인이라 UTM 을 붙여도 우리 프론트를 거치지 않는다.
-        // 이 저니의 기여는 시간 기준(회수)으로만 잡힌다.
-        utm: null,
-      });
-    }
-
-    console.log(`[LINE Journey] ${JOURNEY} 발송 ${sent}건 · 친구아님 ${notFriend} · 실패 ${failed}`);
     return res.status(200).json({
       ok: true,
-      journey: JOURNEY,
-      found: candidates.length,
-      willSend: targets.length,
-      sent,
-      notFriend,
-      failed,
-      capped: cap.capped.length,
+      dryRun,
+      enabled,
+      quietHours: inQuietHours(new Date(now)),
+      journeys: results,
+      willSend: results.reduce((s, r) => s + r.willSend, 0),
+      sent: results.reduce((s, r) => s + r.sent, 0),
     });
   } catch (error) {
     console.error('[LINE Journey] Error:', error);

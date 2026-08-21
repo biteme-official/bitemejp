@@ -67,7 +67,7 @@ interface Segment {
   minSpent?: number | null;
 }
 
-interface Member {
+export interface Member {
   gid: string;
   lineUserId: string | null;
   createdAt: string;
@@ -199,7 +199,7 @@ function resolveLineUserId(node: {
   return null;
 }
 
-async function fetchAudience(): Promise<Member[]> {
+export async function fetchAudience(): Promise<Member[]> {
   const token = await getAdminToken();
   const members: Member[] = [];
   let cursor: string | null = null;
