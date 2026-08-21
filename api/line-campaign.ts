@@ -692,7 +692,8 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
       at: new Date(r.created_at).getTime(),
     }));
 
-  if (sends.length === 0) return [];
+  // 🔴 여기서 일찍 돌아가면 안 된다. 우리 발송 기록이 하나도 없어도 매니저 브로드캐스트는
+  //    주문의 UTM 만으로 잡히기 때문이다. 실제로 이 조기 반환 때문에 표가 통째로 비어 있었다.
 
   const gidByUser = new Map<string, string>();
   for (const m of members) if (m.lineUserId) gidByUser.set(m.lineUserId, m.gid);
