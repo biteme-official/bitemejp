@@ -28,8 +28,21 @@ const LINE_ID_TAG_PREFIX = 'line_id:';
 const MULTICAST_CHUNK = 500;
 /** 실수로 대량 발송하는 것을 막는 상한. 늘려야 하면 코드에서 올린다(화면에서 못 넘긴다). */
 const MAX_RECIPIENTS = 2000;
-/** 발송 이력을 남기는 이벤트 타입 (Supabase `events` 테이블 재사용) */
+/** 캠페인 단위 발송 이력 (Supabase `events` 테이블 재사용) */
 const CAMPAIGN_EVENT = 'line_campaign';
+/** 수신자 단위 발송 기록. 빈도 제한과 저니 중복 방지가 전부 이 기록 위에 선다. */
+export const SEND_EVENT = 'line_send';
+
+/**
+ * 한 사람이 받는 마케팅 메시지 상한.
+ *
+ * ⚠️ 주문 확인·배송 알림은 여기 넣지 않는다. 넣으면 물건을 산 사람이 배송 알림을
+ *    못 받는다 — 한도에 걸려 조용히 사라지는 게 하필 가장 중요한 메시지가 된다.
+ */
+export const FREQUENCY_CAPS = { day: 1, week: 2, month: 6 } as const;
+
+/** 발송하지 않는 시간대 (JST). 걸리면 버리지 않고 다음 창까지 미룬다. */
+export const QUIET_HOURS = { from: 21, to: 9 } as const;
 
 const ALLOWED_ORIGINS = [
   'https://biteme.co.jp',
@@ -88,7 +101,7 @@ function matchesSegment(m: Member, s: Segment, now: number): boolean {
 
 // ─── Shopify ─────────────────────────────────────────────────────────────────
 
-async function getAdminToken(): Promise<string> {
+export async function getAdminToken(): Promise<string> {
   const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN;
   const clientId = process.env.REPORT_SHOPIFY_CLIENT_ID;
   const clientSecret = process.env.REPORT_SHOPIFY_CLIENT_SECRET;
@@ -107,7 +120,7 @@ async function getAdminToken(): Promise<string> {
   return (await res.json()).access_token;
 }
 
-async function adminGraphQL<T>(
+export async function adminGraphQL<T>(
   token: string,
   query: string,
   variables: Record<string, unknown> = {},
@@ -220,13 +233,13 @@ async function fetchAudience(): Promise<Member[]> {
 
 // ─── LINE ────────────────────────────────────────────────────────────────────
 
-function lineToken(): string {
+export function lineToken(): string {
   const token = process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN;
   if (!token) throw new Error('LINE_MESSAGING_CHANNEL_ACCESS_TOKEN 미설정');
   return token;
 }
 
-async function lineGet<T>(path: string): Promise<T> {
+export async function lineGet<T>(path: string): Promise<T> {
   const res = await fetch(`https://api.line.me${path}`, {
     headers: { Authorization: `Bearer ${lineToken()}` },
   });
@@ -246,7 +259,7 @@ interface QuotaInfo {
   remaining: number | null;
 }
 
-async function fetchQuota(): Promise<QuotaInfo> {
+export async function fetchQuota(): Promise<QuotaInfo> {
   const [quota, consumption] = await Promise.all([
     lineGet<{ type?: string; value?: number }>('/v2/bot/message/quota'),
     lineGet<{ totalUsage?: number }>('/v2/bot/message/quota/consumption'),
@@ -308,7 +321,7 @@ function jstDate(d: Date): string {
 }
 
 /** 캠페인 ID·UTM 용 (260821) */
-function yymmdd(d = new Date()): string {
+export function yymmdd(d = new Date()): string {
   return jstDate(d).slice(2).replace(/-/g, '');
 }
 
@@ -356,11 +369,119 @@ function buildMessage(input: MessageInput): { text: string; campaignId: string; 
 
 // ─── 발송 이력 (Supabase `events` 재사용) ────────────────────────────────────
 
-function supabase() {
+export function supabase() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return null;
   return createClient(url, key);
+}
+
+/**
+ * 수신자 한 명당 한 행을 남긴다. 빈도 제한·저니 중복 방지가 전부 이 기록을 읽는다.
+ *
+ * ⚠️ 메시지는 이미 나간 뒤에 기록한다. 기록이 실패해도 발송을 되돌릴 수 없으므로
+ *    예외를 삼키되 반드시 로그를 남긴다 — 기록이 비면 그 사람은 오늘 안 받은 것으로
+ *    취급돼 한도를 넘겨 또 받을 수 있다.
+ */
+export async function recordSends(
+  userIds: string[],
+  meta: { campaignId: string; journey?: string; kind: 'marketing' | 'transactional'; ref?: string },
+): Promise<void> {
+  if (userIds.length === 0) return;
+  const db = supabase();
+  if (!db) {
+    console.error('[LINE Send] 🔴 SUPABASE 미설정 — 수신자 기록이 남지 않았습니다:', meta.campaignId);
+    return;
+  }
+  const rows = userIds.map((u) => ({
+    event_type: SEND_EVENT,
+    session_id: `line:${u}`,
+    properties: meta as unknown as Record<string, unknown>,
+    page_path: meta.journey ? `/journey/${meta.journey}` : '/admin',
+    referrer: null,
+  }));
+  const { error } = await db.from('events').insert(rows);
+  if (error) console.error('[LINE Send] 🔴 수신자 기록 실패(중복 발송 위험):', error.message);
+}
+
+interface CapResult {
+  allowed: string[];
+  /** 한도에 걸려 이번에는 보내지 않는 사람 */
+  capped: string[];
+  reasons: Record<string, 'day' | 'week' | 'month'>;
+}
+
+/**
+ * 최근 30일 마케팅 발송 기록을 읽어 한도를 넘는 사람을 걸러낸다.
+ *
+ * 대상 목록으로 `in` 필터를 걸지 않는다 — 수백 명이면 쿼리 문자열이 터진다.
+ * 기간으로만 긁어서(월 1천 행 남짓) 메모리에서 센다.
+ */
+export async function applyFrequencyCap(userIds: string[], now = Date.now()): Promise<CapResult> {
+  const empty: CapResult = { allowed: userIds, capped: [], reasons: {} };
+  const db = supabase();
+  if (!db) {
+    console.error('[LINE Send] 🔴 SUPABASE 미설정 — 빈도 제한을 확인하지 못했습니다');
+    return empty;
+  }
+
+  const monthAgo = new Date(now - 30 * 86_400_000).toISOString();
+  const { data, error } = await db
+    .from('events')
+    .select('session_id, created_at, properties')
+    .eq('event_type', SEND_EVENT)
+    .gte('created_at', monthAgo);
+
+  if (error) {
+    // 확인이 안 되는 것과 한도를 넘긴 것은 다르다. 여기서 전부 막으면 이력 장애가 발송을 멈춘다.
+    console.error('[LINE Send] 🔴 빈도 제한 조회 실패, 제한 없이 진행합니다:', error.message);
+    return empty;
+  }
+
+  const rows = (data ?? []) as {
+    session_id: string;
+    created_at: string;
+    properties: { kind?: string } | null;
+  }[];
+
+  const counts = new Map<string, { day: number; week: number; month: number }>();
+  for (const row of rows) {
+    if (row.properties?.kind === 'transactional') continue;
+    const id = row.session_id.startsWith('line:') ? row.session_id.slice(5) : row.session_id;
+    const age = now - new Date(row.created_at).getTime();
+    const c = counts.get(id) ?? { day: 0, week: 0, month: 0 };
+    if (age <= 86_400_000) c.day++;
+    if (age <= 7 * 86_400_000) c.week++;
+    c.month++;
+    counts.set(id, c);
+  }
+
+  const result: CapResult = { allowed: [], capped: [], reasons: {} };
+  for (const id of userIds) {
+    const c = counts.get(id);
+    const hit = !c
+      ? null
+      : c.day >= FREQUENCY_CAPS.day
+        ? 'day'
+        : c.week >= FREQUENCY_CAPS.week
+          ? 'week'
+          : c.month >= FREQUENCY_CAPS.month
+            ? 'month'
+            : null;
+    if (hit) {
+      result.capped.push(id);
+      result.reasons[id] = hit;
+    } else {
+      result.allowed.push(id);
+    }
+  }
+  return result;
+}
+
+/** 지금이 발송하지 않는 시간대인지 (JST 기준) */
+export function inQuietHours(now = new Date()): boolean {
+  const jstHour = new Date(now.getTime() + 9 * 3600_000).getUTCHours();
+  return jstHour >= QUIET_HOURS.from || jstHour < QUIET_HOURS.to;
 }
 
 async function recentCampaigns(limit = 20) {
@@ -535,12 +656,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: '실발송에는 confirm: true 가 필요합니다' });
     }
 
-    const recipients = isTest
+    const candidates = isTest
       ? Array.from(new Set(testUserIds.filter((id) => typeof id === 'string' && id.startsWith('U'))))
       : Array.from(new Set(matched.map((m) => m.lineUserId).filter((id): id is string => !!id)));
 
+    // 테스트 발송은 문안 확인용이라 한도를 적용하지 않는다 — 걸리면 확인 자체가 막힌다.
+    const cap = isTest ? { allowed: candidates, capped: [] as string[] } : await applyFrequencyCap(candidates);
+    const recipients = cap.allowed;
+
     if (recipients.length === 0) {
-      return res.status(400).json({ error: '보낼 대상이 없습니다' });
+      return res.status(400).json({
+        error:
+          cap.capped.length > 0
+            ? `대상 ${candidates.length}명이 전부 최근 수신 한도에 걸려 있습니다`
+            : '보낼 대상이 없습니다',
+      });
     }
     if (recipients.length > MAX_RECIPIENTS) {
       return res
@@ -569,17 +699,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     let sent = 0;
+    const delivered: string[] = [];
     const failures: { chunk: number; status: number; body: string }[] = [];
     for (let i = 0; i < chunks.length; i++) {
       // 직렬로 보낸다. 병렬은 레이트리밋에 걸리고, 어디까지 나갔는지도 흐려진다.
       const result = await multicast(chunks[i], built.text, campaignId, i);
       if (result.ok) {
         sent += chunks[i].length;
+        delivered.push(...chunks[i]);
       } else {
         failures.push({ chunk: i, status: result.status, body: result.body });
         console.error(`[LINE Campaign] 🔴 묶음 ${i} 실패 ${result.status}: ${result.body}`);
       }
     }
+
+    // 실제로 나간 사람만 기록한다 — 실패한 묶음까지 세면 다음 발송에서 애먼 사람이 한도에 걸린다
+    await recordSends(delivered, { campaignId, kind: 'marketing' });
 
     const record = {
       campaignId,
@@ -588,6 +723,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       test: isTest,
       segment,
       recipients: recipients.length,
+      capped: cap.capped.length,
       sent,
       failedChunks: failures.length,
       url: message.url ?? null,

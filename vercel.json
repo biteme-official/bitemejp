@@ -11,6 +11,10 @@
     {
       "path": "/api/instagram-follower-cron",
       "schedule": "0 15 * * *"
+    },
+    {
+      "path": "/api/line-journey",
+      "schedule": "0 * * * *"
     }
   ],
   "headers": [
