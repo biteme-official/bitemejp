@@ -377,6 +377,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
 
   return (
     <section className="py-8 px-4">
+      <CollectionBanner image={banner} />
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold">{displayTitle}</h2>
         {filteredAndSortedProducts.length > 0 && (
