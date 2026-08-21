@@ -332,6 +332,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         journey: JOURNEY,
         kind: 'marketing',
         ref: d.checkoutId,
+        name: '장바구니 이탈 복구',
+        // 복구 링크는 Shopify 도메인이라 UTM 을 붙여도 우리 프론트를 거치지 않는다.
+        // 이 저니의 기여는 시간 기준(회수)으로만 잡힌다.
+        utm: null,
       });
     }
 
