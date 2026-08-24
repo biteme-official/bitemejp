@@ -137,7 +137,7 @@ interface DiscountResult {
 
 let cache: DiscountResult | null = null;
 let cacheAt = 0;
-const CACHE_TTL = 10 * 60 * 1000; // 10분
+const CACHE_TTL = 3 * 60 * 1000; // 3분 (기획전 등 급한 할인 반영을 위해 10분→3분 단축, 2026-08-24)
 
 async function collectionProductIds(token: string, collectionId: string): Promise<string[]> {
   const ids: string[] = [];
@@ -208,8 +208,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cache = await buildDiscountMap();
       cacheAt = now;
     }
-    // 엣지/브라우저 캐시 (할인은 자주 안 바뀜)
-    res.setHeader('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=1800');
+    // 엣지/브라우저 캐시. 함수 메모리 캐시(CACHE_TTL)와 맞춰 3분 + 최대 5분 stale.
+    res.setHeader('Cache-Control', 'public, s-maxage=180, stale-while-revalidate=300');
     return res.status(200).json(cache);
   } catch (err) {
     // 스코프 부재/조회 실패 시에도 프론트가 정가로 degrade 하도록 빈 맵 반환

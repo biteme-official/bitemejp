@@ -467,7 +467,7 @@ export interface AutomaticDiscountData {
 const _EMPTY_DISCOUNTS: AutomaticDiscountData = { productMap: {}, allItemsPercentage: 0 };
 let _autoDiscountPromise: Promise<AutomaticDiscountData> | null = null;
 let _autoDiscountAt = 0;
-const _AUTO_DISCOUNT_TTL = 5 * 60 * 1000; // 5분 (엔드포인트도 10분 캐시)
+const _AUTO_DISCOUNT_TTL = 2 * 60 * 1000; // 2분 (엔드포인트도 3분 캐시, 2026-08-24 단축)
 
 // 전 소비자(리스트·상세)가 하나의 조회를 공유한다. 실패 시 빈 맵 → 정가로 degrade.
 export async function fetchAutomaticDiscountData(): Promise<AutomaticDiscountData> {
