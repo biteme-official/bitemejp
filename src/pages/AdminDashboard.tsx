@@ -15,22 +15,6 @@ import { Calendar } from "@/components/ui/calendar";
 // Admin API base URL — 별도 Vercel 프로젝트로 분리된 경우 해당 URL, 동일 origin이면 빈 문자열
 const ADMIN_API_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL as string) ?? '';
 
-// 자동 할인(api/automatic-discounts.ts)은 메인 사이트에만 배포돼 있어 어드민(별도 프로젝트)에서
-// 강제 새로고침하려면 절대 URL로 호출해야 한다.
-const MAIN_SITE_ORIGIN = 'https://biteme.co.jp';
-
-async function refreshDiscountCache(secret: string): Promise<{ updatedAt: string }> {
-  const res = await fetch(`${MAIN_SITE_ORIGIN}/api/automatic-discounts`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${secret}` },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body?.message || `할인 캐시 새로고침 실패 (${res.status})`);
-  }
-  return res.json();
-}
-
 // ─── 상품명 자동번역 (일어 → 한국어, 어드민 전용) ───────────────────────────
 // MyMemory 무료 API 사용. 실제 사이트(biteme.co.jp)에는 영향 없음.
 const translationCache = new Map<string, string>();
@@ -2325,17 +2309,6 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
   const [customDates, setCustomDates] = useState<DateRange | undefined>();
   const [calOpen, setCalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("dashboard");
-  const [discountRefresh, setDiscountRefresh] = useState<{ status: "idle" | "loading" | "done" | "error"; message?: string }>({ status: "idle" });
-
-  const handleDiscountRefresh = async () => {
-    setDiscountRefresh({ status: "loading" });
-    try {
-      const { updatedAt } = await refreshDiscountCache(secret);
-      setDiscountRefresh({ status: "done", message: `반영됨 ${format(new Date(updatedAt), "HH:mm:ss")}` });
-    } catch (err) {
-      setDiscountRefresh({ status: "error", message: err instanceof Error ? err.message : "실패" });
-    }
-  };
 
   const customFrom = customDates?.from ? format(customDates.from, "yyyy-MM-dd") : undefined;
   const customTo = customDates?.to ? format(customDates.to, "yyyy-MM-dd") : undefined;
@@ -2487,20 +2460,6 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
             </Popover>
 
             <button onClick={() => refetch()} className="text-xs px-3 py-1.5 rounded-lg border hover:bg-muted transition-colors">새로고침</button>
-            <button
-              onClick={handleDiscountRefresh}
-              disabled={discountRefresh.status === "loading"}
-              title="사이트에 표시되는 자동 할인 배지/가격 캐시를 즉시 갱신합니다 (체크아웃 실제 할인 계산과는 무관)"
-              className="text-xs px-3 py-1.5 rounded-lg border hover:bg-muted transition-colors disabled:opacity-50"
-            >
-              {discountRefresh.status === "loading" ? "할인 캐시 새로고침 중..." : "할인 캐시 새로고침"}
-            </button>
-            {discountRefresh.status === "done" && (
-              <span className="text-xs text-green-600">✓ {discountRefresh.message}</span>
-            )}
-            {discountRefresh.status === "error" && (
-              <span className="text-xs text-red-600" title={discountRefresh.message}>✗ 실패</span>
-            )}
             <button onClick={onLogout} className="text-xs text-muted-foreground hover:text-foreground transition-colors">로그아웃</button>
           </div>
         </div>
