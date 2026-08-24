@@ -17,6 +17,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const ALLOWED_ORIGINS = [
   'https://biteme.co.jp',
   'https://www.biteme.co.jp',
+  'https://bitemejp-admin.vercel.app',
   'http://localhost:5173',
 ];
 
@@ -196,10 +197,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const origin = req.headers.origin || '';
   const corsOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
   res.setHeader('Access-Control-Allow-Origin', corsOrigin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // 어드민 강제 새로고침 — 기획전 등 급하게 할인을 켠 직후 캐시를 기다리지 않고 즉시 반영하기 위함.
+  if (req.method === 'POST') {
+    const auth = req.headers.authorization;
+    if (!process.env.ADMIN_SECRET || auth !== `Bearer ${process.env.ADMIN_SECRET}`) {
+      return res.status(401).json({ message: 'UNAUTHORIZED' });
+    }
+    try {
+      cache = await buildDiscountMap();
+      cacheAt = Date.now();
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).json({ ...cache, refreshed: true });
+    } catch (err) {
+      console.error('[automatic-discounts] force refresh failed:', err instanceof Error ? err.message : err);
+      return res.status(502).json({ message: '할인 정보 재조회 실패', error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
@@ -208,8 +227,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       cache = await buildDiscountMap();
       cacheAt = now;
     }
-    // 엣지/브라우저 캐시 (할인은 자주 안 바뀜)
-    res.setHeader('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=1800');
+    // 엣지/브라우저 캐시를 두면 어드민 강제 새로고침이 다른 방문자에게 반영 안 됨 → no-store,
+    // 신선도는 위 함수 메모리 캐시(10분)만으로 관리한다.
+    res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json(cache);
   } catch (err) {
     // 스코프 부재/조회 실패 시에도 프론트가 정가로 degrade 하도록 빈 맵 반환
