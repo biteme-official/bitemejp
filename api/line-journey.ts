@@ -28,6 +28,7 @@ import {
   recordSends,
   supabase,
 } from './line-campaign.js';
+import { signClick } from './line-click.js';
 
 const CART_RECOVERY = 'cart_recovery';
 const FIRST_PURCHASE = 'first_purchase_d1';
@@ -59,6 +60,9 @@ const FIRST_PURCHASE_URL =
  */
 const MIN_AGE_HOURS = 1;
 const MAX_AGE_HOURS = 14;
+
+/** 클릭 추적 링크가 사는 곳. myshopify 주소보다 이쪽이 고객에게 훨씬 덜 낯설다. */
+const CLICK_ORIGIN = 'https://biteme.co.jp';
 
 /** 한 번 실행에 보낼 수 있는 최대 인원 — 폭주 방지 */
 const MAX_PER_RUN = 100;
@@ -227,7 +231,30 @@ async function alreadyHandled(journey: string): Promise<Set<string>> {
  * 문안. 쿠폰을 붙이지 않는다 — 이탈하면 할인이 온다는 걸 학습시키면 정가 구매가 사라진다.
  * 링크는 Shopify 가 주는 복구 URL 이라 담아둔 장바구니가 그대로 열린다.
  */
-function buildMessage(c: Candidate): string {
+/**
+ * 복구 링크를 클릭 추적 링크로 바꾼다.
+ *
+ * 도착지는 그대로다 — 우리 도메인을 한 번 거치면서 "눌렀다"는 사실만 남긴다.
+ * 그게 이 저니의 유일한 하한 지표가 된다(주문에 UTM 이 안 붙으므로).
+ *
+ * ⚠️ 조금이라도 예상과 다르면 **추적을 포기하고 원래 링크를 그대로 보낸다.**
+ *    성과 지표 하나 때문에 복구 링크를 못 열게 만드는 것이 훨씬 큰 손해다.
+ */
+export function trackedUrl(recoveryUrl: string, checkoutId: string): string {
+  const secret = process.env.LINE_CHANNEL_SECRET;
+  if (!secret) return recoveryUrl;
+  try {
+    const u = new URL(recoveryUrl);
+    if (u.host !== process.env.VITE_SHOPIFY_STORE_DOMAIN) return recoveryUrl;
+    const ref = checkoutId.split('/').pop();
+    if (!ref) return recoveryUrl;
+    return `${CLICK_ORIGIN}/api/line-click?t=${signClick(u.pathname + u.search, ref, secret)}`;
+  } catch {
+    return recoveryUrl;
+  }
+}
+
+function buildMessage(c: Candidate, url: string): string {
   const item = c.itemTitle
     ? `「${c.itemTitle}」${c.itemCount > 1 ? ` ほか${c.itemCount - 1}点` : ''}`
     : 'お選びいただいた商品';
@@ -242,7 +269,7 @@ function buildMessage(c: Candidate): string {
     'お早めにご確認ください。',
     '',
     '▼ カートを開く',
-    c.recoveryUrl,
+    url,
   ].join('\n');
 }
 
@@ -317,14 +344,18 @@ async function runCartRecovery(token: string, now: number, dryRun: boolean): Pro
       수신한도: cap.capped.length,
     },
     // userId 는 싣지 않는다. 문안은 실제로 나갈 것 그대로 보여준다.
-    samples: targets.slice(0, 2).map((c) => ({ text: buildMessage(c), note: `이탈 ${c.createdAt}` })),
+    // 실제로 나갈 링크(추적 링크) 그대로 보여준다 — 문안 확인이 링크 확인을 겸해야 한다
+    samples: targets.slice(0, 2).map((c) => ({
+      text: buildMessage(c, trackedUrl(c.recoveryUrl, c.checkoutId)),
+      note: `이탈 ${c.createdAt}`,
+    })),
   };
   if (dryRun) return base;
 
   const delivered: { userId: string; ref: string }[] = [];
   for (const c of targets) {
     // 직렬로 보낸다. 병렬은 레이트리밋에 걸리고 어디까지 나갔는지도 흐려진다.
-    const result = await pushLine(c.lineUserId, buildMessage(c));
+    const result = await pushLine(c.lineUserId, buildMessage(c, trackedUrl(c.recoveryUrl, c.checkoutId)));
     if (result === 'sent') {
       base.sent++;
       delivered.push({ userId: c.lineUserId, ref: c.checkoutId });
@@ -345,8 +376,9 @@ async function runCartRecovery(token: string, now: number, dryRun: boolean): Pro
       ref: d.ref,
       name: '장바구니 이탈 복구',
       // 복구 링크는 Shopify 도메인이라 UTM 을 붙여도 우리 프론트를 거치지 않는다.
-      // 이 저니의 기여는 시간 기준(회수)으로만 잡힌다.
+      // 그래서 이 저니의 하한은 UTM 이 아니라 **클릭**으로 센다 (`/api/line-click`).
       utm: null,
+      clickTracked: true,
     });
   }
   return base;
