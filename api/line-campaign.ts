@@ -715,7 +715,7 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
    * 복구 링크는 한 사람당 하나뿐이라 ref(이탈 결제 id) 단위로 접으면 같은 사람이 두 번
    * 눌러도 한 건이다. 미리보기 크롤러가 남긴 것은 `bot` 으로 표시돼 있으니 뺀다.
    */
-  const clickByRef = new Map<string, number>();
+  const clicksByRef = new Map<string, number[]>();
   {
     const { data: clicks } = await db
       .from('events')
@@ -725,10 +725,12 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     for (const c of (clicks ?? []) as { session_id: string; created_at: string; properties: { bot?: boolean } | null }[]) {
       if (c.properties?.bot) continue;
       const ref = c.session_id.startsWith('checkout:') ? c.session_id.slice('checkout:'.length) : c.session_id;
-      const at = new Date(c.created_at).getTime();
-      const prev = clickByRef.get(ref);
-      if (prev === undefined || at < prev) clickByRef.set(ref, at);
+      const list = clicksByRef.get(ref) ?? [];
+      list.push(new Date(c.created_at).getTime());
+      clicksByRef.set(ref, list);
     }
+    // 발송보다 앞선 클릭은 이 발송의 것이 아니다. 시각 순으로 두고 발송 이후 첫 건을 찾는다.
+    for (const list of clicksByRef.values()) list.sort((a, b) => a - b);
   }
 
   const orders = await fetchOrders(since);
@@ -798,8 +800,8 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     if (s.p.clickTracked) {
       agg.clickTracked = true;
       const ref = String(s.p.ref ?? '').split('/').pop() ?? '';
-      const clickedAt = clickByRef.get(ref);
-      if (clickedAt !== undefined && clickedAt >= s.at) {
+      const clickedAt = (clicksByRef.get(ref) ?? []).find((t) => t >= s.at);
+      if (clickedAt !== undefined) {
         agg.clicks++;
         const bought = gid
           ? (ordersByCustomer.get(gid) ?? []).find(
