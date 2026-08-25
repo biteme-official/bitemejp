@@ -18,6 +18,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHash } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
+import { CLICK_EVENT } from './line-click.js';
 
 const SHOPIFY_API_VERSION = '2025-07';
 const PLACEHOLDER_EMAIL_DOMAIN = '@line-user.biteme.co.jp';
@@ -398,6 +399,11 @@ export async function recordSends(
      *    유추하려 하면 소재명이 겹치거나 바뀐 캠페인에서 어긋난다.
      */
     utm?: string | null;
+    /**
+     * UTM 이 아니라 클릭(`/api/line-click`)으로 기여를 세는 발송인지.
+     * 링크가 우리 프론트를 거치지 않는 저니(장바구니 복구)가 여기 해당한다.
+     */
+    clickTracked?: boolean;
   },
 ): Promise<void> {
   if (userIds.length === 0) return;
@@ -580,6 +586,8 @@ interface CampaignStat {
   /** UTM 을 달고 들어온 주문 (하한). 링크가 없던 발송은 null */
   clicked: number | null;
   clickRevenue: number | null;
+  /** 링크를 실제로 누른 사람 수. 클릭 추적을 하는 발송에만 있다 */
+  clicks: number | null;
 }
 
 /**
@@ -672,6 +680,9 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     name?: string | null;
     utm?: string | null;
     kind?: string;
+    /** 이탈 결제 id 등, 클릭과 맞춰볼 열쇠 */
+    ref?: string;
+    clickTracked?: boolean;
   }
 
   const sends = ((data ?? []) as {
@@ -698,6 +709,30 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
   const gidByUser = new Map<string, string>();
   for (const m of members) if (m.lineUserId) gidByUser.set(m.lineUserId, m.gid);
 
+  /**
+   * 클릭 기록.
+   *
+   * 복구 링크는 한 사람당 하나뿐이라 ref(이탈 결제 id) 단위로 접으면 같은 사람이 두 번
+   * 눌러도 한 건이다. 미리보기 크롤러가 남긴 것은 `bot` 으로 표시돼 있으니 뺀다.
+   */
+  const clicksByRef = new Map<string, number[]>();
+  {
+    const { data: clicks } = await db
+      .from('events')
+      .select('session_id, created_at, properties')
+      .eq('event_type', CLICK_EVENT)
+      .gte('created_at', new Date(since).toISOString());
+    for (const c of (clicks ?? []) as { session_id: string; created_at: string; properties: { bot?: boolean } | null }[]) {
+      if (c.properties?.bot) continue;
+      const ref = c.session_id.startsWith('checkout:') ? c.session_id.slice('checkout:'.length) : c.session_id;
+      const list = clicksByRef.get(ref) ?? [];
+      list.push(new Date(c.created_at).getTime());
+      clicksByRef.set(ref, list);
+    }
+    // 발송보다 앞선 클릭은 이 발송의 것이 아니다. 시각 순으로 두고 발송 이후 첫 건을 찾는다.
+    for (const list of clicksByRef.values()) list.sort((a, b) => a - b);
+  }
+
   const orders = await fetchOrders(since);
   const ordersByCustomer = new Map<string, OrderRow[]>();
   const ordersByUtm = new Map<string, { count: number; revenue: number }>();
@@ -723,6 +758,11 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     recovered: number;
     revenue: number;
     utms: Set<string>;
+    /** UTM 대신 클릭으로 기여를 세는 발송 */
+    clickTracked: boolean;
+    clicks: number;
+    clickOrders: number;
+    clickRevenue: number;
   }
   const byCampaign = new Map<string, Agg>();
 
@@ -736,6 +776,10 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
       recovered: 0,
       revenue: 0,
       utms: new Set<string>(),
+      clickTracked: false,
+      clicks: 0,
+      clickOrders: 0,
+      clickRevenue: 0,
     };
     agg.sent++;
     agg.firstSentAt = Math.min(agg.firstSentAt, s.at);
@@ -750,6 +794,25 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     if (hit) {
       agg.recovered++;
       agg.revenue += hit.total;
+    }
+
+    // 클릭 기여 — 누른 뒤에 산 것만 센다. 발송보다 앞선 클릭은 남의 기록이다.
+    if (s.p.clickTracked) {
+      agg.clickTracked = true;
+      const ref = String(s.p.ref ?? '').split('/').pop() ?? '';
+      const clickedAt = (clicksByRef.get(ref) ?? []).find((t) => t >= s.at);
+      if (clickedAt !== undefined) {
+        agg.clicks++;
+        const bought = gid
+          ? (ordersByCustomer.get(gid) ?? []).find(
+              (o) => o.at > clickedAt && o.at <= clickedAt + ATTRIBUTION_HOURS * 3600_000,
+            )
+          : undefined;
+        if (bought) {
+          agg.clickOrders++;
+          agg.clickRevenue += bought.total;
+        }
+      }
     }
     byCampaign.set(key, agg);
   }
@@ -774,6 +837,8 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
       rate: null,
       clicked: agg.count,
       clickRevenue: Math.round(agg.revenue),
+      // 매니저 발송은 우리가 링크를 감싸지 않으니 클릭을 셀 수 없다
+      clicks: null,
     });
   }
 
@@ -783,7 +848,12 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
       // 화면에서 "0건"과 "셀 수 없음"이 구분된다.
       let clicked: number | null = null;
       let clickRevenue: number | null = null;
-      if (v.utms.size > 0) {
+      if (v.clickTracked) {
+        // 주문에 UTM 이 안 붙는 저니 — 하한을 클릭에서 만든다.
+        // 「눌렀고, 그 뒤 72시간 안에 샀다」라서 발송 기준 회수보다 훨씬 좁다.
+        clicked = v.clickOrders;
+        clickRevenue = v.clickRevenue;
+      } else if (v.utms.size > 0) {
         clicked = 0;
         clickRevenue = 0;
         for (const u of v.utms) {
@@ -805,6 +875,7 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
         rate: v.sent > 0 ? Math.round((v.recovered / v.sent) * 1000) / 10 : 0,
         clicked,
         clickRevenue: clickRevenue === null ? null : Math.round(clickRevenue),
+        clicks: v.clickTracked ? v.clicks : null,
       };
     })
     .concat(broadcasts)
