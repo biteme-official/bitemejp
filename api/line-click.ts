@@ -18,8 +18,11 @@
  *   3. 클릭 기록은 **곁다리**다. Supabase 가 죽어 있어도 리다이렉트는 나가야 하므로
  *      짧은 타임아웃을 걸고 실패는 삼킨다.
  *
- * 오픈 리다이렉트 방지: 토큰은 HMAC 로 서명하고, 목적지 호스트는 우리 상점으로 고정한다.
- * 토큰에는 경로+쿼리만 담기므로 서명이 뚫려도 우리 상점 밖으로는 못 보낸다.
+ * 오픈 리다이렉트 방지: 토큰은 HMAC 로 서명하고, 목적지는 화이트리스트 호스트만 허용한다.
+ *
+ * ⚠️ 목적지 호스트를 환경변수(`VITE_SHOPIFY_STORE_DOMAIN`)에서 조립하지 않는다.
+ *    프리뷰 환경의 값이 프로덕션과 달라(다른 상점) 엉뚱한 주소로 보내는 것을 실측으로 확인했다.
+ *    Shopify 가 준 URL 을 통째로 서명해 나르고, 여기서는 호스트가 허용 목록에 있는지만 본다.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -42,13 +45,30 @@ const FALLBACK_URL = 'https://biteme.co.jp/';
  */
 const BOT_UA = /bot|crawler|spider|preview|facebookexternalhit|slackbot|twitterbot|whatsapp|telegram|line-?poker/i;
 
-function shopHost(): string {
-  return process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
+/**
+ * 보낼 수 있는 목적지.
+ *
+ * Shopify 체크아웃은 상점의 영구 도메인(`*.myshopify.com`)에서 열리고, 그 도메인은
+ * 상점 설정에 따라 바뀔 수 있으므로 이름을 못 박지 않는다. 우리 사이트도 함께 허용한다.
+ */
+const ALLOWED_HOST = /(^|\.)myshopify\.com$/;
+const OWN_HOSTS = ['biteme.co.jp', 'www.biteme.co.jp'];
+
+/** 허용된 목적지면 **받은 문자열 그대로** 돌려준다. 정규화하면 `key` 파라미터가 달라질 수 있다. */
+export function allowedTarget(raw: string): string | null {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== 'https:') return null;
+    if (!ALLOWED_HOST.test(u.hostname) && !OWN_HOSTS.includes(u.hostname)) return null;
+    return raw;
+  } catch {
+    return null;
+  }
 }
 
-/** 토큰에 담는 것은 목적지의 경로+쿼리와 이탈 결제 id 뿐이다. 개인 식별자는 싣지 않는다. */
-export function signClick(pathWithSearch: string, ref: string, secret: string): string {
-  const body = Buffer.from(`${pathWithSearch}|${ref}`, 'utf8').toString('base64url');
+/** 토큰에 담는 것은 목적지 URL 과 이탈 결제 id 뿐이다. 개인 식별자는 싣지 않는다. */
+export function signClick(url: string, ref: string, secret: string): string {
+  const body = Buffer.from(`${url}|${ref}`, 'utf8').toString('base64url');
   return `${body}.${sign(body, secret)}`;
 }
 
@@ -57,7 +77,7 @@ function sign(body: string, secret: string): string {
   return createHmac('sha256', secret).update(body).digest('base64url').slice(0, 16);
 }
 
-function verify(token: string, secret: string): { path: string; ref: string } | null {
+function verify(token: string, secret: string): { target: string; ref: string } | null {
   const dot = token.lastIndexOf('.');
   if (dot <= 0) return null;
   const body = token.slice(0, dot);
@@ -68,10 +88,9 @@ function verify(token: string, secret: string): { path: string; ref: string } | 
   const decoded = Buffer.from(body, 'base64url').toString('utf8');
   const bar = decoded.lastIndexOf('|');
   if (bar <= 0) return null;
-  const path = decoded.slice(0, bar);
-  // `//evil.com` 은 브라우저가 프로토콜 상대 URL 로 읽어 외부로 나간다. 호스트를 붙이기 전에 막는다.
-  if (!path.startsWith('/') || path.startsWith('//')) return null;
-  return { path, ref: decoded.slice(bar + 1) };
+  const target = allowedTarget(decoded.slice(0, bar));
+  if (!target) return null;
+  return { target, ref: decoded.slice(bar + 1) };
 }
 
 async function logClick(req: VercelRequest, ref: string): Promise<void> {
@@ -133,14 +152,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.redirect(302, FALLBACK_URL);
   }
 
-  const target = `https://${shopHost()}${parsed.path}`;
-
   // HEAD 는 링크 미리보기다. 기록하지 않고 길만 알려준다.
   if (req.method === 'HEAD') {
-    res.setHeader('Location', target);
+    res.setHeader('Location', parsed.target);
     return res.status(302).end();
   }
 
   await logClick(req, parsed.ref);
-  return res.redirect(302, target);
+  return res.redirect(302, parsed.target);
 }

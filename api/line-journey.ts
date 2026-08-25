@@ -28,7 +28,7 @@ import {
   recordSends,
   supabase,
 } from './line-campaign.js';
-import { signClick } from './line-click.js';
+import { allowedTarget, signClick } from './line-click.js';
 
 const CART_RECOVERY = 'cart_recovery';
 const FIRST_PURCHASE = 'first_purchase_d1';
@@ -243,15 +243,11 @@ async function alreadyHandled(journey: string): Promise<Set<string>> {
 export function trackedUrl(recoveryUrl: string, checkoutId: string): string {
   const secret = process.env.LINE_CHANNEL_SECRET;
   if (!secret) return recoveryUrl;
-  try {
-    const u = new URL(recoveryUrl);
-    if (u.host !== process.env.VITE_SHOPIFY_STORE_DOMAIN) return recoveryUrl;
-    const ref = checkoutId.split('/').pop();
-    if (!ref) return recoveryUrl;
-    return `${CLICK_ORIGIN}/api/line-click?t=${signClick(u.pathname + u.search, ref, secret)}`;
-  } catch {
-    return recoveryUrl;
-  }
+  // 리다이렉트가 되받아 줄 수 있는 주소가 아니면 감싸지 않는다 — 감쌌다가 못 열면 그게 손실이다
+  if (!allowedTarget(recoveryUrl)) return recoveryUrl;
+  const ref = checkoutId.split('/').pop();
+  if (!ref) return recoveryUrl;
+  return `${CLICK_ORIGIN}/api/line-click?t=${signClick(recoveryUrl, ref, secret)}`;
 }
 
 function buildMessage(c: Candidate, url: string): string {
