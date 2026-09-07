@@ -16,7 +16,8 @@ import LineCallback from "./pages/LineCallback";
 import LineLoginEntry from "./pages/LineLoginEntry";
 import MyPage from "./pages/MyPage";
 import WishlistPage from "./pages/WishlistPage";
-import Checkout from "./pages/Checkout";
+import Checkout from "./pages/Checkout";
+import CartRestore from './pages/CartRestore';
 import AdminDashboard from "./pages/AdminDashboard";
 import TokushoHo from "./pages/TokushoHo";
 import About from "./pages/About";
@@ -65,6 +66,8 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/product/:id" element={<ProductDetail />} />
           <Route path="/checkout" element={<Checkout />} />
+          {/* LINE 담기 이탈 저니의 복구 링크 — 카트를 되살린다 */}
+          <Route path="/cart/restore" element={<CartRestore />} />
           <Route path="/checkout-return" element={<CheckoutReturn />} />
           <Route path="/contact" element={<ContactUs />} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
