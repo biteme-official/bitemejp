@@ -323,6 +323,14 @@ function authorized(req: VercelRequest): boolean {
 
 interface RunResult {
   journey: string;
+  /**
+   * 저니가 읽어 온 원재료의 크기. 발송 창 밖까지 포함한다.
+   *
+   * `found` 는 창 안에 든 것만 세기 때문에, 0 이어도 "아직 아무도 조건을 안 채웠다"인지
+   * "애초에 데이터가 안 들어오고 있다"인지 구분이 안 된다. 담기 저니는 수집을 새로 붙인
+   * 저니라 이 구분이 특히 중요해서, 창 밖 것까지 센 수를 따로 남긴다.
+   */
+  pool?: number;
   found: number;
   willSend: number;
   sent: number;
@@ -342,6 +350,8 @@ interface RunResult {
  */
 interface JourneyPlan {
   journey: string;
+  /** 읽어 온 원재료 (창 밖 포함). 수집 자체가 도는지 보는 값 */
+  pool?: number;
   /** 창 안에 들어온 전체 (제외 조건 적용 전) */
   found: number;
   excluded: Record<string, number>;
@@ -592,6 +602,9 @@ async function planCartAdd(
 
   return {
     journey: CART_ADD,
+    // 창(3~20h) 밖까지 포함한 스냅샷 수. 이 값이 0 이면 창 문제가 아니라
+    // **수집이 아예 안 들어오고 있는 것**이다.
+    pool: snapshots.length,
     found: inWindow,
     excluded: {
       카트비움: emptied,
@@ -689,6 +702,7 @@ async function deliver(plan: JourneyPlan, now: number, dryRun: boolean): Promise
 
   const base: RunResult = {
     journey: plan.journey,
+    ...(plan.pool === undefined ? {} : { pool: plan.pool }),
     found: plan.found,
     willSend: targets.length,
     sent: 0,
