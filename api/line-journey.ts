@@ -618,7 +618,8 @@ async function runCartAdd(
 
   const base: RunResult = {
     journey: CART_ADD,
-    found: inWindow.length,
+    // selectCartAddTargets 는 개수를 준다 (배열이 아니다)
+    found: inWindow,
     willSend: targets.length,
     sent: 0,
     notFriend: 0,
