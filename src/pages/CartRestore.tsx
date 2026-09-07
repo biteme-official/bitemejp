@@ -54,34 +54,56 @@ export default function CartRestore() {
     }
 
     void (async () => {
-      const { items, addItem } = useCartStore.getState();
+      const { items } = useCartStore.getState();
       const already = new Set(items.map(i => i.variantId));
       let restored = 0;
 
-      for (const w of wanted) {
+      const nodes = await Promise.all(
+        wanted.map(w => (already.has(`gid://shopify/ProductVariant/${w.variantId}`)
+          ? Promise.resolve(null)
+          : fetchProductById(w.productId).catch(() => null))),
+      );
+
+      const rebuilt: CartItem[] = [];
+      wanted.forEach((w, i) => {
         const variantGid = `gid://shopify/ProductVariant/${w.variantId}`;
-        if (already.has(variantGid)) { restored++; continue; }
+        // 이미 담겨 있으면 건드리지 않는다 — 링크를 두 번 눌러도 수량이 늘면 안 된다
+        if (already.has(variantGid)) { restored++; return; }
 
-        const node = await fetchProductById(w.productId).catch(() => null);
-        if (!node) continue;
+        const node = nodes[i];
+        if (!node) return;
         const variant = node.variants.edges.find(e => e.node.id === variantGid)?.node;
-        // 품절·삭제된 옵션은 조용히 건너뛴다. 하나 빠졌다고 나머지까지 못 살릴 이유가 없다.
-        if (!variant) continue;
+        // 삭제됐거나 품절인 옵션은 건너뛴다. 하나 빠졌다고 나머지까지 못 살릴 이유가 없다.
+        //
+        // 🔴 품절을 안 거르면 조용히 수량 0 짜리 줄이 생긴다. addItem 이
+        //    `Math.min(수량, quantityAvailable)` 로 자르는데 `?? Infinity` 는 null 만
+        //    걸러서 0 이 그대로 살아남는다. 그 줄을 들고 결제로 가면 살 수 없다.
+        if (!variant || !variant.availableForSale || variant.quantityAvailable === 0) return;
 
-        const item: CartItem = {
+        rebuilt.push({
           product: { node },
           variantId: variant.id,
           variantTitle: variant.title,
           price: variant.price,
-          quantity: w.quantity,
+          quantity: Math.min(w.quantity, variant.quantityAvailable ?? w.quantity),
           quantityAvailable: variant.quantityAvailable ?? null,
           selectedOptions: variant.selectedOptions,
-        };
-        addItem(item);
+        });
         restored++;
-      }
+      });
 
       if (restored === 0) { setFailed(true); return; }
+
+      // 🔴 addItem 을 줄마다 부르면 안 된다. addItem 은 매번 syncGiftItem 을 던지는데
+      //    그 함수는 재진입 방지 플래그로 앞선 호출이 끝날 때까지 나머지를 통째로
+      //    무시한다. 그러면 증정 임계값을 부분 카트로 판정해, 5,000엔을 넘겼는데도
+      //    うちわ 없이 결제로 가는 Issue #126 과 같은 손해가 난다.
+      //    한 번에 넣고 증정 동기화를 딱 한 번, 끝날 때까지 기다린다.
+      if (rebuilt.length > 0) {
+        useCartStore.setState({ items: [...useCartStore.getState().items, ...rebuilt] });
+        await useCartStore.getState().syncGiftItem();
+      }
+
       // 카트 서랍은 헤더가 열고 닫는다. 되살린 카트를 눈으로 확인하도록 결제 페이지로 보낸다.
       navigate('/checkout', { replace: true });
     })();

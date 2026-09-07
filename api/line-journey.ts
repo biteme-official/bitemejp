@@ -20,6 +20,7 @@
  *    - 인당 수신 한도와 대상당 1회 규칙을 지킨다
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { Member } from './line-campaign.js';
 import {
   SEND_EVENT,
   adminGraphQL,
@@ -338,11 +339,9 @@ async function runCartRecovery(
   now: number,
   dryRun: boolean,
   abandoned: Candidate[],
+  buyers: Set<string>,
 ): Promise<RunResult> {
-  const [buyers, handled] = await Promise.all([
-    fetchRecentBuyers(token, now),
-    alreadyHandled(CART_RECOVERY),
-  ]);
+  const handled = await alreadyHandled(CART_RECOVERY);
 
   const candidates = abandoned.filter((c) => c.ageH >= MIN_AGE_HOURS && c.ageH <= MAX_AGE_HOURS);
 
@@ -501,11 +500,13 @@ function stripControl(v: string): string {
  * 문안. 결제창 이탈과 마찬가지로 쿠폰을 붙이지 않는다 —
  * 담아두면 할인이 온다는 걸 학습시키면 정가 구매가 사라진다.
  */
-function buildCartAddMessage(items: CartLine[], url: string): string {
+export function buildCartAddMessage(items: CartLine[], url: string): string {
   // 상품명은 브라우저가 보낸 값이라 그대로 문안에 넣지 않는다. 개행이 섞이면
   // 메시지 모양이 무너진다(피해는 본인 한정이지만 고객이 보는 문장이다).
   const first = stripControl(items[0]?.title ?? '').trim();
-  const rest = items.length - 1;
+  // 「ほかN点」은 줄 수가 아니라 총 수량 − 1 이다 — 복구 저니(buildMessage)의 itemCount 와 같은 기준.
+  // 한 줄에 3개를 담아도 「ほか2点」이 맞다.
+  const rest = items.reduce((n, i) => n + i.quantity, 0) - 1;
   const what = first
     ? `「${first}」${rest > 0 ? ` ほか${rest}点` : ''}`
     : 'お選びいただいた商品';
@@ -584,16 +585,15 @@ export function selectCartAddTargets(input: {
 }
 
 async function runCartAdd(
-  token: string,
   now: number,
   dryRun: boolean,
   /** 결제창까지 간 사람 — 저니 1 의 몫이라 여기서 뺀다 */
   checkoutReached: Set<string>,
+  members: Member[],
+  buyers: Set<string>,
 ): Promise<RunResult> {
-  const [snapshots, members, buyers, handled] = await Promise.all([
+  const [snapshots, handled] = await Promise.all([
     fetchCartSnapshots(now),
-    fetchAudience(),
-    fetchRecentBuyers(token, now),
     alreadyHandled(CART_ADD),
   ]);
 
@@ -699,8 +699,8 @@ const FIRST_PURCHASE_TEXT = [
   FIRST_PURCHASE_URL,
 ].join('\n');
 
-async function runFirstPurchase(now: number, dryRun: boolean): Promise<RunResult> {
-  const [members, handled] = await Promise.all([fetchAudience(), alreadyHandled(FIRST_PURCHASE)]);
+async function runFirstPurchase(now: number, dryRun: boolean, members: Member[]): Promise<RunResult> {
+  const handled = await alreadyHandled(FIRST_PURCHASE);
 
   const inWindow = members.filter((m) => {
     const ageH = (now - new Date(m.createdAt).getTime()) / 3600_000;
@@ -794,19 +794,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const token = await getAdminToken();
-    // 결제창 이탈은 한 번만 읽어 두 저니가 나눠 쓴다 (저니 1 = 대상, 저니 2 = 제외 조건)
-    const abandoned = await fetchCandidates(token, now);
-    const checkoutReached = new Set(abandoned.map((c) => c.lineUserId));
+    const runs = (j: (typeof JOURNEY_ORDER)[number]) => dryRun || enabled.includes(j);
+    const needsCarts = runs(CART_RECOVERY) || runs(CART_ADD);
+
+    // 공용 조회는 여기서 한 번만 한다. 저니마다 부르면 한 번 실행에 고객 목록을 두 번,
+    // 최근 주문을 두 번 훑어서 함수 시간을 다 쓴다 — 발송 도중에 타임아웃이 나면
+    // 중복 방지 기록(recordSends)이 안 남아 다음 시간에 같은 사람에게 또 나간다.
+    const [members, buyers] = await Promise.all([
+      runs(CART_ADD) || runs(FIRST_PURCHASE) ? fetchAudience() : Promise.resolve([] as Member[]),
+      needsCarts ? fetchRecentBuyers(token, now) : Promise.resolve(new Set<string>()),
+    ]);
+
+    // 결제창 이탈은 한 번만 읽어 두 저니가 나눠 쓴다 (저니 1 = 대상, 저니 2 = 제외 조건).
+    // 🔴 여기서 던지면 안 된다. 이 조회가 실패했다고 관계없는 첫 구매 유도까지 멈추면
+    //    Shopify 딸꾹질 한 번에 그날 발송이 통째로 사라진다. 실패는 두 카트 저니만 건너뛴다.
+    let abandoned: Candidate[] | null = null;
+    if (needsCarts) {
+      abandoned = await fetchCandidates(token, now).catch((e: unknown) => {
+        console.error('[LINE Journey] 🔴 이탈 조회 실패 — 카트 저니만 건너뜁니다:', e);
+        return null;
+      });
+    }
+    const checkoutReached = new Set((abandoned ?? []).map((c) => c.lineUserId));
     const results: RunResult[] = [];
 
     // ⚠️ 순서대로 돈다. 빈도 제한이 하루 1통이라 앞 저니가 보낸 사람은 뒤 저니에서 빠진다.
     //    즉 이 배열의 순서가 곧 우선순위다.
     for (const j of JOURNEY_ORDER) {
       // 드라이런은 꺼져 있어도 "켜면 어떻게 되는지"를 보여줘야 하므로 전부 돈다
-      if (!dryRun && !enabled.includes(j)) continue;
-      if (j === CART_RECOVERY) results.push(await runCartRecovery(token, now, dryRun, abandoned));
-      if (j === CART_ADD) results.push(await runCartAdd(token, now, dryRun, checkoutReached));
-      if (j === FIRST_PURCHASE) results.push(await runFirstPurchase(now, dryRun));
+      if (!runs(j)) continue;
+      // 이탈 조회가 실패한 실행에서는 카트 두 저니를 건너뛴다 (없는 데이터로 판정하지 않는다)
+      if ((j === CART_RECOVERY || j === CART_ADD) && abandoned === null) continue;
+      if (j === CART_RECOVERY) results.push(await runCartRecovery(token, now, dryRun, abandoned!, buyers));
+      if (j === CART_ADD) results.push(await runCartAdd(now, dryRun, checkoutReached, members, buyers));
+      if (j === FIRST_PURCHASE) results.push(await runFirstPurchase(now, dryRun, members));
     }
 
     if (!dryRun) {

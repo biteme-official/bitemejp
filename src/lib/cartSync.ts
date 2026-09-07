@@ -1,5 +1,6 @@
 import { useAuthStore } from '@/stores/authStore';
 import type { CartItem } from '@/stores/cartStore';
+import { isGiftLine } from '@/config/giftConfig';
 
 /**
  * 로그인 고객의 장바구니 스냅샷을 서버에 남긴다.
@@ -14,8 +15,8 @@ import type { CartItem } from '@/stores/cartStore';
  * · 비로그인 방문자는 보내지 않는다 (보낼 곳이 없다).
  * · 서버는 서명된 `lineSessionToken` 에서만 LINE userId 를 꺼낸다 — 여기서 userId 를
  *   실어 보내지 않는 이유다.
- * · 증정품 라인은 뺀다. 고객이 담은 것이 아니라 임계값을 넘겨서 우리가 붙인 것이라,
- *   문안에 「うちわ をお預かりしています」가 나가면 이상하다.
+ * · 증정품 라인은 뺀다(`isGiftLine`). 고객이 담은 것이 아니라 임계값을 넘겨서 우리가
+ *   붙인 것이고, 복구 링크에 실리면 정가 상품으로 되살아난다.
  */
 
 /** 담기 한 번에 한 통씩 던지지 않도록 묶는 간격. 수량 버튼 연타를 한 번으로 만든다. */
@@ -32,7 +33,10 @@ function post(items: CartItem[], leaving = false): void {
   if (!token) return;
 
   const payload = items
-    .filter(i => !i.isGift)
+    // 🔴 isGift 플래그만 보면 안 된다 — localStorage 카트에서 유실된다(Issue #126).
+    //    유실된 증정 라인이 스냅샷에 들어가면 문안이 うちわ 를 광고하고, 복구 링크로
+    //    되살릴 때는 플래그 없이 들어가 **고객이 증정품을 정가로 사게 된다.**
+    .filter(i => !isGiftLine(i))
     .map(i => ({
       productId: i.product?.node?.id,
       variantId: i.variantId,
