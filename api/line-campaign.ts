@@ -588,6 +588,29 @@ interface CampaignStat {
   clickRevenue: number | null;
   /** 링크를 실제로 누른 사람 수. 클릭 추적을 하는 발송에만 있다 */
   clicks: number | null;
+  /**
+   * 일자별 성과. **발송일 축**이다 — 그날 보낸 발송이 그 뒤 72시간 안에 무엇을 만들었나.
+   *
+   * 저니는 매시 돌아서 한 캠페인이 30일간 계속 나간다. 합계만 보면 어느 날부터 회수가
+   * 꺾였는지, 어제 실제로 나가긴 했는지를 알 수 없다.
+   *
+   * `clicked`(링크 기여)는 클릭 추적 발송에서만 날짜로 나뉜다. UTM 으로 세는 발송은
+   * 주문 쪽 UTM 이 열쇠라 '어느 날 보낸 것이 만든 주문인지'를 가를 수 없어 null 이다
+   * (합계에는 그대로 들어간다). 매니저 브로드캐스트는 발송 기록 자체가 없어 daily 가 없다.
+   */
+  daily: CampaignDay[] | null;
+}
+
+interface CampaignDay {
+  /** JST 발송일 (YYYY-MM-DD) */
+  date: string;
+  sent: number;
+  recovered: number;
+  revenue: number;
+  rate: number | null;
+  clicked: number | null;
+  clickRevenue: number | null;
+  clicks: number | null;
 }
 
 /**
@@ -763,8 +786,11 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     clicks: number;
     clickOrders: number;
     clickRevenue: number;
+    /** 발송일(JST) → 그날 몫 */
+    daily: Map<string, { sent: number; recovered: number; revenue: number; clicks: number; clickOrders: number; clickRevenue: number }>;
   }
   const byCampaign = new Map<string, Agg>();
+  const emptyDay = () => ({ sent: 0, recovered: 0, revenue: 0, clicks: 0, clickOrders: 0, clickRevenue: 0 });
 
   for (const s of sends) {
     const key = s.p.journey ?? s.p.campaignId ?? 'unknown';
@@ -780,8 +806,14 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
       clicks: 0,
       clickOrders: 0,
       clickRevenue: 0,
+      daily: new Map(),
     };
+    // 하루의 경계는 JST 다 — 발송도 크론도 일본 시간으로 돈다
+    const day = jstDate(new Date(s.at));
+    const d = agg.daily.get(day) ?? emptyDay();
+    agg.daily.set(day, d);
     agg.sent++;
+    d.sent++;
     agg.firstSentAt = Math.min(agg.firstSentAt, s.at);
     if (s.p.utm) agg.utms.add(s.p.utm);
 
@@ -794,6 +826,8 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     if (hit) {
       agg.recovered++;
       agg.revenue += hit.total;
+      d.recovered++;
+      d.revenue += hit.total;
     }
 
     // 클릭 기여 — 누른 뒤에 산 것만 센다. 발송보다 앞선 클릭은 남의 기록이다.
@@ -803,6 +837,7 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
       const clickedAt = (clicksByRef.get(ref) ?? []).find((t) => t >= s.at);
       if (clickedAt !== undefined) {
         agg.clicks++;
+        d.clicks++;
         const bought = gid
           ? (ordersByCustomer.get(gid) ?? []).find(
               (o) => o.at > clickedAt && o.at <= clickedAt + ATTRIBUTION_HOURS * 3600_000,
@@ -811,6 +846,8 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
         if (bought) {
           agg.clickOrders++;
           agg.clickRevenue += bought.total;
+          d.clickOrders++;
+          d.clickRevenue += bought.total;
         }
       }
     }
@@ -839,6 +876,8 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
       clickRevenue: Math.round(agg.revenue),
       // 매니저 발송은 우리가 링크를 감싸지 않으니 클릭을 셀 수 없다
       clicks: null,
+      // 발송 기록 자체가 없어 일자로 나눌 수 없다
+      daily: null,
     });
   }
 
@@ -864,6 +903,20 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
           }
         }
       }
+      const daily: CampaignDay[] = [...v.daily.entries()]
+        .sort(([a], [b]) => b.localeCompare(a))
+        .map(([date, d]) => ({
+          date,
+          sent: d.sent,
+          recovered: d.recovered,
+          revenue: Math.round(d.revenue),
+          rate: d.sent > 0 ? Math.round((d.recovered / d.sent) * 1000) / 10 : null,
+          // UTM 으로 세는 발송은 '어느 날 보낸 것이 만든 주문인지'를 가를 수 없다 → 합계에만
+          clicked: v.clickTracked ? d.clickOrders : null,
+          clickRevenue: v.clickTracked ? Math.round(d.clickRevenue) : null,
+          clicks: v.clickTracked ? d.clicks : null,
+        }));
+
       return {
         key,
         kind: v.kind,
@@ -876,6 +929,7 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
         clicked,
         clickRevenue: clickRevenue === null ? null : Math.round(clickRevenue),
         clicks: v.clickTracked ? v.clicks : null,
+        daily,
       };
     })
     .concat(broadcasts)
