@@ -508,6 +508,58 @@ function buildCartAddMessage(items: CartLine[], url: string): string {
   ].join('\n');
 }
 
+/**
+ * 담기 저니의 선별 규칙만 떼어낸 순수 함수.
+ *
+ * 발송 조건이 다섯 겹이라(창·비움·결제창·구매·중복) 규칙이 하나만 어긋나도
+ * 엉뚱한 사람에게 나간다. 네트워크 없이 시험할 수 있어야 해서 밖으로 뺐다.
+ */
+export function selectCartAddTargets(input: {
+  snapshots: CartSnapshot[];
+  now: number;
+  /** 결제창까지 간 사람 — 저니 1 의 몫 */
+  checkoutReached: Set<string>;
+  /** 최근 주문한 고객 gid */
+  buyers: Set<string>;
+  gidByLine: Map<string, string>;
+  /** 이미 이 카트 구성으로 보낸 ref */
+  handled: Set<string>;
+}): {
+  inWindow: number;
+  emptied: number;
+  reachedCheckout: number;
+  bought: number;
+  alreadySent: number;
+  fresh: CartSnapshot[];
+} {
+  const { snapshots, now, checkoutReached, buyers, gidByLine, handled } = input;
+
+  const inWindow = snapshots.filter((s) => {
+    const ageH = (now - s.at) / 3600_000;
+    return ageH >= CART_ADD_MIN_H && ageH <= CART_ADD_MAX_H;
+  });
+
+  const withItems = inWindow.filter((s) => s.items.length > 0);
+  const boughtOf = (s: CartSnapshot) => {
+    const gid = gidByLine.get(s.lineUserId);
+    return !!gid && buyers.has(gid);
+  };
+
+  return {
+    inWindow: inWindow.length,
+    emptied: inWindow.length - withItems.length,
+    reachedCheckout: withItems.filter((s) => checkoutReached.has(s.lineUserId)).length,
+    bought: withItems.filter(boughtOf).length,
+    alreadySent: withItems.filter((s) => handled.has(cartKey(s.lineUserId, s.items))).length,
+    fresh: withItems.filter(
+      (s) =>
+        !checkoutReached.has(s.lineUserId) &&
+        !boughtOf(s) &&
+        !handled.has(cartKey(s.lineUserId, s.items)),
+    ),
+  };
+}
+
 async function runCartAdd(
   token: string,
   now: number,
@@ -525,25 +577,14 @@ async function runCartAdd(
   const gidByLine = new Map<string, string>();
   for (const m of members) if (m.lineUserId) gidByLine.set(m.lineUserId, m.gid);
 
-  const inWindow = snapshots.filter((s) => {
-    const ageH = (now - s.at) / 3600_000;
-    return ageH >= CART_ADD_MIN_H && ageH <= CART_ADD_MAX_H;
+  const { inWindow, emptied, reachedCheckout, bought, alreadySent, fresh } = selectCartAddTargets({
+    snapshots,
+    now,
+    checkoutReached,
+    buyers,
+    gidByLine,
+    handled,
   });
-
-  const emptied = inWindow.filter((s) => s.items.length === 0);
-  const withItems = inWindow.filter((s) => s.items.length > 0);
-  const reachedCheckout = withItems.filter((s) => checkoutReached.has(s.lineUserId));
-  const bought = withItems.filter((s) => {
-    const gid = gidByLine.get(s.lineUserId);
-    return !!gid && buyers.has(gid);
-  });
-
-  const fresh = withItems.filter(
-    (s) =>
-      !checkoutReached.has(s.lineUserId) &&
-      !bought.includes(s) &&
-      !handled.has(cartKey(s.lineUserId, s.items)),
-  );
 
   const cap = await applyFrequencyCap(
     fresh.map((s) => s.lineUserId),
@@ -561,10 +602,10 @@ async function runCartAdd(
     failed: 0,
     capped: cap.capped.length,
     excluded: {
-      카트비움: emptied.length,
-      결제창까지감: reachedCheckout.length,
-      구매함: bought.length,
-      이미발송: withItems.filter((s) => handled.has(cartKey(s.lineUserId, s.items))).length,
+      카트비움: emptied,
+      결제창까지감: reachedCheckout,
+      구매함: bought,
+      이미발송: alreadySent,
       수신한도: cap.capped.length,
     },
     samples: targets.slice(0, 2).map((s) => ({
