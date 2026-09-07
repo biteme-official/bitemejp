@@ -6,6 +6,7 @@ import {
   isGiftLine, shouldSendGiftCode,
 } from '@/config/giftConfig';
 import { LINE_WELCOME_DISCOUNT_KEY } from '@/lib/lineWelcomeDiscount';
+import { syncCartSnapshot } from '@/lib/cartSync';
 
 export interface CartItem {
   product: ShopifyProduct;
@@ -130,6 +131,8 @@ export const useCartStore = create<CartStore>()(
 
       clearCart: () => {
         set({ items: [], cartId: null, checkoutUrl: null });
+        // 비운 것도 신호다 — 안 알리면 저니가 옛 카트를 들고 「남아 있습니다」를 보낸다
+        syncCartSnapshot([]);
       },
 
       setCartId: (cartId) => set({ cartId }),
@@ -184,6 +187,10 @@ export const useCartStore = create<CartStore>()(
           }
         } finally {
           _giftSyncing = false;
+          // 담기·수량변경·삭제가 전부 이 함수를 마지막으로 거친다. 여기 한 곳에서만
+          // 스냅샷을 던지면 세 경로를 각각 손대지 않아도 되고, 증정 라인 정리까지 끝난
+          // 뒤라 내용도 확정이다.
+          syncCartSnapshot(get().items);
         }
       },
 

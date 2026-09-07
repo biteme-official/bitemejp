@@ -1,0 +1,98 @@
+import { useAuthStore } from '@/stores/authStore';
+import type { CartItem } from '@/stores/cartStore';
+import { isGiftLine } from '@/config/giftConfig';
+
+/**
+ * 로그인 고객의 장바구니 스냅샷을 서버에 남긴다.
+ *
+ * Shopify 의 이탈 결제(abandoned checkout)는 **결제창까지 들어간 사람**만 기록한다.
+ * 담기만 하고 결제창에 안 가면 우리 쪽에 흔적이 없어서, 장바구니 이탈 저니가 그 사람을
+ * 볼 수 없었다. 2026-09-04 담기 이벤트 때 담기는 293 → 1,341 로 뛰었는데 결제창 이탈은
+ * 15 → 16 이었다 — 담기 단계가 통째로 사각지대였다.
+ *
+ * 그래서 카트가 바뀔 때마다 여기서 스냅샷을 던지고 `cart_add` 저니가 그걸 읽는다.
+ *
+ * · 비로그인 방문자는 보내지 않는다 (보낼 곳이 없다).
+ * · 서버는 서명된 `lineSessionToken` 에서만 LINE userId 를 꺼낸다 — 여기서 userId 를
+ *   실어 보내지 않는 이유다.
+ * · 증정품 라인은 뺀다(`isGiftLine`). 고객이 담은 것이 아니라 임계값을 넘겨서 우리가
+ *   붙인 것이고, 복구 링크에 실리면 정가 상품으로 되살아난다.
+ */
+
+/** 담기 한 번에 한 통씩 던지지 않도록 묶는 간격. 수량 버튼 연타를 한 번으로 만든다. */
+const DEBOUNCE_MS = 4000;
+
+let timer: ReturnType<typeof setTimeout> | null = null;
+let pending: CartItem[] | null = null;
+
+/**
+ * @param leaving 탭을 떠나는 중인가. 이때는 일반 fetch 가 취소될 수 있어 sendBeacon 을 쓴다.
+ */
+function post(items: CartItem[], leaving = false): void {
+  const token = useAuthStore.getState().user?.lineSessionToken;
+  if (!token) return;
+
+  const payload = items
+    // 🔴 isGift 플래그만 보면 안 된다 — localStorage 카트에서 유실된다(Issue #126).
+    //    유실된 증정 라인이 스냅샷에 들어가면 문안이 うちわ 를 광고하고, 복구 링크로
+    //    되살릴 때는 플래그 없이 들어가 **고객이 증정품을 정가로 사게 된다.**
+    .filter(i => !isGiftLine(i))
+    .map(i => ({
+      productId: i.product?.node?.id,
+      variantId: i.variantId,
+      quantity: i.quantity,
+      title: i.product?.node?.title ?? '',
+    }))
+    .filter(i => !!i.productId && !!i.variantId);
+
+  // 빈 카트도 보낸다 — "비웠다"가 저니를 멈추는 신호다.
+  const body = JSON.stringify({ lineSessionToken: token, items: payload });
+
+  // 🔴 탭이 닫히는 중에는 fetch 가 취소된다. 담고 바로 나가는 사람이 이 저니의 핵심
+  //    대상이라, 하필 그 사람의 카트만 기록이 안 남는 셈이 된다. sendBeacon 은 문서가
+  //    사라진 뒤에도 브라우저가 대신 보내 준다.
+  if (leaving && typeof navigator !== 'undefined' && navigator.sendBeacon) {
+    // 같은 오리진이라 application/json 을 그대로 쓸 수 있다(프리플라이트가 없다).
+    // 그래도 서버는 문자열 body 도 파싱하도록 해 뒀다 — 브라우저가 타입을 바꿔 보내도
+    // 조용히 버려지지 않게.
+    if (navigator.sendBeacon('/api/line-cart', new Blob([body], { type: 'application/json' }))) return;
+  }
+
+  fetch('/api/line-cart', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+    keepalive: leaving,
+  }).catch(() => {});
+}
+
+export function syncCartSnapshot(items: CartItem[]): void {
+  if (!useAuthStore.getState().user?.lineSessionToken) return;
+  pending = items;
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(() => {
+    timer = null;
+    const snapshot = pending;
+    pending = null;
+    if (snapshot) post(snapshot);
+  }, DEBOUNCE_MS);
+}
+
+/** 탭을 닫아도 마지막 상태는 남겨야 한다 — 담고 바로 나가는 사람이 이 저니의 핵심 대상이다. */
+export function flushCartSnapshot(): void {
+  if (!timer || !pending) return;
+  clearTimeout(timer);
+  timer = null;
+  const snapshot = pending;
+  pending = null;
+  post(snapshot, true);
+}
+
+if (typeof window !== 'undefined') {
+  // pagehide 는 뒤로가기 캐시·탭 종료 양쪽에서 뜬다. visibilitychange 는 모바일에서
+  // 앱 전환만 해도 뜨는데, 그때도 카트는 이미 확정이라 보내도 손해가 없다.
+  window.addEventListener('pagehide', flushCartSnapshot);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushCartSnapshot();
+  });
+}

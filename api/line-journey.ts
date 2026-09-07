@@ -1,10 +1,13 @@
 /**
  * /api/line-journey — 트리거로 도는 LINE 자동 발송
  *
- * 저니 두 갈래가 우선순위 순으로 돈다.
- *   1. cart_recovery      장바구니 이탈 복구 — 최근 30일 연결 고객 이탈 120건 > 주문 103건.
- *                         결제창까지 온 사람이 산 사람보다 많아서 여기가 가장 크게 샌다.
- *   2. first_purchase_d1  연결 다음날 첫 구매 유도 — 볼륨이 가장 크다(월 약 300통).
+ * 저니 세 갈래가 우선순위 순으로 돈다.
+ *   1. cart_recovery      장바구니 이탈 복구 — 결제창까지 갔다가 이탈 (신호가 가장 강하다).
+ *   2. cart_add           장바구니 담기 이탈 — 담기만 하고 결제창에 안 간 사람.
+ *                         Shopify 는 결제창 이탈만 기록해서 여기가 통째로 사각지대였다.
+ *                         2026-09-04 담기 이벤트 때 담기 293→1,341 인데 결제창 이탈은 15→16.
+ *                         카트 스냅샷은 `/api/line-cart` 가 남긴다.
+ *   3. first_purchase_d1  연결 다음날 첫 구매 유도 — 볼륨이 가장 크다(월 약 300통).
  *
  * ⚠️ 순서가 곧 우선순위다. 빈도 제한이 하루 1통이라 같은 사람에게 둘 다 나가지 않고,
  *    **먼저 도는 쪽이 가져간다.** 진 쪽은 지금 그냥 사라진다 — 설계의 "3일 대기 후 폐기"는
@@ -17,6 +20,7 @@
  *    - 인당 수신 한도와 대상당 1회 규칙을 지킨다
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { Member } from './line-campaign.js';
 import {
   SEND_EVENT,
   adminGraphQL,
@@ -29,12 +33,24 @@ import {
   supabase,
 } from './line-campaign.js';
 import { allowedTarget, signClick } from './line-click.js';
+import { CART_EVENT, type CartLine } from './line-cart.js';
 
 const CART_RECOVERY = 'cart_recovery';
+const CART_ADD = 'cart_add';
 const FIRST_PURCHASE = 'first_purchase_d1';
 
 /** 순서 = 우선순위. 앞에 있는 저니가 먼저 대상을 가져간다. */
-const JOURNEY_ORDER = [CART_RECOVERY, FIRST_PURCHASE] as const;
+const JOURNEY_ORDER = [CART_RECOVERY, CART_ADD, FIRST_PURCHASE] as const;
+
+/**
+ * 담기 이탈로 인정하는 구간.
+ *
+ * 결제창 이탈보다 뒤를 길게 잡는다(1h → 3h). 담기 직후는 아직 쇼핑 중일 때가 많아서
+ * 1시간 만에 말을 걸면 "보고 있는 중인데 왜"가 된다.
+ * 20시간까지 여는 건 조용한 시간(21~09) 때문이다 — 저녁에 담고 간 사람을 아침에 주워야 한다.
+ */
+const CART_ADD_MIN_H = 3;
+const CART_ADD_MAX_H = 20;
 
 /** 연결 후 이만큼 지난 사람에게 첫 구매를 권한다. 24시간을 안 두면 가입 직후에 또 말을 건다. */
 const FIRST_PURCHASE_MIN_H = 24;
@@ -70,6 +86,8 @@ const MAX_PER_RUN = 100;
 interface Candidate {
   checkoutId: string;
   createdAt: string;
+  /** 지금 기준 몇 시간 전 이탈인가 */
+  ageH: number;
   lineUserId: string;
   customerGid: string;
   recoveryUrl: string;
@@ -120,8 +138,16 @@ function resolveLineUserId(c: {
   return null;
 }
 
+/**
+ * 결제창 이탈을 읽어 온다. **나이로 거르지 않는다** — 저니마다 쓰는 창이 다르기 때문이다.
+ *   · 복구 저니(저니 1)는 1~14시간짜리만 쓰고
+ *   · 담기 저니(저니 2)는 "결제창까지 갔는가"를 판정하는 데 전 구간이 필요하다.
+ *     여기서 좁게 잘라 두면, 방금 결제창에 들어간 사람에게 담기 저니가 먼저 말을 걸고
+ *     하루 1통 한도 때문에 정작 신호가 강한 복구 저니가 막힌다.
+ */
 async function fetchCandidates(token: string, now: number): Promise<Candidate[]> {
-  const since = new Date(now - MAX_AGE_HOURS * 3600_000).toISOString().slice(0, 10);
+  const lookbackH = Math.max(MAX_AGE_HOURS, CART_ADD_MAX_H);
+  const since = new Date(now - lookbackH * 3600_000).toISOString().slice(0, 10);
   const out: Candidate[] = [];
   let cursor: string | null = null;
 
@@ -154,7 +180,7 @@ async function fetchCandidates(token: string, now: number): Promise<Candidate[]>
     for (const edge of conn.edges) {
       const n = edge.node;
       const ageH = (now - new Date(n.createdAt).getTime()) / 3600_000;
-      if (ageH < MIN_AGE_HOURS || ageH > MAX_AGE_HOURS) continue;
+      if (ageH < 0 || ageH > lookbackH) continue;
       if (!n.abandonedCheckoutUrl || !n.customer) continue;
       if (!(n.customer.tags ?? []).includes('line_member')) continue;
 
@@ -165,6 +191,7 @@ async function fetchCandidates(token: string, now: number): Promise<Candidate[]>
       out.push({
         checkoutId: n.id,
         createdAt: n.createdAt,
+        ageH,
         lineUserId,
         customerGid: n.customer.id,
         recoveryUrl: n.abandonedCheckoutUrl,
@@ -307,12 +334,16 @@ interface RunResult {
 }
 
 /** 저니 1 — 장바구니 이탈 복구 */
-async function runCartRecovery(token: string, now: number, dryRun: boolean): Promise<RunResult> {
-  const [candidates, buyers, handled] = await Promise.all([
-    fetchCandidates(token, now),
-    fetchRecentBuyers(token, now),
-    alreadyHandled(CART_RECOVERY),
-  ]);
+async function runCartRecovery(
+  token: string,
+  now: number,
+  dryRun: boolean,
+  abandoned: Candidate[],
+  buyers: Set<string>,
+): Promise<RunResult> {
+  const handled = await alreadyHandled(CART_RECOVERY);
+
+  const candidates = abandoned.filter((c) => c.ageH >= MIN_AGE_HOURS && c.ageH <= MAX_AGE_HOURS);
 
   const fresh = candidates.filter((c) => !buyers.has(c.customerGid) && !handled.has(c.checkoutId));
 
@@ -380,8 +411,273 @@ async function runCartRecovery(token: string, now: number, dryRun: boolean): Pro
   return base;
 }
 
+/* ─── 저니 2 — 장바구니 담기 이탈 ─────────────────────────────────────────────
+ *
+ * 결제창 이탈(저니 1)이 못 보는 구간을 맡는다. 담기만 하고 결제창에 안 간 사람.
+ * 트리거는 Shopify 가 아니라 우리 카트 스냅샷(`/api/line-cart`)이다.
+ */
+
+/** 스냅샷에서 사람마다 마지막 카트 하나만 남긴다. 빈 카트면 "비웠다"라서 대상이 아니다. */
+interface CartSnapshot {
+  lineUserId: string;
+  at: number;
+  items: CartLine[];
+}
+
+/** 한 번에 읽는 스냅샷 행 수 상한. 지금 규모(하루 수백 줄)의 열 배쯤 잡아 둔다. */
+const SNAPSHOT_ROW_LIMIT = 10000;
+
+async function fetchCartSnapshots(now: number): Promise<CartSnapshot[]> {
+  const db = supabase();
+  if (!db) return [];
+
+  // 창보다 넉넉히 읽는다 — 창 밖의 더 최신 스냅샷이 있으면 그 사람은 대상이 아니어야 한다
+  const since = new Date(now - (CART_ADD_MAX_H + 6) * 3600_000).toISOString();
+  // 🔴 정렬과 상한을 명시한다. PostgREST 는 기본 상한(보통 1,000행)에서 **조용히** 자르는데,
+  //    카트는 바뀔 때마다 한 줄씩 쌓여서 로그인 쇼핑객이 늘면 금방 넘는다.
+  //    최신순으로 자르면 잘리는 쪽이 항상 '더 오래된 행'이라, 사람마다 마지막 카트를
+  //    고르는 이 로직에서는 아예 안 잡힐 뿐 **엉뚱한 옛 카트가 뽑히지는 않는다**.
+  const { data, error } = await db
+    .from('events')
+    .select('session_id, created_at, properties')
+    .eq('event_type', CART_EVENT)
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(SNAPSHOT_ROW_LIMIT);
+  if (error) throw new Error(`카트 스냅샷 조회 실패: ${error.message}`);
+
+  const latest = new Map<string, CartSnapshot>();
+  for (const row of (data ?? []) as {
+    session_id: string;
+    created_at: string;
+    properties: { items?: CartLine[] } | null;
+  }[]) {
+    if (!row.session_id.startsWith('line:')) continue;
+    const lineUserId = row.session_id.slice(5);
+    const at = new Date(row.created_at).getTime();
+    const prev = latest.get(lineUserId);
+    if (prev && prev.at >= at) continue;
+    latest.set(lineUserId, { lineUserId, at, items: row.properties?.items ?? [] });
+  }
+  return [...latest.values()];
+}
+
 /**
- * 저니 2 — 연결 다음날 첫 구매 유도.
+ * 카트 구성을 나타내는 열쇠. 중복 발송을 막는 `ref` 로 쓴다.
+ *
+ * 사람 단위로 막으면 다음 주에 다른 상품을 담아도 영영 못 보낸다. 카트 구성이 바뀌면
+ * 새 의도라 다시 보낼 수 있어야 하고, 그래도 주 2통 한도가 상한을 잡는다.
+ */
+function cartKey(lineUserId: string, items: CartLine[]): string {
+  const sig = items
+    .map((i) => `${i.variantId.split('/').pop()}x${i.quantity}`)
+    .sort()
+    .join(',');
+  return `${lineUserId}|${sig}`;
+}
+
+/** 담기 이탈 복구 링크 — 우리 사이트에서 카트를 그대로 되살린다(로그인·쿠폰 상태 유지). */
+export function cartRestoreUrl(items: CartLine[]): string {
+  const c = items
+    .map((i) => `${i.productId.split('/').pop()}:${i.variantId.split('/').pop()}:${i.quantity}`)
+    .join(',');
+  const url = new URL('https://biteme.co.jp/cart/restore');
+  url.searchParams.set('c', c);
+  url.searchParams.set('utm_source', 'line');
+  url.searchParams.set('utm_medium', 'line');
+  url.searchParams.set('utm_campaign', CART_ADD_UTM);
+  return url.toString();
+}
+
+const CART_ADD_UTM = 'line_cart_add';
+
+/** 문안에 들어가는 값에서 개행·제어문자를 걷어낸다. 상품명은 브라우저가 보낸 값이다. */
+function stripControl(v: string): string {
+  return [...v].map((ch) => (ch.codePointAt(0)! < 0x20 || ch.codePointAt(0)! === 0x7f ? ' ' : ch)).join('');
+}
+
+/**
+ * 문안. 결제창 이탈과 마찬가지로 쿠폰을 붙이지 않는다 —
+ * 담아두면 할인이 온다는 걸 학습시키면 정가 구매가 사라진다.
+ */
+export function buildCartAddMessage(items: CartLine[], url: string): string {
+  // 상품명은 브라우저가 보낸 값이라 그대로 문안에 넣지 않는다. 개행이 섞이면
+  // 메시지 모양이 무너진다(피해는 본인 한정이지만 고객이 보는 문장이다).
+  const first = stripControl(items[0]?.title ?? '').trim();
+  // 「ほかN点」은 줄 수가 아니라 총 수량 − 1 이다 — 복구 저니(buildMessage)의 itemCount 와 같은 기준.
+  // 한 줄에 3개를 담아도 「ほか2点」이 맞다.
+  const rest = items.reduce((n, i) => n + i.quantity, 0) - 1;
+  const what = first
+    ? `「${first}」${rest > 0 ? ` ほか${rest}点` : ''}`
+    : 'お選びいただいた商品';
+
+  return [
+    'カートに商品が入ったままです🐾',
+    '',
+    'BITE ME JAPANです。',
+    `${what}をお預かりしています。`,
+    '',
+    'ご注文手続きはまだ完了していません。',
+    '下のリンクからそのまま進めます。',
+    '',
+    '▼ カートを開く',
+    url,
+  ].join('\n');
+}
+
+/**
+ * 담기 저니의 선별 규칙만 떼어낸 순수 함수.
+ *
+ * 발송 조건이 다섯 겹이라(창·비움·결제창·구매·중복) 규칙이 하나만 어긋나도
+ * 엉뚱한 사람에게 나간다. 네트워크 없이 시험할 수 있어야 해서 밖으로 뺐다.
+ */
+export function selectCartAddTargets(input: {
+  snapshots: CartSnapshot[];
+  now: number;
+  /** 결제창까지 간 사람 — 저니 1 의 몫 */
+  checkoutReached: Set<string>;
+  /** 최근 주문한 고객 gid */
+  buyers: Set<string>;
+  gidByLine: Map<string, string>;
+  /** 이미 이 카트 구성으로 보낸 ref */
+  handled: Set<string>;
+}): {
+  inWindow: number;
+  emptied: number;
+  reachedCheckout: number;
+  bought: number;
+  alreadySent: number;
+  fresh: CartSnapshot[];
+} {
+  const { snapshots, now, checkoutReached, buyers, gidByLine, handled } = input;
+
+  const inWindow = snapshots.filter((s) => {
+    const ageH = (now - s.at) / 3600_000;
+    return ageH >= CART_ADD_MIN_H && ageH <= CART_ADD_MAX_H;
+  });
+
+  // 사람당 하나로 접는다. fetchCartSnapshots 가 이미 접어서 주지만, 여기서 한 사람이
+  // 두 줄이면 그 사람에게 메시지가 두 통 나간다 — 발송 경로에는 방어를 겹쳐 둔다.
+  const seen = new Set<string>();
+  const withItems = inWindow.filter((s) => {
+    if (s.items.length === 0 || seen.has(s.lineUserId)) return false;
+    seen.add(s.lineUserId);
+    return true;
+  });
+  const boughtOf = (s: CartSnapshot) => {
+    const gid = gidByLine.get(s.lineUserId);
+    return !!gid && buyers.has(gid);
+  };
+
+  return {
+    inWindow: inWindow.length,
+    emptied: inWindow.filter((s) => s.items.length === 0).length,
+    reachedCheckout: withItems.filter((s) => checkoutReached.has(s.lineUserId)).length,
+    bought: withItems.filter(boughtOf).length,
+    alreadySent: withItems.filter((s) => handled.has(cartKey(s.lineUserId, s.items))).length,
+    fresh: withItems.filter(
+      (s) =>
+        !checkoutReached.has(s.lineUserId) &&
+        !boughtOf(s) &&
+        !handled.has(cartKey(s.lineUserId, s.items)),
+    ),
+  };
+}
+
+async function runCartAdd(
+  now: number,
+  dryRun: boolean,
+  /** 결제창까지 간 사람 — 저니 1 의 몫이라 여기서 뺀다 */
+  checkoutReached: Set<string>,
+  members: Member[],
+  buyers: Set<string>,
+): Promise<RunResult> {
+  const [snapshots, handled] = await Promise.all([
+    fetchCartSnapshots(now),
+    alreadyHandled(CART_ADD),
+  ]);
+
+  const gidByLine = new Map<string, string>();
+  for (const m of members) if (m.lineUserId) gidByLine.set(m.lineUserId, m.gid);
+
+  const { inWindow, emptied, reachedCheckout, bought, alreadySent, fresh } = selectCartAddTargets({
+    snapshots,
+    now,
+    checkoutReached,
+    buyers,
+    gidByLine,
+    handled,
+  });
+
+  const cap = await applyFrequencyCap(
+    fresh.map((s) => s.lineUserId),
+    now,
+  );
+  const allowed = new Set(cap.allowed);
+  const targets = fresh.filter((s) => allowed.has(s.lineUserId)).slice(0, MAX_PER_RUN);
+
+  const base: RunResult = {
+    journey: CART_ADD,
+    found: inWindow.length,
+    willSend: targets.length,
+    sent: 0,
+    notFriend: 0,
+    failed: 0,
+    capped: cap.capped.length,
+    excluded: {
+      카트비움: emptied,
+      결제창까지감: reachedCheckout,
+      구매함: bought,
+      이미발송: alreadySent,
+      수신한도: cap.capped.length,
+    },
+    samples: targets.slice(0, 2).map((s) => ({
+      text: buildCartAddMessage(s.items, cartRestoreUrl(s.items)),
+      note: `담기 ${new Date(s.at).toISOString()} · ${s.items.length}줄`,
+    })),
+  };
+  if (dryRun) return base;
+
+  const delivered: { userId: string; ref: string }[] = [];
+  for (const s of targets) {
+    const ref = cartKey(s.lineUserId, s.items);
+    const result = await pushLine(s.lineUserId, buildCartAddMessage(s.items, cartRestoreUrl(s.items)));
+    if (result === 'sent') {
+      base.sent++;
+      delivered.push({ userId: s.lineUserId, ref });
+    } else if (result === 'not-friend') {
+      base.notFriend++;
+      delivered.push({ userId: s.lineUserId, ref });
+    } else {
+      base.failed++;
+    }
+  }
+
+  for (const d of delivered) {
+    await recordSends([d.userId], {
+      campaignId: `journey_${CART_ADD}`,
+      journey: CART_ADD,
+      kind: 'marketing',
+      ref: d.ref,
+      name: '장바구니 담기 이탈',
+      // 🔴 클릭 추적(`/api/line-click`)을 쓰지 않는다.
+      //
+      //    복구 저니가 그걸 쓰는 이유는 Shopify 복구 URL 이 우리 프론트를 거치지 않아
+      //    주문에 UTM 이 안 붙기 때문이다. 담기 저니의 링크는 **우리 사이트**라
+      //    `index.html` 이 UTM 을 sessionStorage 에 담고 체크아웃이 주문 속성으로 실어
+      //    보낸다 — UTM 쪽이 더 정확하다.
+      //
+      //    게다가 클릭 래퍼를 씌우면 조용히 깨진다: 서명 토큰은 `<url>|<ref>` 를 마지막
+      //    `|` 로 가르는데 여기 ref(`userId|변형x수량`)에 `|` 가 들어 있어 목적지와 ref 가
+      //    둘 다 잘린다. 그리고 `clickTracked` 를 켜면 성과 집계가 UTM 분기를 아예 건너뛴다.
+      utm: CART_ADD_UTM,
+    });
+  }
+  return base;
+}
+
+/**
+ * 저니 3 — 연결 다음날 첫 구매 유도.
  *
  * 문안은 2026-08-21 테스트 발송으로 확인한 것을 그대로 쓴다.
  * ⚠️ 「初回」라고 단정하지 않는다. 예전에 게스트로 산 사람이 섞일 수 있는데 그 이력은
@@ -403,8 +699,8 @@ const FIRST_PURCHASE_TEXT = [
   FIRST_PURCHASE_URL,
 ].join('\n');
 
-async function runFirstPurchase(now: number, dryRun: boolean): Promise<RunResult> {
-  const [members, handled] = await Promise.all([fetchAudience(), alreadyHandled(FIRST_PURCHASE)]);
+async function runFirstPurchase(now: number, dryRun: boolean, members: Member[]): Promise<RunResult> {
+  const handled = await alreadyHandled(FIRST_PURCHASE);
 
   const inWindow = members.filter((m) => {
     const ageH = (now - new Date(m.createdAt).getTime()) / 3600_000;
@@ -498,15 +794,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const token = await getAdminToken();
+    const runs = (j: (typeof JOURNEY_ORDER)[number]) => dryRun || enabled.includes(j);
+    const needsCarts = runs(CART_RECOVERY) || runs(CART_ADD);
+
+    // 공용 조회는 여기서 한 번만 한다. 저니마다 부르면 한 번 실행에 고객 목록을 두 번,
+    // 최근 주문을 두 번 훑어서 함수 시간을 다 쓴다 — 발송 도중에 타임아웃이 나면
+    // 중복 방지 기록(recordSends)이 안 남아 다음 시간에 같은 사람에게 또 나간다.
+    const [members, buyers] = await Promise.all([
+      runs(CART_ADD) || runs(FIRST_PURCHASE) ? fetchAudience() : Promise.resolve([] as Member[]),
+      needsCarts ? fetchRecentBuyers(token, now) : Promise.resolve(new Set<string>()),
+    ]);
+
+    // 결제창 이탈은 한 번만 읽어 두 저니가 나눠 쓴다 (저니 1 = 대상, 저니 2 = 제외 조건).
+    // 🔴 여기서 던지면 안 된다. 이 조회가 실패했다고 관계없는 첫 구매 유도까지 멈추면
+    //    Shopify 딸꾹질 한 번에 그날 발송이 통째로 사라진다. 실패는 두 카트 저니만 건너뛴다.
+    let abandoned: Candidate[] | null = null;
+    if (needsCarts) {
+      abandoned = await fetchCandidates(token, now).catch((e: unknown) => {
+        console.error('[LINE Journey] 🔴 이탈 조회 실패 — 카트 저니만 건너뜁니다:', e);
+        return null;
+      });
+    }
+    const checkoutReached = new Set((abandoned ?? []).map((c) => c.lineUserId));
     const results: RunResult[] = [];
 
     // ⚠️ 순서대로 돈다. 빈도 제한이 하루 1통이라 앞 저니가 보낸 사람은 뒤 저니에서 빠진다.
     //    즉 이 배열의 순서가 곧 우선순위다.
     for (const j of JOURNEY_ORDER) {
       // 드라이런은 꺼져 있어도 "켜면 어떻게 되는지"를 보여줘야 하므로 전부 돈다
-      if (!dryRun && !enabled.includes(j)) continue;
-      if (j === CART_RECOVERY) results.push(await runCartRecovery(token, now, dryRun));
-      if (j === FIRST_PURCHASE) results.push(await runFirstPurchase(now, dryRun));
+      if (!runs(j)) continue;
+      // 이탈 조회가 실패한 실행에서는 카트 두 저니를 건너뛴다 (없는 데이터로 판정하지 않는다)
+      if ((j === CART_RECOVERY || j === CART_ADD) && abandoned === null) continue;
+      if (j === CART_RECOVERY) results.push(await runCartRecovery(token, now, dryRun, abandoned!, buyers));
+      if (j === CART_ADD) results.push(await runCartAdd(now, dryRun, checkoutReached, members, buyers));
+      if (j === FIRST_PURCHASE) results.push(await runFirstPurchase(now, dryRun, members));
     }
 
     if (!dryRun) {
@@ -533,3 +854,4 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .json({ error: error instanceof Error ? error.message : '저니 실행 중 오류가 발생했습니다' });
   }
 }
+
