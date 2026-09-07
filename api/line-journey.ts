@@ -473,12 +473,14 @@ export function cartRestoreUrl(items: CartLine[]): string {
   const c = items
     .map((i) => `${i.productId.split('/').pop()}:${i.variantId.split('/').pop()}:${i.quantity}`)
     .join(',');
-  const url = new URL('https://biteme.co.jp/cart/restore');
-  url.searchParams.set('c', c);
-  url.searchParams.set('utm_source', 'line');
-  url.searchParams.set('utm_medium', 'line');
-  url.searchParams.set('utm_campaign', CART_ADD_UTM);
-  return url.toString();
+  // 🔴 URLSearchParams 로 붙이지 않는다. `:` 와 `,` 를 %3A·%2C 로 바꿔 놓아서
+  //    고객이 LINE 에서 보는 링크가 두 배로 길고 지저분해진다. 둘 다 쿼리에 그대로 써도
+  //    되는 문자다(RFC 3986 sub-delims). 값은 우리가 만든 숫자·구분자뿐이라 이스케이프가
+  //    필요한 입력이 섞일 여지도 없다.
+  return (
+    `https://biteme.co.jp/cart/restore?c=${c}` +
+    `&utm_source=line&utm_medium=line&utm_campaign=${CART_ADD_UTM}`
+  );
 }
 
 const CART_ADD_UTM = 'line_cart_add';
