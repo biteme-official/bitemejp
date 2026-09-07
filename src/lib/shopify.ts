@@ -961,6 +961,63 @@ export async function fetchProductByHandle(handle: string): Promise<ShopifyProdu
   return data.data?.productByHandle || null;
 }
 
+const PRODUCT_FIELDS = `
+  fragment ProductFields on Product {
+          id
+          title
+          description
+          descriptionHtml
+          handle
+          productType
+          tags
+          vendor
+          priceRange {
+            minVariantPrice {
+              amount
+              currencyCode
+            }
+          }
+          images(first: 20) {
+            edges {
+              node {
+                url
+                altText
+              }
+            }
+          }
+          variants(first: 50) {
+            edges {
+              node {
+                id
+                title
+                price {
+                  amount
+                  currencyCode
+                }
+                compareAtPrice {
+                  amount
+                  currencyCode
+                }
+                availableForSale
+                quantityAvailable
+                image {
+                  url
+                  altText
+                }
+                selectedOptions {
+                  name
+                  value
+                }
+              }
+            }
+          }
+          options {
+            name
+            values
+          }
+  }
+`;
+
 const GET_PRODUCT_BY_ID_QUERY = `
   query GetProductById($id: ID!) {
     node(id: $id) {
@@ -1027,6 +1084,39 @@ export async function fetchProductById(numericId: string): Promise<ShopifyProduc
   const data = await storefrontApiRequest(GET_PRODUCT_BY_ID_QUERY, { id });
   if (!data) return null;
   return data.data?.node || null;
+}
+
+/**
+ * 옵션(variant) id 들로 그 상품들을 한 번에 가져온다.
+ *
+ * LINE 담기 복구 링크(`/r/...`)는 링크 길이를 줄이려고 **옵션 id 만** 싣는다. 상품 id 는
+ * 여기서 되찾는다. 한 요청으로 묶어서 카트에 담긴 수만큼 왕복하지 않는다.
+ *
+ * 반환은 `옵션 id → 상품 노드`. 삭제된 옵션은 키가 없다.
+ */
+export async function fetchProductsByVariantIds(
+  variantIds: string[],
+): Promise<Map<string, ShopifyProduct['node']>> {
+  const out = new Map<string, ShopifyProduct['node']>();
+  if (variantIds.length === 0) return out;
+
+  const data = await storefrontApiRequest(
+    `query VariantProducts($ids: [ID!]!) {
+      nodes(ids: $ids) {
+        ... on ProductVariant {
+          id
+          product { ...ProductFields }
+        }
+      }
+    }
+    ${PRODUCT_FIELDS}`,
+    { ids: variantIds },
+  );
+
+  for (const n of data?.data?.nodes ?? []) {
+    if (n?.id && n.product) out.set(n.id, n.product);
+  }
+  return out;
 }
 
 export async function fetchCollections(first: number = 20): Promise<ShopifyCollection[]> {

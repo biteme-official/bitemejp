@@ -468,19 +468,29 @@ function cartKey(lineUserId: string, items: CartLine[]): string {
   return `${lineUserId}|${sig}`;
 }
 
-/** 담기 이탈 복구 링크 — 우리 사이트에서 카트를 그대로 되살린다(로그인·쿠폰 상태 유지). */
+/**
+ * 담기 이탈 복구 링크 — 우리 사이트에서 카트를 그대로 되살린다(로그인·쿠폰 상태 유지).
+ *
+ * LINE 은 링크를 그냥 글자로 보여준다. 길면 휴대폰에서 서너 줄을 잡아먹고 그것만으로
+ * 광고처럼 보인다. 그래서 짧게 만든다 — 158자에서 46자로.
+ *
+ *   https://biteme.co.jp/r/ifyim7e49~1.ifyisg4zd~2
+ *
+ * 줄인 방법 세 가지. **조회 테이블을 쓰지 않는다** — 코드→주소 매핑을 두면 그 조회가
+ * 고객이 자기 카트로 가는 길 위에 새 실패 지점이 된다. 지표 하나 때문에 복구 링크를
+ * 못 열게 만드는 것이 훨씬 큰 손해라는 `line-click.ts` 의 원칙과 같다.
+ *
+ *   1. 상품 id 를 뺀다 — 옵션(variant) id 하나로 상품까지 찾을 수 있다
+ *   2. 남은 숫자를 36진수로 (14자리 → 9자)
+ *   3. UTM 을 주소에서 뺀다 — `/r/` 로 들어오는 길은 이 저니뿐이라 `index.html` 이 심는다
+ */
 export function cartRestoreUrl(items: CartLine[]): string {
   const c = items
-    .map((i) => `${i.productId.split('/').pop()}:${i.variantId.split('/').pop()}:${i.quantity}`)
-    .join(',');
-  // 🔴 URLSearchParams 로 붙이지 않는다. `:` 와 `,` 를 %3A·%2C 로 바꿔 놓아서
-  //    고객이 LINE 에서 보는 링크가 두 배로 길고 지저분해진다. 둘 다 쿼리에 그대로 써도
-  //    되는 문자다(RFC 3986 sub-delims). 값은 우리가 만든 숫자·구분자뿐이라 이스케이프가
-  //    필요한 입력이 섞일 여지도 없다.
-  return (
-    `https://biteme.co.jp/cart/restore?c=${c}` +
-    `&utm_source=line&utm_medium=line&utm_campaign=${CART_ADD_UTM}`
-  );
+    .map((i) => `${BigInt(i.variantId.split('/').pop() ?? '0').toString(36)}~${i.quantity}`)
+    .join('.');
+  // `~` 와 `.` 는 경로에 그대로 쓸 수 있는 문자다(RFC 3986 unreserved / sub-delims).
+  // 인코딩되지 않으므로 %7E 같은 것이 끼어 링크가 다시 길어지지 않는다.
+  return `https://biteme.co.jp/r/${c}`;
 }
 
 const CART_ADD_UTM = 'line_cart_add';

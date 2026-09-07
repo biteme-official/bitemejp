@@ -66,7 +66,9 @@ const App = () => (
           <Route path="/" element={<Index />} />
           <Route path="/product/:id" element={<ProductDetail />} />
           <Route path="/checkout" element={<Checkout />} />
-          {/* LINE 담기 이탈 저니의 복구 링크 — 카트를 되살린다 */}
+          {/* LINE 담기 이탈 저니의 복구 링크 — 카트를 되살린다.
+              `/r/...` 이 지금 쓰는 짧은 형식이고, `/cart/restore` 는 이미 나간 옛 링크용이다 */}
+          <Route path="/r/:c" element={<CartRestore />} />
           <Route path="/cart/restore" element={<CartRestore />} />
           <Route path="/checkout-return" element={<CheckoutReturn />} />
           <Route path="/contact" element={<ContactUs />} />
