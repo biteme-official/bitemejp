@@ -425,17 +425,26 @@ interface CartSnapshot {
   items: CartLine[];
 }
 
+/** 한 번에 읽는 스냅샷 행 수 상한. 지금 규모(하루 수백 줄)의 열 배쯤 잡아 둔다. */
+const SNAPSHOT_ROW_LIMIT = 10000;
+
 async function fetchCartSnapshots(now: number): Promise<CartSnapshot[]> {
   const db = supabase();
   if (!db) return [];
 
   // 창보다 넉넉히 읽는다 — 창 밖의 더 최신 스냅샷이 있으면 그 사람은 대상이 아니어야 한다
   const since = new Date(now - (CART_ADD_MAX_H + 6) * 3600_000).toISOString();
+  // 🔴 정렬과 상한을 명시한다. PostgREST 는 기본 상한(보통 1,000행)에서 **조용히** 자르는데,
+  //    카트는 바뀔 때마다 한 줄씩 쌓여서 로그인 쇼핑객이 늘면 금방 넘는다.
+  //    최신순으로 자르면 잘리는 쪽이 항상 '더 오래된 행'이라, 사람마다 마지막 카트를
+  //    고르는 이 로직에서는 아예 안 잡힐 뿐 **엉뚱한 옛 카트가 뽑히지는 않는다**.
   const { data, error } = await db
     .from('events')
     .select('session_id, created_at, properties')
     .eq('event_type', CART_EVENT)
-    .gte('created_at', since);
+    .gte('created_at', since)
+    .order('created_at', { ascending: false })
+    .limit(SNAPSHOT_ROW_LIMIT);
   if (error) throw new Error(`카트 스냅샷 조회 실패: ${error.message}`);
 
   const latest = new Map<string, CartSnapshot>();
@@ -483,12 +492,19 @@ export function cartRestoreUrl(items: CartLine[]): string {
 
 const CART_ADD_UTM = 'line_cart_add';
 
+/** 문안에 들어가는 값에서 개행·제어문자를 걷어낸다. 상품명은 브라우저가 보낸 값이다. */
+function stripControl(v: string): string {
+  return [...v].map((ch) => (ch.codePointAt(0)! < 0x20 || ch.codePointAt(0)! === 0x7f ? ' ' : ch)).join('');
+}
+
 /**
  * 문안. 결제창 이탈과 마찬가지로 쿠폰을 붙이지 않는다 —
  * 담아두면 할인이 온다는 걸 학습시키면 정가 구매가 사라진다.
  */
 function buildCartAddMessage(items: CartLine[], url: string): string {
-  const first = items[0]?.title?.trim();
+  // 상품명은 브라우저가 보낸 값이라 그대로 문안에 넣지 않는다. 개행이 섞이면
+  // 메시지 모양이 무너진다(피해는 본인 한정이지만 고객이 보는 문장이다).
+  const first = stripControl(items[0]?.title ?? '').trim();
   const rest = items.length - 1;
   const what = first
     ? `「${first}」${rest > 0 ? ` ほか${rest}点` : ''}`
@@ -539,7 +555,14 @@ export function selectCartAddTargets(input: {
     return ageH >= CART_ADD_MIN_H && ageH <= CART_ADD_MAX_H;
   });
 
-  const withItems = inWindow.filter((s) => s.items.length > 0);
+  // 사람당 하나로 접는다. fetchCartSnapshots 가 이미 접어서 주지만, 여기서 한 사람이
+  // 두 줄이면 그 사람에게 메시지가 두 통 나간다 — 발송 경로에는 방어를 겹쳐 둔다.
+  const seen = new Set<string>();
+  const withItems = inWindow.filter((s) => {
+    if (s.items.length === 0 || seen.has(s.lineUserId)) return false;
+    seen.add(s.lineUserId);
+    return true;
+  });
   const boughtOf = (s: CartSnapshot) => {
     const gid = gidByLine.get(s.lineUserId);
     return !!gid && buyers.has(gid);
@@ -547,7 +570,7 @@ export function selectCartAddTargets(input: {
 
   return {
     inWindow: inWindow.length,
-    emptied: inWindow.length - withItems.length,
+    emptied: inWindow.filter((s) => s.items.length === 0).length,
     reachedCheckout: withItems.filter((s) => checkoutReached.has(s.lineUserId)).length,
     bought: withItems.filter(boughtOf).length,
     alreadySent: withItems.filter((s) => handled.has(cartKey(s.lineUserId, s.items))).length,
@@ -609,7 +632,7 @@ async function runCartAdd(
       수신한도: cap.capped.length,
     },
     samples: targets.slice(0, 2).map((s) => ({
-      text: buildCartAddMessage(s.items, trackedUrl(cartRestoreUrl(s.items), cartKey(s.lineUserId, s.items))),
+      text: buildCartAddMessage(s.items, cartRestoreUrl(s.items)),
       note: `담기 ${new Date(s.at).toISOString()} · ${s.items.length}줄`,
     })),
   };
@@ -618,7 +641,7 @@ async function runCartAdd(
   const delivered: { userId: string; ref: string }[] = [];
   for (const s of targets) {
     const ref = cartKey(s.lineUserId, s.items);
-    const result = await pushLine(s.lineUserId, buildCartAddMessage(s.items, trackedUrl(cartRestoreUrl(s.items), ref)));
+    const result = await pushLine(s.lineUserId, buildCartAddMessage(s.items, cartRestoreUrl(s.items)));
     if (result === 'sent') {
       base.sent++;
       delivered.push({ userId: s.lineUserId, ref });
@@ -637,10 +660,17 @@ async function runCartAdd(
       kind: 'marketing',
       ref: d.ref,
       name: '장바구니 담기 이탈',
-      // 복구 링크는 우리 사이트라 UTM 이 그대로 따라온다. 클릭도 같이 센다 —
-      // 둘 다 있으면 성과의 상한(회수)과 하한(클릭·UTM)을 모두 잡을 수 있다.
+      // 🔴 클릭 추적(`/api/line-click`)을 쓰지 않는다.
+      //
+      //    복구 저니가 그걸 쓰는 이유는 Shopify 복구 URL 이 우리 프론트를 거치지 않아
+      //    주문에 UTM 이 안 붙기 때문이다. 담기 저니의 링크는 **우리 사이트**라
+      //    `index.html` 이 UTM 을 sessionStorage 에 담고 체크아웃이 주문 속성으로 실어
+      //    보낸다 — UTM 쪽이 더 정확하다.
+      //
+      //    게다가 클릭 래퍼를 씌우면 조용히 깨진다: 서명 토큰은 `<url>|<ref>` 를 마지막
+      //    `|` 로 가르는데 여기 ref(`userId|변형x수량`)에 `|` 가 들어 있어 목적지와 ref 가
+      //    둘 다 잘린다. 그리고 `clickTracked` 를 켜면 성과 집계가 UTM 분기를 아예 건너뛴다.
       utm: CART_ADD_UTM,
-      clickTracked: true,
     });
   }
   return base;

@@ -104,7 +104,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const secret = process.env.LINE_CHANNEL_SECRET;
   if (!secret) return res.status(500).json({ error: 'LINE_CHANNEL_SECRET 미설정' });
 
-  const { lineSessionToken, items } = (req.body ?? {}) as {
+  // sendBeacon 으로 오면 Vercel 이 JSON 으로 파싱하지 않고 문자열을 그대로 줄 수 있다.
+  // 그대로 구조분해하면 전부 undefined 가 되어 "로그인 안 함"으로 조용히 버려진다 —
+  // 하필 탭을 닫으며 보낸 마지막 카트만 사라지는 셈이다.
+  let payload: unknown = req.body ?? {};
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return res.status(400).json({ error: '요청 형식이 올바르지 않습니다' });
+    }
+  }
+  const { lineSessionToken, items } = (payload ?? {}) as {
     lineSessionToken?: unknown;
     items?: unknown;
   };

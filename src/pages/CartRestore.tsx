@@ -22,11 +22,15 @@ type Parsed = { productId: string; variantId: string; quantity: number };
 function parse(c: string | null): Parsed[] {
   if (!c) return [];
   const out: Parsed[] = [];
+  // 같은 옵션이 두 번 적힌 링크에 수량이 겹쳐 쌓이지 않도록 접는다
+  const seen = new Set<string>();
   for (const part of c.split(',').slice(0, 20)) {
     const [p, v, q] = part.split(':');
     if (!/^\d+$/.test(p ?? '') || !/^\d+$/.test(v ?? '')) continue;
     const n = Number(q);
     if (!Number.isFinite(n) || n < 1 || n > 99) continue;
+    if (seen.has(v)) continue;
+    seen.add(v);
     out.push({ productId: p, variantId: v, quantity: Math.floor(n) });
   }
   return out;

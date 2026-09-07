@@ -24,7 +24,10 @@ const DEBOUNCE_MS = 4000;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let pending: CartItem[] | null = null;
 
-function post(items: CartItem[]): void {
+/**
+ * @param leaving 탭을 떠나는 중인가. 이때는 일반 fetch 가 취소될 수 있어 sendBeacon 을 쓴다.
+ */
+function post(items: CartItem[], leaving = false): void {
   const token = useAuthStore.getState().user?.lineSessionToken;
   if (!token) return;
 
@@ -39,10 +42,23 @@ function post(items: CartItem[]): void {
     .filter(i => !!i.productId && !!i.variantId);
 
   // 빈 카트도 보낸다 — "비웠다"가 저니를 멈추는 신호다.
+  const body = JSON.stringify({ lineSessionToken: token, items: payload });
+
+  // 🔴 탭이 닫히는 중에는 fetch 가 취소된다. 담고 바로 나가는 사람이 이 저니의 핵심
+  //    대상이라, 하필 그 사람의 카트만 기록이 안 남는 셈이 된다. sendBeacon 은 문서가
+  //    사라진 뒤에도 브라우저가 대신 보내 준다.
+  if (leaving && typeof navigator !== 'undefined' && navigator.sendBeacon) {
+    // 같은 오리진이라 application/json 을 그대로 쓸 수 있다(프리플라이트가 없다).
+    // 그래도 서버는 문자열 body 도 파싱하도록 해 뒀다 — 브라우저가 타입을 바꿔 보내도
+    // 조용히 버려지지 않게.
+    if (navigator.sendBeacon('/api/line-cart', new Blob([body], { type: 'application/json' }))) return;
+  }
+
   fetch('/api/line-cart', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ lineSessionToken: token, items: payload }),
+    body,
+    keepalive: leaving,
   }).catch(() => {});
 }
 
@@ -65,7 +81,7 @@ export function flushCartSnapshot(): void {
   timer = null;
   const snapshot = pending;
   pending = null;
-  post(snapshot);
+  post(snapshot, true);
 }
 
 if (typeof window !== 'undefined') {
