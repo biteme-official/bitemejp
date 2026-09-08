@@ -43,7 +43,13 @@ const CART_ADD = 'cart_add';
 const REPEAT_PURCHASE = 'repeat_purchase_d21';
 const FIRST_PURCHASE = 'first_purchase_d1';
 
-/** 순서 = 우선순위. 앞에 있는 저니가 먼저 대상을 가져간다. */
+/**
+ * 순서 = 우선순위. 앞에 있는 저니가 먼저 대상을 가져간다.
+ *
+ * **실측 회수율 순**이다(2026-09-08): 복구 28.3% · 첫 구매 2.5%. 담기와 재구매는 아직
+ * 표본이 모자라 신호 세기(카트에 담았다 > 3주 전에 샀다)로 그 사이에 둔다.
+ * 숫자가 쌓이면 이 줄을 다시 볼 것 — 순서를 정하는 건 모수가 아니라 회수율이다.
+ */
 const JOURNEY_ORDER = [CART_RECOVERY, CART_ADD, REPEAT_PURCHASE, FIRST_PURCHASE] as const;
 
 /**
@@ -138,7 +144,15 @@ interface AbandonedResponse {
             email: string | null;
             metafield: { value: string } | null;
           } | null;
-          lineItems: { edges: { node: { title: string; quantity: number } }[] };
+          lineItems: {
+            edges: {
+              node: {
+                title: string;
+                quantity: number;
+                originalUnitPriceSet: { shopMoney: { amount: string } } | null;
+              };
+            }[];
+          };
         };
       }[];
     };
@@ -195,7 +209,11 @@ async function fetchCandidates(token: string, now: number): Promise<Candidate[]>
               email
               metafield(namespace: "custom", key: "line_id") { value }
             }
-            lineItems(first: 3) { edges { node { title quantity } } }
+            lineItems(first: 5) { edges { node {
+              title
+              quantity
+              originalUnitPriceSet { shopMoney { amount } }
+            } } }
           } }
         }
       }`,
@@ -215,7 +233,13 @@ async function fetchCandidates(token: string, now: number): Promise<Candidate[]>
       const lineUserId = resolveLineUserId(n.customer);
       if (!lineUserId) continue;
 
-      const items = n.lineItems?.edges ?? [];
+      // 증정품(정가 0)은 빼고 고른다. 카트 스냅샷(`cartSync`)은 클라이언트에서 이미
+      // 걸러 보내지만, 이탈 결제는 Shopify 가 준 그대로라 증정 줄이 **맨 앞에** 올 수 있다.
+      // 그러면 "「BITE ME サマーうちわ」를 お取り置き하고 있습니다" 가 되어, 우리가 끼워 준
+      // 물건을 미끼로 쓰는 문장이 된다.
+      const items = (n.lineItems?.edges ?? []).filter(
+        (e) => Number(e.node.originalUnitPriceSet?.shopMoney?.amount ?? 0) > 0,
+      );
       out.push({
         checkoutId: n.id,
         createdAt: n.createdAt,
@@ -979,17 +1003,27 @@ function enabledJourneys(): string[] {
 }
 
 /**
- * 모수가 큰 저니부터. 같으면 `JOURNEY_ORDER` 순서(신호가 강한 쪽)로 가른다.
+ * `JOURNEY_ORDER` 순서 — **잘 먹히는 저니부터**. 제자리 정렬이다.
  *
  * 빈도 제한 때문에 앞선 저니가 겹치는 사람을 가져가므로, 이 정렬이 곧 "누가 어떤 메시지를
- * 받는가"를 정한다. 제자리 정렬이다.
+ * 받는가"를 정한다.
+ *
+ * 🔴 예전에는 **모수가 큰 저니부터** 돌렸다. 어느 저니가 큰지는 날마다 바뀌니 고정 순서보다
+ *    낫다는 논리였는데, 실측이 정반대를 가리켰다 (2026-09-08):
+ *
+ *      장바구니 이탈 복구   회수율 28.3%  후보 2건   → 모수순에서는 항상 꼴찌
+ *      연결 다음날 첫 구매   회수율  2.5%  후보 128건 → 모수순에서는 항상 1등
+ *
+ *    11배 잘 먹히는 저니가 순서에서 지고 있었다. 겹치는 사람이 생기는 날마다 회수율 28% 짜리
+ *    한 통이 2.5% 짜리 한 통에 밀려 사라진다. 모수는 "몇 명에게 보낼 수 있나"이지
+ *    "보내면 몇 명이 사나"가 아니다 — 한 사람을 두고 다투는 자리에서는 뒤쪽이 기준이다.
  */
-export function sortByAudience(plans: { journey: string; candidates: unknown[] }[]): void {
+export function sortByPriority(plans: { journey: string }[]): void {
   const rank = (j: string) => {
     const i = JOURNEY_ORDER.indexOf(j as (typeof JOURNEY_ORDER)[number]);
     return i === -1 ? JOURNEY_ORDER.length : i;
   };
-  plans.sort((a, b) => b.candidates.length - a.candidates.length || rank(a.journey) - rank(b.journey));
+  plans.sort((a, b) => rank(a.journey) - rank(b.journey));
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -1045,15 +1079,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ── 실행 순서 ────────────────────────────────────────────────────────────
     // 빈도 제한이 하루 1통이라 **먼저 도는 저니가 대상을 가져가고, 진 쪽은 그냥 사라진다.**
-    // 그래서 순서가 곧 우선순위다.
+    // 그래서 순서가 곧 우선순위이고, 순서는 실측 회수율 순(`JOURNEY_ORDER`)으로 고정한다.
+    // 왜 모수순을 버렸는지는 `sortByPriority` 에 적어 뒀다.
     //
-    // 순서를 상수로 박지 않고 **이번 실행의 모수가 큰 저니부터** 돈다. 어느 저니가 큰지는
-    // 날마다 바뀌기 때문이다 — 신규 연결이 쏟아진 날은 첫 구매 유도가 가장 크고,
-    // 담기 이벤트를 한 날은 담기 저니가 가장 크다.
-    //
-    // 🔴 세 저니의 후보를 **전부 세고 나서** 보내기 시작한다. 세기 전에 하나라도 보내면
-    //    그 발송이 빈도 제한을 깎아서 나머지의 모수가 실제보다 작게 잡히고, 순서가
-    //    "먼저 계산된 저니가 유리한" 쪽으로 기운다.
+    // 🔴 저니의 후보를 **전부 세고 나서** 보내기 시작한다. 세기 전에 하나라도 보내면
+    //    그 발송이 빈도 제한을 깎아서 나머지 저니의 모수가 실제보다 작게 잡힌다 —
+    //    드라이런으로 보는 수와 실행이 보는 수가 어긋나고, `excluded` 집계도 흐려진다.
     const plans: JourneyPlan[] = [];
     for (const j of JOURNEY_ORDER) {
       // 드라이런은 꺼져 있어도 "켜면 어떻게 되는지"를 보여줘야 하므로 전부 돈다
@@ -1066,7 +1097,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (j === FIRST_PURCHASE) plans.push(await planFirstPurchase(now, members));
     }
 
-    sortByAudience(plans);
+    sortByPriority(plans);
 
     for (const plan of plans) {
       results.push(await deliver(plan, now, dryRun));

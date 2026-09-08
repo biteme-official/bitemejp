@@ -67,7 +67,24 @@ function verifySessionToken(token: unknown, secret: string): { lineUserId: strin
 const PRODUCT_GID = /^gid:\/\/shopify\/Product\/\d+$/;
 const VARIANT_GID = /^gid:\/\/shopify\/ProductVariant\/\d+$/;
 
-/** 형식이 어긋난 줄은 버린다. 카트를 통째로 거절하면 나머지 정상 줄까지 못 남긴다. */
+/**
+ * 증정품 상품 id. `src/config/giftConfig.ts` 의 `GIFT_PRODUCT_ID` 와 같은 값이다.
+ *
+ * 값을 옮겨 적은 이유는 `api/` 가 `src/` 를 import 하지 않기 때문이다(함수 번들이 프론트
+ * 모듈 그래프를 끌고 들어오면 콜드스타트가 늘고 별칭 경로가 깨진다). 증정 상품을 바꾸면
+ * 두 곳을 같이 고쳐야 한다.
+ */
+const GIFT_PRODUCT_ID = '10244037017913';
+
+/**
+ * 형식이 어긋난 줄은 버린다. 카트를 통째로 거절하면 나머지 정상 줄까지 못 남긴다.
+ *
+ * 🔴 증정품 줄도 여기서 버린다. `cartSync` 가 이미 걸러 보내지만 **그건 브라우저 쪽 방어**라,
+ *    옛 번들이 캐시에 남아 있거나 누가 이 엔드포인트를 직접 부르면 그대로 들어온다.
+ *    증정 줄이 스냅샷에 남으면 손해가 두 갈래다 —
+ *      · 담기 저니 문안이 우리가 끼워 준 물건을 광고한다
+ *      · 복구 링크(`/r/…`)가 그 줄을 **정가 상품으로** 되살려 고객이 증정품을 돈 주고 산다
+ */
 export function sanitizeLines(raw: unknown): CartLine[] {
   if (!Array.isArray(raw)) return [];
   const out: CartLine[] = [];
@@ -76,6 +93,7 @@ export function sanitizeLines(raw: unknown): CartLine[] {
     const { productId, variantId, quantity, title } = r as Record<string, unknown>;
     if (typeof productId !== 'string' || !PRODUCT_GID.test(productId)) continue;
     if (typeof variantId !== 'string' || !VARIANT_GID.test(variantId)) continue;
+    if (productId.endsWith(`/${GIFT_PRODUCT_ID}`)) continue;
     const q = Math.floor(Number(quantity));
     if (!Number.isFinite(q) || q < 1 || q > 99) continue;
     out.push({
