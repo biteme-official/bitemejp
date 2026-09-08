@@ -7,7 +7,10 @@
  *                         Shopify 는 결제창 이탈만 기록해서 여기가 통째로 사각지대였다.
  *                         2026-09-04 담기 이벤트 때 담기 293→1,341 인데 결제창 이탈은 15→16.
  *                         카트 스냅샷은 `/api/line-cart` 가 남긴다.
- *   3. first_purchase_d1  연결 다음날 첫 구매 유도 — 볼륨이 가장 크다(월 약 300통).
+ *   3. repeat_purchase_d21 재구매 유도 — 마지막 주문 3주 뒤. 산 사람은 그동안 아무도
+ *                         말을 걸지 않던 구간이었다. 2026-09-08 실측: LINE 연결 구매자
+ *                         260명 중 252명(97%)이 1회 구매뿐이고, 전체 재구매 간격 중앙값은 20일.
+ *   4. first_purchase_d1  연결 다음날 첫 구매 유도 — 볼륨이 가장 크다(월 약 300통).
  *
  * ⚠️ 순서가 곧 우선순위다. 빈도 제한이 하루 1통이라 같은 사람에게 둘 다 나가지 않고,
  *    **먼저 도는 쪽이 가져간다.** 진 쪽은 지금 그냥 사라진다 — 설계의 "3일 대기 후 폐기"는
@@ -37,10 +40,11 @@ import { CART_EVENT, type CartLine } from './line-cart.js';
 
 const CART_RECOVERY = 'cart_recovery';
 const CART_ADD = 'cart_add';
+const REPEAT_PURCHASE = 'repeat_purchase_d21';
 const FIRST_PURCHASE = 'first_purchase_d1';
 
 /** 순서 = 우선순위. 앞에 있는 저니가 먼저 대상을 가져간다. */
-const JOURNEY_ORDER = [CART_RECOVERY, CART_ADD, FIRST_PURCHASE] as const;
+const JOURNEY_ORDER = [CART_RECOVERY, CART_ADD, REPEAT_PURCHASE, FIRST_PURCHASE] as const;
 
 /**
  * 담기 이탈로 인정하는 구간.
@@ -55,6 +59,30 @@ const CART_ADD_MAX_H = 20;
 /** 연결 후 이만큼 지난 사람에게 첫 구매를 권한다. 24시간을 안 두면 가입 직후에 또 말을 건다. */
 const FIRST_PURCHASE_MIN_H = 24;
 const FIRST_PURCHASE_MAX_H = 48;
+
+/**
+ * 재구매를 권하는 시점 — **마지막** 주문으로부터 21~22일.
+ *
+ * 창을 딱 하루로 잡는 이유가 두 가지다.
+ *
+ * 1. 🔴 **최초 가동 때 옛날 사람이 쏟아지지 않는다.** 창을 「14~35일」처럼 넓게 잡으면
+ *    켜는 순간 그 구간에 이미 들어와 있는 사람 전원에게 한꺼번에 나간다. 하루짜리 창은
+ *    오늘 D+21 이 된 사람만 잡으므로 켠 날부터 자연스러운 흐름으로만 나간다.
+ * 2. 한 사람이 이 창을 통과하는 건 주문 한 건당 딱 한 번이다. 중복 방지(ref = 주문 id)와
+ *    맞물려 「주문 한 건에 재구매 권유 한 통」이 된다.
+ *
+ * 21일은 2026-09-08 실측에서 나온 값이다 — 전체 재구매 간격 중앙값 20일(p25 7 · p75 35).
+ * 중앙값 언저리에 서면 「이미 다시 산 사람」은 마지막 주문이 갱신돼 저절로 빠지고,
+ * 아직 안 산 사람만 남는다.
+ */
+const REPEAT_MIN_H = 21 * 24;
+const REPEAT_MAX_H = 22 * 24;
+
+/** 재구매 저니가 훑는 주문 범위. 창보다 하루 넉넉히 봐야 「그 뒤에 또 샀는가」를 판정할 수 있다. */
+const REPEAT_LOOKBACK_DAYS = 23;
+
+const REPEAT_UTM = 'line_repeat_d21';
+const REPEAT_URL = `https://biteme.co.jp/?utm_source=line&utm_medium=line&utm_campaign=${REPEAT_UTM}`;
 
 /**
  * 첫 구매 유도 링크.
@@ -651,8 +679,189 @@ async function planCartAdd(
   };
 }
 
+/* ─── 저니 3 — 재구매 유도 ────────────────────────────────────────────────────
+ *
+ * 앞의 두 저니와 방향이 반대다. 저 둘은 「아직 안 산 사람」을 쫓고, 이건 **산 사람**을 본다.
+ * 지금까지 구매 이후 구간에는 배송 알림 말고 아무것도 없었다.
+ */
+
+/** 사람마다 마지막 주문 하나. 「그 뒤에 또 샀는가」는 이 값이 갱신되는 것으로 판정된다. */
+interface LastOrder {
+  customerGid: string;
+  orderGid: string;
+  at: number;
+  itemTitle: string | null;
+  itemCount: number;
+}
+
 /**
- * 저니 3 — 연결 다음날 첫 구매 유도.
+ * 최근 주문을 훑어 사람마다 마지막 것 하나만 남긴다.
+ *
+ * 🔴 「D+21 인 주문」을 바로 찾지 않고 **마지막 주문**을 고르는 게 핵심이다. 주문 단위로
+ *    보면 3주 전에 사고 지난주에 또 산 사람에게 "그동안 어떠셨나요"가 나간다.
+ */
+async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]> {
+  const since = new Date(now - REPEAT_LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const latest = new Map<string, LastOrder>();
+  let cursor: string | null = null;
+
+  for (;;) {
+    const res = await adminGraphQL<{
+      data?: {
+        orders?: {
+          pageInfo: { hasNextPage: boolean; endCursor: string };
+          edges: {
+            node: {
+              id: string;
+              createdAt: string;
+              customer: { id: string } | null;
+              lineItems: {
+                edges: {
+                  node: {
+                    title: string;
+                    quantity: number;
+                    originalUnitPriceSet: { shopMoney: { amount: string } } | null;
+                  };
+                }[];
+              };
+            };
+          }[];
+        };
+      };
+      errors?: unknown;
+    }>(
+      token,
+      `query RepeatOrders($cursor: String, $q: String) {
+        orders(first: 250, after: $cursor, query: $q, sortKey: CREATED_AT, reverse: true) {
+          pageInfo { hasNextPage endCursor }
+          edges { node {
+            id
+            createdAt
+            customer { id }
+            lineItems(first: 5) { edges { node {
+              title
+              quantity
+              originalUnitPriceSet { shopMoney { amount } }
+            } } }
+          } }
+        }
+      }`,
+      { cursor, q: `created_at:>=${since}` },
+    );
+
+    const conn = res?.data?.orders;
+    if (!conn) throw new Error(`주문 조회 실패: ${JSON.stringify(res?.errors ?? res).slice(0, 300)}`);
+
+    for (const e of conn.edges) {
+      const n = e.node;
+      if (!n.customer) continue;
+      const at = new Date(n.createdAt).getTime();
+      const prev = latest.get(n.customer.id);
+      if (prev && prev.at >= at) continue;
+      // 🔴 증정품을 빼고 고른다. 사은품(うちわ 등)이 줄의 **맨 앞**에 오는 주문이 있어서,
+      //    그냥 첫 줄을 집으면 "「BITE ME サマーうちわ」는 어떠셨나요" 가 나간다 —
+      //    돈 주고 산 물건이 아니라 우리가 끼워 준 물건의 감상을 묻는 꼴이 된다.
+      //    증정품은 정가가 0 이라 그것으로 가른다.
+      const items = (n.lineItems?.edges ?? []).filter(
+        (i) => Number(i.node.originalUnitPriceSet?.shopMoney?.amount ?? 0) > 0,
+      );
+      latest.set(n.customer.id, {
+        customerGid: n.customer.id,
+        orderGid: n.id,
+        at,
+        itemTitle: items[0]?.node?.title ?? null,
+        itemCount: items.reduce((sum, i) => sum + (i.node.quantity ?? 1), 0),
+      });
+    }
+
+    if (!conn.pageInfo.hasNextPage) break;
+    cursor = conn.pageInfo.endCursor;
+  }
+
+  return [...latest.values()];
+}
+
+/**
+ * 문안.
+ *
+ * 🔴 쿠폰을 붙이지 않는다. 이탈 저니와 같은 이유이지만 여기가 더 위험하다 —
+ *    "3주 기다리면 할인이 온다"를 **만족한 고객에게** 학습시키는 게 되기 때문이다.
+ *    링크는 상품 페이지가 아니라 몰 첫 화면이다. 산 물건이 소모품인지 아닌지
+ *    (사료냐 리드줄이냐) 우리가 모르는 채로 같은 걸 또 권하면 어긋난다.
+ *    무엇을 샀는지는 문장으로만 부른다 — 그 한 줄이 이 메시지를 「나에게 온 것」으로 만든다.
+ */
+export function buildRepeatMessage(itemTitle: string | null, itemCount: number, url: string): string {
+  const first = stripControl(itemTitle ?? '').trim();
+  // 「ほかN点」의 기준은 앞선 두 저니와 같다 — 줄 수가 아니라 총 수량 − 1.
+  const rest = itemCount - 1;
+  const what = first
+    ? `「${first}」${rest > 0 ? ` ほか${rest}点` : ''}`
+    : 'お求めいただいた商品';
+
+  return [
+    'その後、いかがでしょうか🐾',
+    '',
+    'BITE ME JAPANです。',
+    `${what}は`,
+    'お役に立っていますか？',
+    '',
+    '新しく入荷したアイテムも',
+    'ぜひご覧ください。',
+    '',
+    '▼ ショップを見る',
+    url,
+  ].join('\n');
+}
+
+async function planRepeatPurchase(
+  now: number,
+  members: Member[],
+  token: string,
+): Promise<JourneyPlan> {
+  const [lastOrders, handled] = await Promise.all([
+    fetchLastOrders(token, now),
+    alreadyHandled(REPEAT_PURCHASE),
+  ]);
+
+  const lineByGid = new Map<string, string>();
+  for (const m of members) if (m.lineUserId) lineByGid.set(m.gid, m.lineUserId);
+
+  const inWindow = lastOrders.filter((o) => {
+    const ageH = (now - o.at) / 3600_000;
+    return ageH >= REPEAT_MIN_H && ageH < REPEAT_MAX_H;
+  });
+
+  const fresh = inWindow.filter((o) => lineByGid.has(o.customerGid) && !handled.has(o.orderGid));
+
+  return {
+    journey: REPEAT_PURCHASE,
+    // 창 밖까지 포함해 읽어 온 고객 수. 0 이면 창 문제가 아니라 주문 조회가 죽은 것이다.
+    pool: lastOrders.length,
+    found: inWindow.length,
+    excluded: {
+      // 구매 고객의 대부분은 LINE 을 안 쓴다. 이 값이 크다고 이상한 게 아니다 —
+      // 2026-09-08 기준 구매 고객 2,234명 중 LINE 연결은 260명(11.6%)이다.
+      라인미연결: inWindow.filter((o) => !lineByGid.has(o.customerGid)).length,
+      이미발송: inWindow.filter((o) => handled.has(o.orderGid)).length,
+    },
+    candidates: fresh.map((o) => ({
+      userId: lineByGid.get(o.customerGid) as string,
+      // 주문 id 로 막는다. 사람으로 막으면 다음 주문 뒤에는 영영 못 보낸다.
+      ref: o.orderGid,
+      text: buildRepeatMessage(o.itemTitle, o.itemCount, REPEAT_URL),
+      note: `마지막 주문 ${new Date(o.at).toISOString()}`,
+    })),
+    record: {
+      campaignId: `journey_${REPEAT_PURCHASE}`,
+      name: '재구매 유도',
+      // 링크가 우리 사이트라 `index.html` 이 UTM 을 실어 체크아웃까지 넘긴다.
+      utm: REPEAT_UTM,
+    },
+  };
+}
+
+/**
+ * 저니 4 — 연결 다음날 첫 구매 유도.
  *
  * 문안은 2026-08-21 테스트 발송으로 확인한 것을 그대로 쓴다.
  * ⚠️ 「初回」라고 단정하지 않는다. 예전에 게스트로 산 사람이 섞일 수 있는데 그 이력은
@@ -815,7 +1024,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 최근 주문을 두 번 훑어서 함수 시간을 다 쓴다 — 발송 도중에 타임아웃이 나면
     // 중복 방지 기록(recordSends)이 안 남아 다음 시간에 같은 사람에게 또 나간다.
     const [members, buyers] = await Promise.all([
-      runs(CART_ADD) || runs(FIRST_PURCHASE) ? fetchAudience() : Promise.resolve([] as Member[]),
+      runs(CART_ADD) || runs(REPEAT_PURCHASE) || runs(FIRST_PURCHASE)
+        ? fetchAudience()
+        : Promise.resolve([] as Member[]),
       needsCarts ? fetchRecentBuyers(token, now) : Promise.resolve(new Set<string>()),
     ]);
 
@@ -851,6 +1062,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if ((j === CART_RECOVERY || j === CART_ADD) && abandoned === null) continue;
       if (j === CART_RECOVERY) plans.push(await planCartRecovery(now, abandoned!, buyers));
       if (j === CART_ADD) plans.push(await planCartAdd(now, checkoutReached, members, buyers));
+      if (j === REPEAT_PURCHASE) plans.push(await planRepeatPurchase(now, members, token));
       if (j === FIRST_PURCHASE) plans.push(await planFirstPurchase(now, members));
     }
 
