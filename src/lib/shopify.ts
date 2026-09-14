@@ -802,7 +802,52 @@ export interface ShopifyBanner {
   handle: string;
   image: { url: string; altText: string | null } | null;
   linkUrl: string | null;
+  /**
+   * 이미지 위에 얹는 문구 (#174). 어드민에서 비워 두면 null 이고, 셋 다 null 이면 이미지만 보여준다.
+   * subtext 는 다중행 텍스트라 줄바꿈이 들어올 수 있다.
+   */
+  text: { badge: string | null; headline: string | null; subtext: string | null; buttonLabel: string | null };
   fields: Record<string, string>;
+}
+
+/**
+ * 메타오브젝트 필드 키 → 우리 쪽 이름.
+ *
+ * 쇼피파이는 필드 "이름" 과 "키" 가 다르다 — 이미지 필드는 이름이 img 인데 키가 2603 이다.
+ * 어드민에서 만든 키가 headline / Headline / button_label / buttonLabel 어느 쪽이든 붙도록
+ * 소문자·영숫자만 남겨 비교한다. 여기 없는 키는 `fields` 에 그대로 남는다.
+ */
+const BANNER_TEXT_KEYS: Record<string, keyof ShopifyBanner['text']> = {
+  badge: 'badge',
+  headline: 'headline',
+  title: 'headline',
+  subtext: 'subtext',
+  subtitle: 'subtext',
+  buttonlabel: 'buttonLabel',
+  button: 'buttonLabel',
+  cta: 'buttonLabel',
+  ctalabel: 'buttonLabel',
+};
+
+/** 노출 여부 필드로 인정하는 키 (같은 정규화 규칙). */
+const BANNER_VISIBLE_KEYS = new Set(['visible', 'visibility', 'show', 'display', 'isvisible', 'exposure', 'active', 'enabled', '노출', '노출여부']);
+
+function normalizeFieldKey(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9가-힣]/g, '');
+}
+
+/**
+ * 노출 여부. **명시적으로 "미노출" 인 값일 때만** false.
+ * 필드가 없거나(기존 배너 9개) 비어 있으면 노출 — 키 이름이 어긋나도 배너가 통째로 사라지지 않게.
+ */
+const HIDDEN_VALUES = new Set(['false', '0', 'no', 'off', 'hidden', 'hide', '미노출', '비노출', '숨김']);
+
+export function isBannerVisible(banner: ShopifyBanner): boolean {
+  for (const [key, value] of Object.entries(banner.fields)) {
+    if (!BANNER_VISIBLE_KEYS.has(normalizeFieldKey(key))) continue;
+    if (HIDDEN_VALUES.has(value.trim().toLowerCase())) return false;
+  }
+  return true;
 }
 
 const GET_BANNERS_QUERY = `
@@ -879,6 +924,7 @@ export async function fetchBanners(first: number = 10): Promise<ShopifyBanner[]>
     let image: { url: string; altText: string | null } | null = null;
 
     let linkUrl: string | null = null;
+    const text: ShopifyBanner['text'] = { badge: null, headline: null, subtext: null, buttonLabel: null };
 
     for (const field of node.fields) {
       if (field.reference?.image) {
@@ -893,11 +939,14 @@ export async function fetchBanners(first: number = 10): Promise<ShopifyBanner[]>
         }
       } else if (field.value) {
         fields[field.key] = field.value;
+        const textKey = BANNER_TEXT_KEYS[normalizeFieldKey(field.key)];
+        // 공백만 있는 값은 어드민에서 지우다 만 것 — 비운 것으로 본다
+        if (textKey && String(field.value).trim()) text[textKey] = String(field.value).trim();
       }
     }
 
-    return { id: node.id, handle: node.handle, image, linkUrl, fields };
-  }).filter((b: ShopifyBanner) => isBannerLive(b)).sort((a, b) => {
+    return { id: node.id, handle: node.handle, image, linkUrl, text, fields };
+  }).filter((b: ShopifyBanner) => isBannerLive(b) && isBannerVisible(b)).sort((a, b) => {
     const aOrder = parseInt(a.fields['sort_order'] ?? '9999', 10);
     const bOrder = parseInt(b.fields['sort_order'] ?? '9999', 10);
     return aOrder - bOrder;
