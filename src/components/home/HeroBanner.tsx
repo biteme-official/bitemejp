@@ -35,7 +35,8 @@ function BannerText({ text }: { text: ShopifyBanner["text"] }) {
 
   return (
     <div className="absolute inset-0 flex items-center bg-gradient-to-r from-black/55 via-black/25 to-transparent pointer-events-none">
-      <div className="px-5 sm:px-10 md:px-14 max-w-[70%] sm:max-w-[55%] text-white drop-shadow-md">
+      {/* 좌우 화살표(left-2 + w-8 = 40px)와 겹치지 않도록 모바일도 왼쪽 여백을 48px 이상 둔다 */}
+      <div className="px-12 md:px-14 max-w-[80%] sm:max-w-[55%] text-white drop-shadow-md">
         {badge && (
           <span className="inline-block mb-2 sm:mb-3 px-2 py-0.5 rounded-full bg-primary text-primary-foreground text-[10px] sm:text-xs font-bold tracking-wider">
             {badgeLabel(badge)}
