@@ -26,38 +26,38 @@ function badgeLabel(raw: string): string {
  * 이미지 위에 얹는 문구 (#174). 어드민 메타오브젝트의 Badge·Headline·Subtext·Button Label 을 그대로 그린다.
  * 셋 다 비어 있으면 아무것도 그리지 않아, 문구를 이미지에 박아 만든 기존 배너는 지금과 똑같이 보인다.
  *
- * 배너 전체가 이미 클릭 영역이라 버튼은 별도 링크가 아니라 시각적 CTA 다(중첩 a/button 을 피한다).
- * 사진 위 글자라 배경색을 모르므로 왼쪽→오른쪽 어두운 그라데이션으로 대비를 만든다.
+ * 레이아웃은 기존 제작 배너(1200×504, 왼쪽 6% 여백 · 위에 작은 한 줄 · 큰 헤드라인 2줄 · 아래 CTA 한 줄)를 따른다.
+ * 딤(그라데이션)은 깔지 않는다 — 배경이 밝은 단색인 배너라 글자만 진하게 얹으면 된다. 따라서 이미지는 밝은 배경이어야 한다.
+ * 글자 크기는 배너 폭에 비례(vw)하되 모바일에서 너무 작아지지 않게 clamp 로 하한을 둔다.
+ *
+ * 배너 전체가 이미 클릭 영역이라 CTA 는 별도 링크가 아니라 글자만(중첩 a/button 을 피한다).
  */
 function BannerText({ text }: { text: ShopifyBanner["text"] }) {
   const { badge, headline, subtext, buttonLabel } = text;
   if (!headline && !subtext && !buttonLabel) return null;
 
   return (
-    <div className="absolute inset-0 flex items-center bg-gradient-to-r from-black/55 via-black/25 to-transparent pointer-events-none">
-      {/* 좌우 화살표(left-2 + w-8 = 40px)와 겹치지 않도록 모바일도 왼쪽 여백을 48px 이상 둔다 */}
-      <div className="px-12 md:px-14 max-w-[80%] sm:max-w-[55%] text-white drop-shadow-md">
-        {badge && (
-          <span className="inline-block mb-2 sm:mb-3 px-2 py-0.5 rounded-full bg-primary text-primary-foreground text-[10px] sm:text-xs font-bold tracking-wider">
-            {badgeLabel(badge)}
-          </span>
-        )}
-        {headline && (
-          <p className="font-bold leading-tight text-lg sm:text-3xl md:text-4xl break-keep">
-            {headline}
-          </p>
-        )}
-        {subtext && (
-          <p className="mt-1 sm:mt-2 text-xs sm:text-base md:text-lg leading-snug whitespace-pre-line line-clamp-2 sm:line-clamp-3">
-            {subtext}
-          </p>
-        )}
-        {buttonLabel && (
-          <span className="inline-block mt-3 sm:mt-5 px-4 py-1.5 sm:px-6 sm:py-2.5 rounded-full bg-white text-black text-xs sm:text-sm font-semibold">
-            {buttonLabel}
-          </span>
-        )}
-      </div>
+    <div className="absolute inset-0 flex flex-col justify-center pl-[max(6%,3rem)] pr-[38%] text-neutral-900 pointer-events-none">
+      {badge && (
+        <span className="self-start mb-[1.2vw] px-[0.9em] py-[0.2em] rounded-full bg-primary text-primary-foreground font-bold tracking-wider text-[clamp(9px,1.1vw,14px)]">
+          {badgeLabel(badge)}
+        </span>
+      )}
+      {subtext && (
+        <p className="font-medium leading-snug whitespace-pre-line line-clamp-2 text-[clamp(11px,2.6vw,34px)]">
+          {subtext}
+        </p>
+      )}
+      {headline && (
+        <p className="mt-[1.2vw] font-black leading-[1.25] break-keep text-[clamp(15px,5vw,62px)]">
+          {headline}
+        </p>
+      )}
+      {buttonLabel && (
+        <p className="mt-[clamp(10px,4.5vw,56px)] font-medium text-[clamp(10px,2.1vw,26px)]">
+          {buttonLabel}
+        </p>
+      )}
     </div>
   );
 }
