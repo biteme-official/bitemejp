@@ -5,6 +5,63 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { track } from "@/lib/track";
 
+/**
+ * 배지 드롭다운 값 → 화면 표기. 목록에 없는 값은 대문자로 그대로 보여준다(어드민에서 선택지를 늘려도 동작).
+ */
+const BADGE_LABELS: Record<string, string> = {
+  new: "NEW",
+  "best-seller": "BEST SELLER",
+  bestseller: "BEST SELLER",
+  best: "BEST SELLER",
+  sale: "SALE",
+  limited: "LIMITED",
+  restock: "RESTOCK",
+};
+
+function badgeLabel(raw: string): string {
+  return BADGE_LABELS[raw.trim().toLowerCase()] ?? raw.trim().toUpperCase();
+}
+
+/**
+ * 이미지 위에 얹는 문구 (#174). 어드민 메타오브젝트의 Badge·Headline·Subtext·Button Label 을 그대로 그린다.
+ * 셋 다 비어 있으면 아무것도 그리지 않아, 문구를 이미지에 박아 만든 기존 배너는 지금과 똑같이 보인다.
+ *
+ * 배너 전체가 이미 클릭 영역이라 버튼은 별도 링크가 아니라 시각적 CTA 다(중첩 a/button 을 피한다).
+ * 사진 위 글자라 배경색을 모르므로 왼쪽→오른쪽 어두운 그라데이션으로 대비를 만든다.
+ */
+function BannerText({ text }: { text: ShopifyBanner["text"] }) {
+  const { badge, headline, subtext, buttonLabel } = text;
+  if (!headline && !subtext && !buttonLabel) return null;
+
+  return (
+    <div className="absolute inset-0 flex items-center bg-gradient-to-r from-black/55 via-black/25 to-transparent pointer-events-none">
+      {/* 좌우 화살표(left-2 + w-8 = 40px)와 겹치지 않도록 모바일도 왼쪽 여백을 48px 이상 둔다 */}
+      <div className="px-12 md:px-14 max-w-[80%] sm:max-w-[55%] text-white drop-shadow-md">
+        {badge && (
+          <span className="inline-block mb-2 sm:mb-3 px-2 py-0.5 rounded-full bg-primary text-primary-foreground text-[10px] sm:text-xs font-bold tracking-wider">
+            {badgeLabel(badge)}
+          </span>
+        )}
+        {headline && (
+          <p className="font-bold leading-tight text-lg sm:text-3xl md:text-4xl break-keep">
+            {headline}
+          </p>
+        )}
+        {subtext && (
+          <p className="mt-1 sm:mt-2 text-xs sm:text-base md:text-lg leading-snug whitespace-pre-line line-clamp-2 sm:line-clamp-3">
+            {subtext}
+          </p>
+        )}
+        {buttonLabel && (
+          <span className="inline-block mt-3 sm:mt-5 px-4 py-1.5 sm:px-6 sm:py-2.5 rounded-full bg-white text-black text-xs sm:text-sm font-semibold">
+            {buttonLabel}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function HeroBanner() {
   const [banners, setBanners] = useState<ShopifyBanner[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,18 +139,19 @@ export function HeroBanner() {
         {banners.map((banner) => (
           <div
             key={banner.id}
-            className="w-full flex-shrink-0"
+            className="relative w-full flex-shrink-0"
             onClick={() => {
-              track('banner_click', { banner_title: banner.fields['title'] || banner.handle, banner_id: banner.id, position: currentIndex });
+              track('banner_click', { banner_title: banner.text.headline || banner.fields['title'] || banner.handle, banner_id: banner.id, position: currentIndex });
               if (banner.linkUrl) window.location.href = banner.linkUrl;
             }}
             style={{ cursor: banner.linkUrl ? 'pointer' : 'default' }}
           >
             <img
               src={banner.image!.url}
-              alt={banner.image!.altText || "Banner"}
+              alt={banner.image!.altText || banner.text.headline || "Banner"}
               className="w-full h-auto block"
             />
+            <BannerText text={banner.text} />
           </div>
         ))}
       </div>
