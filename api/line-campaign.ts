@@ -19,8 +19,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHash } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { CLICK_EVENT } from './line-click.js';
-
-const SHOPIFY_API_VERSION = '2025-07';
+import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 const PLACEHOLDER_EMAIL_DOMAIN = '@line-user.biteme.co.jp';
 const SOURCE_TAG_PREFIX = 'line_src:';
 const LINE_ID_TAG_PREFIX = 'line_id:';

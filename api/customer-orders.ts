@@ -16,9 +16,9 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
+import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
-const API_VERSION = '2025-07';
 
 // ── Admin API token (client_credentials) ──────────────────────────────────
 let cachedAdminToken: string | null = null;
@@ -70,7 +70,7 @@ async function getStorefrontToken(): Promise<string> {
 
 async function storefrontQuery(query: string, variables: Record<string, unknown> = {}) {
   const token = await getStorefrontToken();
-  const res = await fetch(`https://${SHOP}/api/${API_VERSION}/graphql.json`, {
+  const res = await fetch(`https://${SHOP}/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Shopify-Storefront-Private-Token': token },
     body: JSON.stringify({ query, variables }),
@@ -81,7 +81,7 @@ async function storefrontQuery(query: string, variables: Record<string, unknown>
 
 async function adminGraphQL(query: string, variables: Record<string, unknown> = {}) {
   const token = await getAdminToken();
-  const res = await fetch(`https://${SHOP}/admin/api/${API_VERSION}/graphql.json`, {
+  const res = await fetch(`https://${SHOP}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
     body: JSON.stringify({ query, variables }),

@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || '';
 const CLIENT_ID = process.env.VITE_SHOPIFY_CLIENT_ID || '';
 const CLIENT_SECRET = process.env.SHOPIFY_CLIENT_SECRET || '';
-const API_VERSION = '2025-07';
 const BASE_URL = 'https://biteme.co.jp';
 
 let cachedToken: string | null = null;
@@ -46,7 +46,7 @@ async function fetchAllProductHandles(): Promise<{ numericId: string; updatedAt:
       }
     `;
 
-    const res = await fetch(`https://${SHOP}/api/${API_VERSION}/graphql.json`, {
+    const res = await fetch(`https://${SHOP}/api/${SHOPIFY_API_VERSION}/graphql.json`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

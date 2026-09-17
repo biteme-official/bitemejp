@@ -5,8 +5,7 @@ import { createHmac, timingSafeEqual } from 'crypto';
 //    모듈 로드 단계에서 ERR_MODULE_NOT_FOUND 로 함수가 통째로 죽는다 (#130).
 //    그 경우 응답이 JSON 이 아니라 500 text/plain 이라 화면에는 'Unknown error' 만 보인다.
 import { sanitizeSource, type LoginSource } from './line-login-state.js';
-
-const SHOPIFY_API_VERSION = '2025-07';
+import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 /** 유입경로 태그 접두사 — `line_src:welcome` 형태로 붙는다 */
 const SOURCE_TAG_PREFIX = 'line_src:';

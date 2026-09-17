@@ -11,9 +11,9 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
+import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
-const SHOPIFY_API_VERSION = '2025-07';
 
 const ALLOWED_ORIGINS = [
   'https://biteme.co.jp',

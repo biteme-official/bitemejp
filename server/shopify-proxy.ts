@@ -1,4 +1,5 @@
 import type { Connect } from 'vite';
+import { SHOPIFY_API_VERSION } from '../api/_shopify-api-version.js';
 
 let cachedToken: string | null = null;
 let tokenExpiresAt: number = 0;
@@ -55,11 +56,10 @@ export function shopifyProxyMiddleware(): Connect.NextHandleFunction {
       const token = await getAccessToken();
 
       const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
-      const apiVersion = '2025-07';
 
       // Forward to Shopify Storefront API
       const shopifyResponse = await fetch(
-        `https://${shop}/api/${apiVersion}/graphql.json`,
+        `https://${shop}/api/${SHOPIFY_API_VERSION}/graphql.json`,
         {
           method: 'POST',
           headers: {
