@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import AffiliateTab from "@/components/admin/AffiliateTab";
 
 // Admin API base URL — 별도 Vercel 프로젝트로 분리된 경우 해당 URL, 동일 origin이면 빈 문자열
 const ADMIN_API_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL as string) ?? '';
@@ -2491,6 +2492,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               <TabsTrigger value="utm" className="text-xs px-4">UTM 분석</TabsTrigger>
               <TabsTrigger value="members" className="text-xs px-4">회원 분석</TabsTrigger>
               <TabsTrigger value="weekly" className="text-xs px-4">주간회고</TabsTrigger>
+              <TabsTrigger value="affiliate" className="text-xs px-4">어필리에이트</TabsTrigger>
             </TabsList>
 
             {/* ══ 대시보드 탭 ══ */}
@@ -2738,6 +2740,12 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               <p className="text-center text-xs text-muted-foreground pb-4">
                 GA4 + Shopify + Instagram · {RANGE_LABELS[range]} 데이터
               </p>
+            </TabsContent>
+
+            {/* ══ 어필리에이트 탭 (#178 Phase 0) ══ */}
+            <TabsContent value="affiliate" className="space-y-5 mt-0">
+              {/* 탭을 열기 전에는 마운트하지 않는다 — 장부 조회 5개가 딸려 들어간다 */}
+              {activeTab === "affiliate" && <AffiliateTab secret={secret} />}
             </TabsContent>
           </Tabs>
         )}

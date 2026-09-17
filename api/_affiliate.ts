@@ -1,0 +1,316 @@
+/**
+ * 어필리에이트 장부 — 공용 모듈 (Issue #178, 설계안 §5·§6)
+ *
+ * 여기 있는 함수는 주문 웹훅(api/shopify-purchase-webhook.ts)과 어드민 API 가 함께 쓴다.
+ *
+ * 원칙
+ *  - 웹훅 갈래는 **어떤 경우에도 throw 하지 않는다.** 커미션 하나 놓치는 것보다
+ *    GA4·LINE 알림이 멈추는 쪽이 훨씬 비싸다. 모든 실패는 `[Affiliate]` 로그로만 남긴다.
+ *  - Shopify 를 다시 부르지 않는다. 판정에 필요한 값은 웹훅 페이로드와 우리 DB 에서만 읽는다
+ *    (웹훅 5초 제한 — 초과가 쌓이면 Shopify 가 웹훅을 자동 삭제한다).
+ *  - `AFFILIATE_ENABLED` 환경변수가 킬스위치다. 배포 없이 끌 수 있어야 한다.
+ *
+ * ⚠️ `api/` 안의 상대 import 는 반드시 `.js` 확장자 (2026-08-21 장애).
+ */
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+
+/** 기본 커미션 10% — 이용약관 第3条 1항. 우대는 전부 aff_campaigns 에 있다 */
+export const BASE_RATE = 0.10;
+/** 귀속 창 · 확정 대기 — 둘 다 30일 (약관 第3条 4항 · 第4条 1항) */
+export const ATTRIBUTION_WINDOW_DAYS = 30;
+export const CONFIRM_WAIT_DAYS = 30;
+
+/** 수동 등록 파트너(어드민에서 추가, LINE 가입 전)의 line_user_id 접두어 */
+export const MANUAL_LINE_ID_PREFIX = 'manual:';
+/** Collabs 이행 코드를 묶는 시스템 캠페인 이름 */
+export const LEGACY_CAMPAIGN_NAME = 'Collabs 이행 코드';
+
+const PLACEHOLDER_EMAIL_DOMAIN = '@line-user.biteme.co.jp';
+
+export function isAffiliateEnabled(): boolean {
+  const v = (process.env.AFFILIATE_ENABLED || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'on';
+}
+
+let client: SupabaseClient | null = null;
+export function getSupabase(): SupabaseClient {
+  if (client) return client;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error('SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 미설정');
+  client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+  return client;
+}
+
+// ── 타입 ─────────────────────────────────────────────────────────────────────
+
+export interface AffPartner {
+  id: number;
+  code: string;
+  line_user_id: string;
+  shopify_customer_id: string | null;
+  name: string;
+  instagram: string | null;
+  email: string | null;
+  status: 'active' | 'suspended' | 'withdrawn';
+  joined_at: string;
+}
+
+export interface AffCampaign {
+  id: number;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  commission_rate: number;
+  discount_percent: number | null;
+  scope: 'all' | 'partners' | 'products';
+  target_ids: string[];
+  active: boolean;
+}
+
+/** orders/create 웹훅(REST) 페이로드 중 귀속 판정에 쓰는 필드만 */
+export interface OrderForAttribution {
+  id: number;
+  name?: string | null;
+  order_number: number;
+  created_at?: string | null;
+  email?: string | null;
+  customer?: { id: number; email?: string | null } | null;
+  current_subtotal_price?: string | null;
+  subtotal_price?: string | null;
+  discount_codes?: Array<{ code: string; amount?: string; type?: string }> | null;
+  note_attributes?: Array<{ name: string; value: string }> | null;
+  line_items?: Array<{ product_id?: number | null }> | null;
+}
+
+export type Attribution = 'code' | 'ref' | 'customer';
+
+export interface ConversionDecision {
+  partner: AffPartner;
+  attribution: Attribution;
+  campaignId: number | null;   // 코드 귀속일 때 그 코드의 캠페인
+  clickId: number | null;
+}
+
+// ── 판정 ─────────────────────────────────────────────────────────────────────
+
+/** 자리표시자 이메일의 로컬파트에 LINE userId 가 들어있다 (api/line-callback.ts 규약) */
+function lineUserIdFromEmail(email: string | null | undefined): string | null {
+  if (!email || !email.endsWith(PLACEHOLDER_EMAIL_DOMAIN)) return null;
+  const local = email.slice(0, -PLACEHOLDER_EMAIL_DOMAIN.length);
+  return local.startsWith('line_') ? local.slice('line_'.length) : null;
+}
+
+/** 귀속 기준액 = current_subtotal_price (2026-09-17 실측: 세 0·배송 별도·할인 후 상품 소계). 엔 정수 */
+export function eligibleAmountOf(order: OrderForAttribution): number {
+  const raw = order.current_subtotal_price ?? order.subtotal_price ?? '0';
+  const n = Math.round(Number(raw));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function attr(order: OrderForAttribution, name: string): string | undefined {
+  return order.note_attributes?.find((a) => a.name === name)?.value?.trim() || undefined;
+}
+
+function daysBetween(a: Date, b: Date): number {
+  return Math.abs(a.getTime() - b.getTime()) / 86_400_000;
+}
+
+/**
+ * 세 갈래 귀속 판정 (설계 §5 흐름도). 순서가 우선순위다.
+ *  1) 주문의 할인코드가 캠페인 전용 코드(aff_campaign_codes)면 → code
+ *  2) 카트 속성 aff_ref(=파트너 코드) 가 30일 창 안이면 → ref
+ *  3) 이 고객이 30일 안에 누군가의 링크를 눌렀으면(aff_touches) → customer
+ * 셋 다 아니면 null — 자연 유입이다.
+ */
+export async function decideAttribution(
+  sb: SupabaseClient,
+  order: OrderForAttribution,
+  orderedAt: Date
+): Promise<ConversionDecision | null> {
+  // 1) 코드
+  const codes = (order.discount_codes ?? []).map((d) => d.code.toUpperCase()).filter(Boolean);
+  if (codes.length > 0) {
+    const { data, error } = await sb
+      .from('aff_campaign_codes')
+      .select('campaign_id, partner_id, status, partner:aff_partners(*)')
+      .in('shopify_code', codes)
+      .limit(1);
+    if (error) throw new Error(`aff_campaign_codes 조회 실패: ${error.message}`);
+    const row = data?.[0] as { campaign_id: number; partner_id: number; status: string; partner: AffPartner | AffPartner[] } | undefined;
+    if (row) {
+      const partner = Array.isArray(row.partner) ? row.partner[0] : row.partner;
+      if (partner) return { partner, attribution: 'code', campaignId: row.campaign_id, clickId: null };
+    }
+  }
+
+  // 2) 링크 (카트 속성). 값 형식: "CODE" 또는 "CODE:clickId". aff_ref_at 이 있으면 30일 창을 서버에서도 확인
+  const ref = attr(order, 'aff_ref');
+  if (ref) {
+    const [codeRaw, clickRaw] = ref.split(':');
+    const code = (codeRaw || '').toUpperCase();
+    const refAt = attr(order, 'aff_ref_at');
+    const withinWindow = !refAt || daysBetween(new Date(refAt), orderedAt) <= ATTRIBUTION_WINDOW_DAYS;
+    if (code && withinWindow) {
+      const { data, error } = await sb.from('aff_partners').select('*').eq('code', code).maybeSingle();
+      if (error) throw new Error(`aff_partners 조회 실패: ${error.message}`);
+      if (data) {
+        const clickId = clickRaw && /^\d+$/.test(clickRaw) ? Number(clickRaw) : null;
+        return { partner: data as AffPartner, attribution: 'ref', campaignId: null, clickId };
+      }
+    }
+  }
+
+  // 3) 로그인 고객의 서버측 터치
+  const customerId = order.customer?.id;
+  if (customerId) {
+    const since = new Date(orderedAt.getTime() - ATTRIBUTION_WINDOW_DAYS * 86_400_000).toISOString();
+    const { data, error } = await sb
+      .from('aff_touches')
+      .select('partner_id, touched_at, partner:aff_partners(*)')
+      .eq('shopify_customer_id', String(customerId))
+      .gte('touched_at', since)
+      .maybeSingle();
+    if (error) throw new Error(`aff_touches 조회 실패: ${error.message}`);
+    const row = data as { partner: AffPartner | AffPartner[] } | null;
+    const partner = row ? (Array.isArray(row.partner) ? row.partner[0] : row.partner) : null;
+    if (partner) return { partner, attribution: 'customer', campaignId: null, clickId: null };
+  }
+
+  return null;
+}
+
+/**
+ * 요율 해석 — ① 적용 중인 캠페인(여럿이면 가장 높은 요율) → ② 기본 10%.
+ * 값은 주문 시점에 aff_conversions.rate 에 박아 두고 이후 변경에 소급하지 않는다.
+ */
+export async function resolveRate(
+  sb: SupabaseClient,
+  partnerId: number,
+  productIds: number[],
+  orderedAt: Date,
+  preferredCampaignId: number | null
+): Promise<{ rate: number; rateSource: string; campaignId: number | null }> {
+  const at = orderedAt.toISOString();
+  const { data, error } = await sb
+    .from('aff_campaigns')
+    .select('*')
+    .eq('active', true)
+    .lte('starts_at', at)
+    .gte('ends_at', at);
+  if (error) throw new Error(`aff_campaigns 조회 실패: ${error.message}`);
+
+  const productGids = new Set(productIds.flatMap((id) => [String(id), `gid://shopify/Product/${id}`]));
+  const applicable = ((data ?? []) as AffCampaign[]).filter((c) => {
+    if (c.scope === 'all') return true;
+    if (c.scope === 'partners') return c.target_ids.includes(String(partnerId));
+    if (c.scope === 'products') return c.target_ids.some((t) => productGids.has(t));
+    return false;
+  });
+
+  // 코드 귀속이면 그 코드의 캠페인이 우선 — 그 캠페인 기간이 끝났어도 코드는 그 조건으로 나간 것이다
+  if (preferredCampaignId != null) {
+    let preferred = applicable.find((c) => c.id === preferredCampaignId) ?? null;
+    if (!preferred) {
+      const { data: one } = await sb.from('aff_campaigns').select('*').eq('id', preferredCampaignId).maybeSingle();
+      preferred = (one as AffCampaign | null) ?? null;
+    }
+    if (preferred) return { rate: Number(preferred.commission_rate), rateSource: `campaign:${preferred.id}`, campaignId: preferred.id };
+  }
+
+  if (applicable.length > 0) {
+    const best = applicable.reduce((a, b) => (Number(b.commission_rate) > Number(a.commission_rate) ? b : a));
+    return { rate: Number(best.commission_rate), rateSource: `campaign:${best.id}`, campaignId: best.id };
+  }
+  return { rate: BASE_RATE, rateSource: 'base', campaignId: null };
+}
+
+/** 자기 링크로 자기 구매 — 약관 第4条 3항. 결제는 막지 않고 커미션만 0 */
+export function isSelfPurchase(partner: AffPartner, order: OrderForAttribution): boolean {
+  const customerId = order.customer?.id ? String(order.customer.id) : null;
+  if (customerId && partner.shopify_customer_id && customerId === partner.shopify_customer_id) return true;
+
+  const rawEmail = (order.email ?? order.customer?.email ?? '').trim();
+  const email = rawEmail.toLowerCase();
+  if (email && partner.email && email === partner.email.toLowerCase()) return true;
+
+  // LINE userId 는 대소문자를 구분한다(U + 32 hex) — 소문자화 전의 원문에서 뽑는다
+  const lineId = lineUserIdFromEmail(rawEmail);
+  if (lineId && lineId === partner.line_user_id) return true;
+
+  return false;
+}
+
+// ── 적재 ─────────────────────────────────────────────────────────────────────
+
+export interface RecordResult {
+  outcome: 'disabled' | 'unattributed' | 'inserted' | 'duplicate' | 'error';
+  detail?: string;
+}
+
+/**
+ * orders/create 한 건을 장부에 앉힌다. **절대 throw 하지 않는다.**
+ * order_id 유니크 + ignoreDuplicates 로 웹훅 재전송에도 두 번 쌓이지 않는다.
+ */
+export async function recordConversionFromOrder(order: OrderForAttribution): Promise<RecordResult> {
+  if (!isAffiliateEnabled()) return { outcome: 'disabled' };
+
+  try {
+    const sb = getSupabase();
+    const orderedAt = order.created_at ? new Date(order.created_at) : new Date();
+
+    const decision = await decideAttribution(sb, order, orderedAt);
+    if (!decision) return { outcome: 'unattributed' };
+
+    const { partner, attribution, clickId } = decision;
+    const productIds = (order.line_items ?? []).map((l) => l.product_id).filter((v): v is number => typeof v === 'number');
+    const { rate, rateSource, campaignId } = await resolveRate(sb, partner.id, productIds, orderedAt, decision.campaignId);
+
+    const eligible = eligibleAmountOf(order);
+    const self = isSelfPurchase(partner, order);
+    // 정지·탈퇴한 파트너의 주문은 장부에는 남기되 커미션 0 (void) — 나중에 대조할 수 있게
+    const inactive = partner.status !== 'active';
+    const commission = self || inactive ? 0 : Math.round(eligible * rate);
+    const status = self ? 'self' : inactive ? 'void' : 'pending';
+    const confirmAt = new Date(orderedAt.getTime() + CONFIRM_WAIT_DAYS * 86_400_000);
+
+    const row = {
+      order_id: String(order.id),
+      order_name: order.name ?? `#${order.order_number}`,
+      partner_id: partner.id,
+      attribution,
+      shopify_customer_id: order.customer?.id ? String(order.customer.id) : null,
+      click_id: clickId,
+      campaign_id: campaignId,
+      eligible_amount: eligible,
+      rate,
+      rate_source: rateSource,
+      commission,
+      status,
+      ordered_at: orderedAt.toISOString(),
+      confirm_at: confirmAt.toISOString(),
+      raw: {
+        discount_codes: order.discount_codes ?? [],
+        aff_ref: attr(order, 'aff_ref') ?? null,
+        aff_ref_at: attr(order, 'aff_ref_at') ?? null,
+        current_subtotal_price: order.current_subtotal_price ?? null,
+        subtotal_price: order.subtotal_price ?? null,
+      },
+    };
+
+    const { data, error } = await sb
+      .from('aff_conversions')
+      .upsert(row, { onConflict: 'order_id', ignoreDuplicates: true })
+      .select('id');
+    if (error) return { outcome: 'error', detail: error.message };
+
+    const inserted = (data?.length ?? 0) > 0;
+    console.log(
+      `[Affiliate] ${inserted ? '적재' : '중복(무시)'} ${row.order_name} → ${partner.code} ` +
+      `${attribution} ¥${eligible} × ${rate} = ¥${commission} (${status}) [${rateSource}]`
+    );
+    return { outcome: inserted ? 'inserted' : 'duplicate' };
+  } catch (err) {
+    return { outcome: 'error', detail: err instanceof Error ? err.message : String(err) };
+  }
+}
