@@ -8,17 +8,19 @@
 -- 이용약관(2026-09-17 확정)이 요구하는 컬럼: terms_version · agreed_at · adult_confirmed_at ·
 --   invoice_reg_no · carried_from · dispute_until
 -- 계좌 정보는 1·2단계에서 담지 않는다(약관 §8-10).
+-- 금액은 전부 엔 단위 integer — JPY 는 소수가 없고, 정산은 「한 엔이라도 어긋나면 열지 않는다」가 기준.
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- 1. 파트너 원장 ───────────────────────────────────────────────────────────────
 create table if not exists public.aff_partners (
   id                 bigserial primary key,
-  code               text        not null unique,          -- 링크 코드 biteme.co.jp/a/{code}
+  code               text        not null unique
+                     check (code ~ '^[A-Z0-9]{4,12}$'),         -- 링크 코드 biteme.co.jp/a/{code}, 대문자·숫자만
   line_user_id       text        not null unique,          -- LINE 1계정 = 파트너 1명 (약관 第2条 3항)
   shopify_customer_id text,                                -- 자기구매 판정용, LINE 매핑에서 복사
   name               text        not null,
   instagram          text,
-  email              text,
+  email              text        check (email is null or email = lower(email)),  -- 자기구매 판정은 소문자 비교
   status             text        not null default 'active'
                      check (status in ('active', 'suspended', 'withdrawn')),
   terms_version      text        not null,                 -- 동의한 약관 버전 (초기 '2026-10')
@@ -90,10 +92,13 @@ create table if not exists public.aff_conversions (
   order_name      text,                                    -- #3687
   partner_id      bigint not null references public.aff_partners (id),
   attribution     text   not null check (attribution in ('code', 'ref', 'customer')),
-  eligible_amount numeric(12,2) not null,                  -- current_subtotal_price (JPY, 할인 후 상품 소계)
+  shopify_customer_id text,                                -- 주문 고객. 자기구매(self) 판정·customer 귀속 감사용
+  click_id        bigint references public.aff_clicks (id) on delete set null,      -- ref 귀속의 근거 클릭
+  campaign_id     bigint references public.aff_campaigns (id) on delete set null,   -- 캠페인 요율이 적용됐으면 (전후 성과 비교)
+  eligible_amount integer not null check (eligible_amount >= 0), -- current_subtotal_price (엔 정수, 할인 후 상품 소계)
   rate            numeric(5,4)  not null,                  -- 주문 시점 요율 고정
   rate_source     text   not null,                         -- 'base' | 'campaign:{id}'
-  commission      numeric(12,2) not null,                  -- round(eligible_amount * rate), 内税
+  commission      integer not null check (commission >= 0),      -- round(eligible_amount * rate), 内税, 엔 정수
   status          text   not null default 'pending'
                   check (status in ('pending', 'confirmed', 'reversed', 'self', 'void')),
   ordered_at      timestamptz not null,
@@ -108,15 +113,17 @@ create table if not exists public.aff_conversions (
 create index if not exists idx_aff_conversions_partner_status on public.aff_conversions (partner_id, status);
 create index if not exists idx_aff_conversions_confirm on public.aff_conversions (status, confirm_at);
 create index if not exists idx_aff_conversions_payout on public.aff_conversions (payout_id);
+create index if not exists idx_aff_conversions_ordered on public.aff_conversions (ordered_at);
+create index if not exists idx_aff_conversions_customer on public.aff_conversions (shopify_customer_id);
 
 -- 7. 월 정산 묶음 ─────────────────────────────────────────────────────────────
 create table if not exists public.aff_payouts (
   id            bigserial primary key,
   partner_id    bigint not null references public.aff_partners (id),
   period        text   not null,                           -- 'YYYY-MM' (확정 기준 월)
-  gross         numeric(12,2) not null default 0,
-  withholding   numeric(12,2) not null default 0,          -- 세무사 답이 '대상'일 때만 채움 (第5条 3항)
-  net           numeric(12,2) not null default 0,
+  gross         integer not null default 0,
+  withholding   integer not null default 0,                -- 세무사 답이 '대상'일 때만 채움 (第5条 3항)
+  net           integer not null default 0,
   status        text   not null default 'draft'
                 check (status in ('draft', 'carried', 'payable', 'paid', 'void')),
   carried_from  bigint[] not null default '{}',            -- ¥3,000 미만으로 이월된 이전 payout id (第5条 2항)
