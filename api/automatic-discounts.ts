@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 /**
  * 자동 할인(Automatic Discount) 조회 엔드포인트 — Admin API 기반.
@@ -52,7 +53,7 @@ async function getAccessToken(): Promise<string> {
 
 async function adminGraphQL(token: string, query: string, variables: Record<string, unknown> = {}) {
   const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
-  const res = await fetch(`https://${shop}/admin/api/2025-07/graphql.json`, {
+  const res = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
     body: JSON.stringify({ query, variables }),

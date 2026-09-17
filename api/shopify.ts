@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 let cachedToken: string | null = null;
 let tokenExpiresAt: number = 0;
@@ -73,10 +74,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const token = await getAccessToken();
     const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
-    const apiVersion = '2025-07';
 
     const shopifyResponse = await fetch(
-      `https://${shop}/api/${apiVersion}/graphql.json`,
+      `https://${shop}/api/${SHOPIFY_API_VERSION}/graphql.json`,
       {
         method: 'POST',
         headers: {

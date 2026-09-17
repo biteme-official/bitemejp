@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
+import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 // Vercel 자동 JSON 파싱 비활성화 — HMAC 검증에 raw body 필요
 export const config = { api: { bodyParser: false } };
@@ -8,7 +9,6 @@ const GA4_ENDPOINT = 'https://www.google-analytics.com/mp/collect';
 const GA4_MEASUREMENT_ID = 'G-WLTZH90W2L';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'hihtsp-0m.myshopify.com';
-const SHOPIFY_API_VERSION = '2025-07';
 
 /**
  * ⚠️ 이 도메인은 MX 레코드가 없어 메일이 전량 바운스된다.

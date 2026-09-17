@@ -21,6 +21,7 @@
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { config } from 'dotenv';
+import { SHOPIFY_API_VERSION } from '../api/_shopify-api-version.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirname, '..', '.env.production') });
@@ -29,7 +30,6 @@ config({ path: join(__dirname, '..', '.env') });
 const STORE_DOMAIN = process.env.VITE_SHOPIFY_STORE_DOMAIN!;
 const CLIENT_ID = process.env.REPORT_SHOPIFY_CLIENT_ID!;
 const CLIENT_SECRET = process.env.REPORT_SHOPIFY_CLIENT_SECRET!;
-const API_VERSION = '2025-07';
 
 /** LINE 로그인 시 이메일 미동의 유저에게 부여되는 도메인 (api/line-callback.ts:102) */
 const LINE_EMAIL_DOMAIN = '@line-user.biteme.co.jp';
@@ -67,7 +67,7 @@ async function adminGraphQL<T>(
   query: string,
   variables: Record<string, unknown> = {}
 ): Promise<GraphQLResponse<T>> {
-  const res = await fetch(`https://${STORE_DOMAIN}/admin/api/${API_VERSION}/graphql.json`, {
+  const res = await fetch(`https://${STORE_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
     body: JSON.stringify({ query, variables }),

@@ -15,13 +15,13 @@
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { config } from 'dotenv';
+import { SHOPIFY_API_VERSION } from '../api/_shopify-api-version.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: join(__dirname, '..', '.env.production') });
 config({ path: join(__dirname, '..', '.env') });
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN!;
-const API_VERSION = '2025-07';
 const MEMBER_TAG = 'line_member';
 const PLACEHOLDER_DOMAIN = '@line-user.biteme.co.jp';
 const APPLY = process.argv.includes('--apply');
@@ -47,7 +47,7 @@ async function getAccessToken(): Promise<string> {
 }
 
 async function gql(token: string, query: string, variables: Record<string, unknown> = {}) {
-  const res = await fetch(`https://${SHOP}/admin/api/${API_VERSION}/graphql.json`, {
+  const res = await fetch(`https://${SHOP}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
     body: JSON.stringify({ query, variables }),
