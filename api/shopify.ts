@@ -95,7 +95,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Shopify-Storefront-Private-Token': token,
+          // shpss_(비공개) 는 Private-Token, 그 외(커스텀 앱의 공개 토큰) 는 Access-Token 헤더
+          ...(token.startsWith('shpss_')
+            ? { 'Shopify-Storefront-Private-Token': token }
+            : { 'X-Shopify-Storefront-Access-Token': token }),
         },
         body: JSON.stringify(req.body),
       }
