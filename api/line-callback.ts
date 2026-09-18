@@ -327,7 +327,7 @@ async function syncLineUserToShopify(
         customerUserErrors { code message }
       }
     }
-  `, { input: { email, password } });
+  `, { input: { email, password } }, buyerIp);
 
   const accessToken = tokenResult.data?.customerAccessTokenCreate?.customerAccessToken?.accessToken || null;
 
