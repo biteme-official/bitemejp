@@ -121,10 +121,14 @@ async function getAdminToken(): Promise<string> {
   return (await res.json()).access_token;
 }
 
-async function storefrontQuery(token: string, query: string, variables: Record<string, unknown> = {}) {
+async function storefrontQuery(token: string, query: string, variables: Record<string, unknown> = {}, buyerIp?: string) {
   const res = await fetch(`https://${SHOP}/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Shopify-Storefront-Private-Token': token },
+    headers: {
+      'Content-Type': 'application/json',
+      'Shopify-Storefront-Private-Token': token,
+      ...(buyerIp ? { 'Shopify-Storefront-Buyer-IP': buyerIp } : {}),
+    },
     body: JSON.stringify({ query, variables }),
   });
   return res.json();
@@ -191,7 +195,8 @@ async function readCustomerLineIdentity(
 async function issueCustomerAccessToken(
   sfToken: string,
   email: string,
-  lineUserId: string
+  lineUserId: string,
+  buyerIp?: string
 ): Promise<string | null> {
   try {
     const tokenResult = await storefrontQuery(sfToken, `
@@ -201,7 +206,7 @@ async function issueCustomerAccessToken(
           customerUserErrors { code message }
         }
       }
-    `, { input: { email, password: generatePassword(lineUserId) } });
+    `, { input: { email, password: generatePassword(lineUserId) } }, buyerIp);
 
     const token: string | null =
       tokenResult?.data?.customerAccessTokenCreate?.customerAccessToken?.accessToken ?? null;
@@ -254,7 +259,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const sfToken = await getStorefrontToken();
+    // Storefront API 는 Headless 채널의 Private 토큰으로만 호출한다 (Admin 토큰이면 403 ACCESS_DENIED).
+    const sfToken = process.env.SHOPIFY_STOREFRONT_PRIVATE_TOKEN || '';
+    const buyerIp = String(req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || '').split(',')[0].trim();
     const adminToken = await getAdminToken();
 
     // 1. 본인 확인 — 서버가 검증한 것만 쓴다. 클라이언트가 보낸 고객 ID 는 신뢰하지 않는다.
@@ -265,7 +272,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         query Me($token: String!) {
           customer(customerAccessToken: $token) { id email }
         }
-      `, { token: customerAccessToken });
+      `, { token: customerAccessToken }, buyerIp);
       me = meResult?.data?.customer ?? null;
     }
 
@@ -367,7 +374,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     //    비밀번호는 LINE userId 기반 결정론적 생성이라 그대로 유효하다.
     let refreshedToken: string | null = null;
     if (lineUserId) {
-      refreshedToken = await issueCustomerAccessToken(sfToken, updatedEmail, lineUserId);
+      refreshedToken = await issueCustomerAccessToken(sfToken, updatedEmail, lineUserId, buyerIp);
     } else {
       // 매핑이 없으면 비밀번호를 만들 수 없다. 세션 토큰 인증은 계속 동작하므로
       // 주문 조회·재변경은 그대로 가능하다.

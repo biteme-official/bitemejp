@@ -31,7 +31,8 @@ async function getStorefrontToken(): Promise<string> {
 }
 
 async function fetchAllProductHandles(): Promise<{ numericId: string; updatedAt: string }[]> {
-  const token = await getStorefrontToken();
+  // Storefront API 는 Headless 채널의 Private 토큰으로만 호출한다 (Admin 토큰이면 403 ACCESS_DENIED).
+  const token = process.env.SHOPIFY_STOREFRONT_PRIVATE_TOKEN || '';
   const products: { numericId: string; updatedAt: string }[] = [];
   let cursor: string | null = null;
   let hasNextPage = true;

@@ -155,13 +155,14 @@ async function adminGraphQL(adminToken: string, query: string, variables: Record
   return res.json();
 }
 
-async function storefrontQuery(token: string, query: string, variables: Record<string, unknown> = {}) {
+async function storefrontQuery(token: string, query: string, variables: Record<string, unknown> = {}, buyerIp?: string) {
   const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN;
   const res = await fetch(`https://${shop}/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Shopify-Storefront-Private-Token': token,
+      ...(buyerIp ? { 'Shopify-Storefront-Buyer-IP': buyerIp } : {}),
     },
     body: JSON.stringify({ query, variables }),
   });
@@ -225,7 +226,8 @@ async function findCustomerIdByEmail(
 
 async function syncLineUserToShopify(
   profile: LineProfile,
-  loginSource: LoginSource | null
+  loginSource: LoginSource | null,
+  buyerIp?: string
 ): Promise<ShopifySyncResult> {
   const empty: ShopifySyncResult = {
     customerAccessToken: null,
@@ -237,12 +239,9 @@ async function syncLineUserToShopify(
   const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN;
   if (!shop) return empty;
 
-  let token: string;
-  try {
-    token = await getStorefrontToken();
-  } catch {
-    return empty;
-  }
+  // Storefront API 는 Headless 채널의 Private 토큰으로만 호출한다 (Admin 토큰이면 403 ACCESS_DENIED).
+  const token = process.env.SHOPIFY_STOREFRONT_PRIVATE_TOKEN || '';
+  if (!token) return empty;
 
   // ⚠️ 이 스토어는 성(姓)을 필수로 요구한다. LINE 표시이름에 공백이 없으면 lastName 이
   //    비게 되고, customerCreate 가 `BLANK: Last nameを入力してください` 로 실패해
@@ -293,7 +292,7 @@ async function syncLineUserToShopify(
           customerUserErrors { code field message }
         }
       }
-    `, { input: { email, password, firstName, lastName, acceptsMarketing: false } });
+    `, { input: { email, password, firstName, lastName, acceptsMarketing: false } }, buyerIp);
 
     const errors = createResult.data?.customerCreate?.customerUserErrors ?? [];
     const alreadyExists = errors.some((e: { code: string }) =>
@@ -570,7 +569,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         pictureUrl: profile.pictureUrl,
         email,
       },
-      loginSource
+      loginSource,
+      String(req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || '').split(',')[0].trim()
     );
 
     // 5. Return profile + Shopify token

@@ -72,7 +72,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const token = await getAccessToken();
+    // Storefront API 는 Headless 채널의 Private 토큰으로만 호출한다.
+    // Admin 토큰(client_credentials)을 Private-Token 헤더에 넣으면 간헐적으로 403 ACCESS_DENIED.
+    const token = process.env.SHOPIFY_STOREFRONT_PRIVATE_TOKEN || '';
+    const buyerIp = String(req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || '').split(',')[0].trim();
     const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
 
     const shopifyResponse = await fetch(
@@ -82,6 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         headers: {
           'Content-Type': 'application/json',
           'Shopify-Storefront-Private-Token': token,
+          ...(buyerIp ? { 'Shopify-Storefront-Buyer-IP': buyerIp } : {}),
         },
         body: JSON.stringify(req.body),
       }

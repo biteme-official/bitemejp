@@ -70,12 +70,13 @@ async function getStorefrontToken(): Promise<string> {
   return data.access_token;
 }
 
-async function storefrontMutation(token: string, query: string, variables: Record<string, unknown> = {}) {
+async function storefrontMutation(token: string, query: string, variables: Record<string, unknown> = {}, buyerIp?: string) {
   const res = await fetch(`https://${SHOP}/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Shopify-Storefront-Private-Token': token,
+      ...(buyerIp ? { 'Shopify-Storefront-Buyer-IP': buyerIp } : {}),
     },
     body: JSON.stringify({ query, variables }),
   });
@@ -114,7 +115,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const sfToken = await getStorefrontToken();
+    // Storefront API 는 Headless 채널의 Private 토큰으로만 호출한다 (Admin 토큰이면 403 ACCESS_DENIED).
+    const sfToken = process.env.SHOPIFY_STOREFRONT_PRIVATE_TOKEN || '';
+    const buyerIp = String(req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || '').split(',')[0].trim();
     const password = generatePassword(lineUserId);
 
     const result = await storefrontMutation(sfToken, `
@@ -127,7 +130,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           customerUserErrors { code message }
         }
       }
-    `, { input: { email: shopifyEmail, password } });
+    `, { input: { email: shopifyEmail, password } }, buyerIp);
 
     const accessToken = result?.data?.customerAccessTokenCreate?.customerAccessToken?.accessToken;
     const errors = result?.data?.customerAccessTokenCreate?.customerUserErrors || [];
