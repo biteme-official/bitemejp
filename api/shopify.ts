@@ -4,7 +4,21 @@ import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 let cachedToken: string | null = null;
 let tokenExpiresAt: number = 0;
 
+/**
+ * Storefront 인증 토큰.
+ *
+ * 1순위: `SHOPIFY_STOREFRONT_TOKEN`(shpss_ 고정 토큰) — 발급 과정이 없어 인스턴스마다
+ *   같은 값을 쓴다.
+ * 2순위(폴백): OAuth client_credentials 로 매번 새 토큰 발급.
+ *   ⚠️ 서버리스는 인스턴스마다 별도로 발급하는데, 여러 인스턴스가 동시에 뜨면
+ *   (홈 첫 진입 = 요청 8~10개 동시) 발급 직후 토큰이 ACCESS_DENIED(403) 로 거절돼
+ *   상품 목록이 통째로 비어 보였다(2026-09-18 장애). 순차 요청은 200 이라 curl 로는
+ *   재현이 안 되고, 동시 요청 10개를 쏘면 재현된다.
+ */
 async function getAccessToken(): Promise<string> {
+  const fixed = (process.env.SHOPIFY_STOREFRONT_TOKEN || '').trim();
+  if (fixed) return fixed;
+
   const now = Date.now();
   if (cachedToken && now < tokenExpiresAt - 5 * 60 * 1000) {
     return cachedToken;
