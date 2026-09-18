@@ -63,6 +63,7 @@ interface ProductNode {
 async function fetchAllProducts(): Promise<ProductNode[]> {
   // Storefront API 는 Headless 채널의 Private 토큰으로만 호출한다 (Admin 토큰이면 403 ACCESS_DENIED).
   const token = process.env.SHOPIFY_STOREFRONT_PRIVATE_TOKEN || '';
+  if (!token) throw new Error('Missing env var: SHOPIFY_STOREFRONT_PRIVATE_TOKEN');
   const products: ProductNode[] = [];
   let cursor: string | null = null;
   let hasNextPage = true;

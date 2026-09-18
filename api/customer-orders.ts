@@ -71,6 +71,7 @@ async function getStorefrontToken(): Promise<string> {
 async function storefrontQuery(query: string, variables: Record<string, unknown> = {}, buyerIp?: string) {
   // Storefront API 는 Headless 채널의 Private 토큰으로만 호출한다 (Admin 토큰이면 403 ACCESS_DENIED).
   const token = process.env.SHOPIFY_STOREFRONT_PRIVATE_TOKEN || '';
+  if (!token) throw new Error('Missing env var: SHOPIFY_STOREFRONT_PRIVATE_TOKEN');
   const res = await fetch(`https://${SHOP}/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
     headers: {

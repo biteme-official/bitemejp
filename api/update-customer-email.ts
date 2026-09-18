@@ -261,6 +261,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Storefront API 는 Headless 채널의 Private 토큰으로만 호출한다 (Admin 토큰이면 403 ACCESS_DENIED).
     const sfToken = process.env.SHOPIFY_STOREFRONT_PRIVATE_TOKEN || '';
+    if (!sfToken) throw new Error('Missing env var: SHOPIFY_STOREFRONT_PRIVATE_TOKEN');
     const buyerIp = String(req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || '').split(',')[0].trim();
     const adminToken = await getAdminToken();
 

@@ -241,7 +241,7 @@ async function syncLineUserToShopify(
 
   // Storefront API 는 Headless 채널의 Private 토큰으로만 호출한다 (Admin 토큰이면 403 ACCESS_DENIED).
   const token = process.env.SHOPIFY_STOREFRONT_PRIVATE_TOKEN || '';
-  if (!token) return empty;
+  if (!token) { console.error('[LINE Callback] Missing env var: SHOPIFY_STOREFRONT_PRIVATE_TOKEN'); return empty; }
 
   // ⚠️ 이 스토어는 성(姓)을 필수로 요구한다. LINE 표시이름에 공백이 없으면 lastName 이
   //    비게 되고, customerCreate 가 `BLANK: Last nameを入力してください` 로 실패해
