@@ -68,11 +68,17 @@ async function getStorefrontToken(): Promise<string> {
   return cachedSfToken!;
 }
 
-async function storefrontQuery(query: string, variables: Record<string, unknown> = {}) {
-  const token = await getStorefrontToken();
+async function storefrontQuery(query: string, variables: Record<string, unknown> = {}, buyerIp?: string) {
+  // Storefront API 는 Headless 채널의 Private 토큰으로만 호출한다 (Admin 토큰이면 403 ACCESS_DENIED).
+  const token = process.env.SHOPIFY_STOREFRONT_PRIVATE_TOKEN || '';
+  if (!token) throw new Error('Missing env var: SHOPIFY_STOREFRONT_PRIVATE_TOKEN');
   const res = await fetch(`https://${SHOP}/api/${SHOPIFY_API_VERSION}/graphql.json`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Shopify-Storefront-Private-Token': token },
+    headers: {
+      'Content-Type': 'application/json',
+      'Shopify-Storefront-Private-Token': token,
+      ...(buyerIp ? { 'Shopify-Storefront-Buyer-IP': buyerIp } : {}),
+    },
     body: JSON.stringify({ query, variables }),
   });
   if (!res.ok) throw new Error(`Storefront API error ${res.status}`);
@@ -224,6 +230,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { customerAccessToken, lineSessionToken } = req.body || {};
+  const buyerIp = String(req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || '').split(',')[0].trim();
 
   const channelSecret = process.env.LINE_CHANNEL_SECRET;
   if (!channelSecret) {
@@ -285,7 +292,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       // 3. Storefront API でトークン検証 → GID 取得 (token がある場合のみ)
       if (!customerAccessToken) return null;
-      const sfData = await storefrontQuery(VERIFY_CUSTOMER_QUERY, { customerAccessToken });
+      const sfData = await storefrontQuery(VERIFY_CUSTOMER_QUERY, { customerAccessToken }, buyerIp);
       return sfData?.data?.customer?.id || null;
     };
 
