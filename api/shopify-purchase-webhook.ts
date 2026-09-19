@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
+import { recordConversionFromOrder, type OrderForAttribution } from './_affiliate.js';
 
 // Vercel 자동 JSON 파싱 비활성화 — HMAC 검증에 raw body 필요
 export const config = { api: { bodyParser: false } };
@@ -22,6 +23,7 @@ const METAFIELD_NAMESPACE = 'custom';
 const NOTIFIED_KEY = 'line_last_order_notified';
 
 interface ShopifyLineItem {
+  product_id?: number | null;
   variant_id: number | null;
   title: string;
   variant_title: string | null;
@@ -30,7 +32,7 @@ interface ShopifyLineItem {
   vendor: string | null;
 }
 
-interface ShopifyOrder {
+interface ShopifyOrder extends OrderForAttribution {
   id: number;
   order_number: number;
   total_price: string;
@@ -451,6 +453,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await notifyOrderCreated(order);
   } catch (err) {
     console.error('[LINE Notify] 🔴 주문 알림 처리 중 예외:', err);
+  }
+
+  // 어필리에이트 장부 (#178). AFFILIATE_ENABLED 가 꺼져 있으면 아무것도 하지 않는다.
+  // recordConversionFromOrder 는 내부에서 모든 예외를 삼키지만, 방어를 한 겹 더 둔다 —
+  // 이 갈래가 어떤 이유로든 웹훅 200 을 막으면 GA4·LINE 까지 재전송으로 흔들린다.
+  try {
+    const r = await recordConversionFromOrder(order);
+    if (r.outcome === 'error') console.error('[Affiliate] 🔴 적재 실패:', r.detail);
+  } catch (err) {
+    console.error('[Affiliate] 🔴 처리 중 예외:', err);
   }
 
   return res.status(200).json({ ok: true });
