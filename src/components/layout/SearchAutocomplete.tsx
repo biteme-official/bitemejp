@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 
 interface SearchAutocompleteProps {
   onSearch: (query: string) => void;
+  /** PC 헤더에서 검색 아이콘으로 펼쳤을 때 바로 입력할 수 있게 */
+  autoFocus?: boolean;
 }
 
 interface ProductSuggestion {
@@ -23,7 +25,7 @@ interface ProductSuggestion {
 const RECENT_SEARCHES_KEY = "bite-me-recent-searches";
 const MAX_RECENT_SEARCHES = 5;
 
-export function SearchAutocomplete({ onSearch }: SearchAutocompleteProps) {
+export function SearchAutocomplete({ onSearch, autoFocus = false }: SearchAutocompleteProps) {
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<ProductSuggestion[]>([]);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
@@ -196,6 +198,10 @@ export function SearchAutocomplete({ onSearch }: SearchAutocompleteProps) {
   useEffect(() => {
     setActiveIndex(-1);
   }, [suggestions, recentSearches]);
+
+  useEffect(() => {
+    if (autoFocus) inputRef.current?.focus();
+  }, [autoFocus]);
 
   const showDropdown = isOpen && (suggestions.length > 0 || (query.length < 2 && recentSearches.length > 0));
 

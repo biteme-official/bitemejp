@@ -550,15 +550,16 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                           );
                         })()}
                       </div>
-                      <Button
-                        size="sm"
-                        variant="secondary"
+                      {/* 메인 섹션 카드(ProductCard)와 같은 둥근 장바구니 버튼 (#185) */}
+                      <button
+                        type="button"
+                        aria-label="カートに追加"
                         onClick={(e) => handleAddToCart(e, product)}
-                        className="h-8 w-8 p-0 flex-shrink-0"
+                        className="shrink-0 w-8 h-8 rounded-full bg-foreground text-background flex items-center justify-center hover:bg-primary transition-colors disabled:opacity-40 disabled:hover:bg-foreground"
                         disabled={isCompletelyOutOfStock}
                       >
                         <ShoppingCart className="h-4 w-4" />
-                      </Button>
+                      </button>
                     </div>
                   </div>
                 </div>

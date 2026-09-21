@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Menu, Phone, ChevronRight, ChevronDown, Package, User, LogOut, BookOpen, BadgePercent } from "lucide-react";
+import { Menu, Phone, ChevronRight, ChevronDown, Package, User, LogOut, BookOpen, BadgePercent, Search } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { LineLoginButton } from "@/components/auth/LineLoginButton";
 import { Button } from "@/components/ui/button";
@@ -91,6 +91,10 @@ function MenuItemComponent({
 export function Header({ onSearch, onCollectionSelect }: HeaderProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isLoginSheetOpen, setIsLoginSheetOpen] = useState(false);
+  // PC 검색창은 아이콘으로 접고 펼친다 (#185). 검색 결과 화면에서는 처음부터 펼쳐 둔다.
+  const [isSearchOpen, setIsSearchOpen] = useState(
+    () => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("q")
+  );
   const [menu, setMenu] = useState<ShopifyMenu | null>(null);
   const [collections, setCollections] = useState<ShopifyCollection[]>([]);
   const navigate = useNavigate();
@@ -178,8 +182,8 @@ export function Header({ onSearch, onCollectionSelect }: HeaderProps) {
     <header className="sticky top-0 z-50 bg-background">
       {/* Main Header Row */}
       <div className="border-b border-border">
-      <div className="max-w-7xl mx-auto flex items-center justify-between px-4 h-14">
-        {/* Left: Hamburger Menu + Logo */}
+      <div className="max-w-7xl mx-auto relative flex items-center justify-between px-4 h-14 md:h-16">
+        {/* Left: Hamburger Menu + Logo (PC 에서는 로고를 가운데로 뺀다) */}
         <div className="flex items-center gap-2">
           <Sheet open={isMenuOpen} onOpenChange={setIsMenuOpen}>
             <SheetTrigger asChild>
@@ -343,14 +347,25 @@ export function Header({ onSearch, onCollectionSelect }: HeaderProps) {
               onCollectionSelect?.(null);
               navigate("/");
             }}
-            className="hover:opacity-80 transition-opacity"
+            className="hover:opacity-80 transition-opacity md:absolute md:left-1/2 md:top-1/2 md:-translate-x-1/2 md:-translate-y-1/2"
           >
-            <img src={biteMeLogo} alt="BITE ME" className="h-[19px]" />
+            <img src={biteMeLogo} alt="BITE ME" className="h-[19px] md:h-6" />
           </button>
         </div>
 
         {/* Right: Icons */}
         <div className="flex items-center gap-1">
+          {/* PC 전용 검색 토글 — 모바일은 아래 검색창이 항상 보인다 */}
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="検索"
+            aria-expanded={isSearchOpen}
+            className={cn("hidden md:inline-flex text-foreground", isSearchOpen && "text-primary")}
+            onClick={() => setIsSearchOpen((v) => !v)}
+          >
+            <Search className="h-6 w-6" />
+          </Button>
           {/* MyPage / Login icon */}
           {isLoggedIn && user ? (
             <Button
@@ -405,10 +420,10 @@ export function Header({ onSearch, onCollectionSelect }: HeaderProps) {
       </div>
       </div>
 
-      {/* Search Bar */}
-      <div className="border-b border-border">
-        <div className="max-w-7xl mx-auto px-4 py-3">
-          <SearchAutocomplete onSearch={handleSearch} />
+      {/* Search Bar — 모바일 상시, PC 는 아이콘으로 펼쳤을 때만 */}
+      <div className={cn("border-b border-border", !isSearchOpen && "md:hidden")}>
+        <div className="max-w-7xl mx-auto px-4 py-3 md:max-w-2xl">
+          <SearchAutocomplete onSearch={handleSearch} autoFocus={isSearchOpen} />
         </div>
       </div>
     </header>

@@ -4,6 +4,15 @@ import { extractHandleFromUrl } from '@/lib/shopify';
 import { useCategoryMenu } from '@/hooks/useCategoryMenu';
 import { track } from '@/lib/track';
 
+/**
+ * 1차 카테고리는 칩이 아니라 텍스트 링크 (#185, 시안의 상단 내비).
+ * 활성 항목은 굵게 + 브랜드색 밑줄. PC 는 가운데 정렬, 모바일은 가로 스크롤.
+ */
+const TOP_LINK =
+  'flex-shrink-0 px-3 py-2.5 text-sm whitespace-nowrap border-b-2 transition-colors';
+const TOP_LINK_ACTIVE = 'font-bold text-foreground border-primary';
+const TOP_LINK_IDLE = 'font-medium text-muted-foreground border-transparent hover:text-foreground';
+
 interface CategoryNavProps {
   selectedCollection: string | null;
   onSelect: (handle: string | null) => void;
@@ -50,18 +59,13 @@ export function CategoryNav({ selectedCollection, onSelect }: CategoryNavProps) 
       {/* Top-level category chips */}
       <div
         ref={topRef}
-        className="max-w-7xl mx-auto flex gap-2 overflow-x-auto scrollbar-hide px-4 py-2"
+        className="max-w-7xl mx-auto flex gap-1 md:gap-2 md:justify-center overflow-x-auto scrollbar-hide px-2 md:px-4"
       >
         <button
           onClick={() => onSelect(null)}
-          className={cn(
-            'flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
-            !selectedCollection
-              ? 'bg-foreground text-background'
-              : 'bg-secondary text-foreground hover:bg-secondary/80'
-          )}
+          className={cn(TOP_LINK, !selectedCollection ? TOP_LINK_ACTIVE : TOP_LINK_IDLE)}
         >
-          ALL
+          すべて
         </button>
 
         {topItems.map(item => {
@@ -76,12 +80,7 @@ export function CategoryNav({ selectedCollection, onSelect }: CategoryNavProps) 
             <button
               key={item.id}
               onClick={() => { if (handle) { track('category_click', { name: item.title, handle }); onSelect(handle); } }}
-              className={cn(
-                'flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
-                isActive
-                  ? 'bg-foreground text-background'
-                  : 'bg-secondary text-foreground hover:bg-secondary/80'
-              )}
+              className={cn(TOP_LINK, isActive ? TOP_LINK_ACTIVE : TOP_LINK_IDLE)}
             >
               {item.title}
             </button>
