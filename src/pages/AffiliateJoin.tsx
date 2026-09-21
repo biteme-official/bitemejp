@@ -42,7 +42,7 @@ const STEPS = [
  */
 function JoinCard() {
   const navigate = useNavigate();
-  const { user, isLoggedIn } = useAuthStore();
+  const { user, isLoggedIn, logout } = useAuthStore();
   const token = user?.lineSessionToken;
   const [instagram, setInstagram] = useState("");
   const [adult, setAdult] = useState(false);
@@ -56,8 +56,16 @@ function JoinCard() {
   useEffect(() => {
     if (!isLoggedIn || !token) { setPartner(null); return; }
     setChecking(true);
-    fetchPartnerView(token).then((v) => setPartner(v.partner)).catch(() => setPartner(null)).finally(() => setChecking(false));
-  }, [isLoggedIn, token]);
+    fetchPartnerView(token)
+      .then((v) => setPartner(v.partner))
+      .catch((e) => {
+        setPartner(null);
+        // 세션 토큰은 30일짜리다. 브라우저에 옛 로그인이 남아 화면은 「로그인됨」인데 서버가 거절하면
+        // 로그인 상태를 지워 LINE 버튼을 보여준다 — 만료를 서버가 알려주는데 화면이 무시하면 안 된다.
+        if (e instanceof AffiliateApiError && e.code === "unauthorized") { logout(); toast.error("ログインの有効期限が切れました。もう一度LINEでログインしてください。"); }
+      })
+      .finally(() => setChecking(false));
+  }, [isLoggedIn, token, logout]);
 
   const submit = async () => {
     if (!token || submitting) return;
@@ -71,7 +79,7 @@ function JoinCard() {
       const code = e instanceof AffiliateApiError ? e.code : "";
       if (code === "not_member") toast.error("会員情報を確認できませんでした。一度ログアウトし、LINEで再ログインしてからお試しください。");
       else if (code === "not_eligible") toast.error("このアカウントは現在ご参加いただけません。お問い合わせください。");
-      else if (code === "unauthorized") toast.error("ログインの有効期限が切れました。再ログインしてください。");
+      else if (code === "unauthorized") { logout(); toast.error("ログインの有効期限が切れました。もう一度LINEでログインしてください。"); }
       else toast.error("登録に失敗しました。時間をおいて再度お試しください。");
     } finally {
       setSubmitting(false);

@@ -46,7 +46,7 @@ function PageFrame({ children }: { children: React.ReactNode }) {
 
 export default function Partner() {
   const navigate = useNavigate();
-  const { user, isLoggedIn } = useAuthStore();
+  const { user, isLoggedIn, logout } = useAuthStore();
   const token = user?.lineSessionToken;
   const [view, setView] = useState<PartnerView | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "not_partner" | "error">("loading");
@@ -59,8 +59,16 @@ export default function Partner() {
     setState("loading");
     fetchPartnerView(token)
       .then((v) => { setView(v); setInvoice(v.partner.invoiceRegNo ?? ""); setState("ok"); })
-      .catch((e) => setState(e instanceof AffiliateApiError && e.code === "not_partner" ? "not_partner" : "error"));
-  }, [isLoggedIn, token]);
+      .catch((e) => {
+        if (e instanceof AffiliateApiError && e.code === "unauthorized") {
+          // 30일 세션 만료 — 옛 로그인이 남아 있으면 로그인 상태를 지워 LINE 버튼을 보여준다
+          logout();
+          toast.error("ログインの有効期限が切れました。もう一度LINEでログインしてください。");
+          return;
+        }
+        setState(e instanceof AffiliateApiError && e.code === "not_partner" ? "not_partner" : "error");
+      });
+  }, [isLoggedIn, token, logout]);
 
   if (!isLoggedIn || !token) {
     return (
