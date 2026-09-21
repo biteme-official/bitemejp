@@ -18,7 +18,12 @@ import {
   getSupabase,
   isAffiliateEnabled,
   type AffPartner,
+  ADMIN_ORDER_FIELDS,
+  reevaluateOrder,
+  toOrderForAttribution,
+  type AdminOrderNode,
 } from './_affiliate.js';
+import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 const CODE_RE = /^[A-Z0-9]{4,12}$/;
 
@@ -226,6 +231,31 @@ async function handleDeletePartner(body: Record<string, unknown>, res: VercelRes
   return res.status(200).json({ ok: true, deleted: id });
 }
 
+/** 주문 재판정 — 주문번호(#3728 또는 3728)로 Shopify 에서 다시 읽어 장부를 다시 쓴다 */
+async function handleReevaluate(body: Record<string, unknown>, res: VercelResponse) {
+  const name = String(body.orderName ?? '').trim().replace(/^#/, '');
+  if (!/^\d+$/.test(name)) return res.status(400).json({ error: 'orderName 필요 (#3728)' });
+  const clientId = process.env.REPORT_SHOPIFY_CLIENT_ID;
+  const clientSecret = process.env.REPORT_SHOPIFY_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return res.status(500).json({ error: 'REPORT_SHOPIFY 미설정' });
+  const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
+  const tokRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }),
+  });
+  const token = (await tokRes.json()).access_token as string | undefined;
+  if (!token) return res.status(500).json({ error: 'Admin 토큰 실패' });
+  const q = await fetch(`https://${shop}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': token },
+    body: JSON.stringify({ query: `query($q: String!) { orders(first: 1, query: $q) { nodes { ${ADMIN_ORDER_FIELDS} lineIdMeta: customer { lineId: metafield(namespace: "custom", key: "line_id") { value } } } } }`, variables: { q: `name:#${name}` } }),
+  }).then((r) => r.json());
+  const node = q?.data?.orders?.nodes?.[0] as (AdminOrderNode & { lineIdMeta?: { lineId?: { value: string } | null } | null }) | undefined;
+  if (!node) return res.status(404).json({ error: `주문 #${name} 없음 (60일 이내만 조회 가능)` });
+  const lineUserId = node.lineIdMeta?.lineId?.value ?? null;
+  const r = await reevaluateOrder(toOrderForAttribution(node), { lineUserId });
+  return res.status(r.outcome === 'error' ? 500 : 200).json({ ok: r.outcome !== 'error', ...r });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!authorized(req)) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -236,6 +266,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (body.action === 'add_partner') return await handleAddPartner(body, res);
       if (body.action === 'set_status') return await handleSetStatus(body, res);
       if (body.action === 'delete_partner') return await handleDeletePartner(body, res);
+      if (body.action === 'reevaluate_order') return await handleReevaluate(body, res);
       return res.status(400).json({ error: `unknown action: ${String(body.action)}` });
     }
     return res.status(405).json({ error: 'Method not allowed' });
