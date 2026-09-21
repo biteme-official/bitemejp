@@ -28,7 +28,6 @@ import AffiliateJoin from "./pages/AffiliateJoin";
 import Partner from "./pages/Partner";
 import BlogList from "./pages/BlogList";
 import BlogPost from "./pages/BlogPost";
-import Affiliate from "./pages/Affiliate";
 import { LineFloatingButton } from "./components/layout/LineFloatingButton";
 import { NoticeBanner } from "./components/layout/NoticeBanner";
 import { LoginBanner } from "./components/layout/LoginBanner";
@@ -90,7 +89,8 @@ const App = () => (
           <Route path="/a/:code" element={<AffiliateLink />} />
           <Route path="/blog" element={<BlogList />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
-          <Route path="/affiliate" element={<Affiliate />} />
+          {/* 상품 페이지 훅으로 프로그램이 공개되므로 모집 페이지도 새 가입 화면으로 (#178) */}
+          <Route path="/affiliate" element={<AffiliateJoin />} />
           <Route path="/affiliate/terms" element={<AffiliateTerms />} />
           <Route path="/partner" element={<Partner />} />
           <Route path="/partner/join" element={<AffiliateJoin />} />
