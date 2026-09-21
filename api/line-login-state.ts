@@ -65,7 +65,39 @@ export function sanitizeSource(value: unknown): LoginSource | null {
     : null;
 }
 
-export function signState(returnTo: string, secret: string, src?: LoginSource | null): string {
+/**
+ * 어필리에이트 링크 터치 (설계 §5 「로그인 시 승격」). 비로그인으로 파트너 링크를 눌렀다가
+ * 로그인하면 localStorage 의 ref 를 서버 터치로 올린다 — src 와 같은 이유로 state 에 실어
+ * 보낸다(LINE 앱 브라우저를 거치면 localStorage 가 비어 있을 수 있다).
+ */
+export interface AffiliateRefInState {
+  /** 파트너 코드 */
+  c: string;
+  /** 클릭 시각 (epoch ms) — 30일 창은 클릭 기준 */
+  t: number;
+  /** 클릭 행 id (있으면) */
+  k?: number;
+}
+
+const AFF_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function sanitizeAffiliateRef(value: unknown): AffiliateRefInState | null {
+  if (!value || typeof value !== 'object') return null;
+  const v = value as Record<string, unknown>;
+  const c = typeof v.c === 'string' ? v.c.trim().toUpperCase() : '';
+  const t = typeof v.t === 'number' ? v.t : NaN;
+  if (!/^[A-Z0-9]{4,12}$/.test(c)) return null;
+  if (!Number.isFinite(t) || t > Date.now() + 60_000 || Date.now() - t > AFF_WINDOW_MS) return null;
+  const k = typeof v.k === 'number' && Number.isInteger(v.k) && v.k > 0 ? v.k : undefined;
+  return { c, t, ...(k ? { k } : {}) };
+}
+
+export function signState(
+  returnTo: string,
+  secret: string,
+  src?: LoginSource | null,
+  aff?: AffiliateRefInState | null
+): string {
   const payload = {
     n: randomBytes(16).toString('hex'),
     e: Date.now() + STATE_TTL_MS,
@@ -73,6 +105,7 @@ export function signState(returnTo: string, secret: string, src?: LoginSource | 
     // ⚠️ src 를 localStorage 로 나르면 안 된다. LINE 앱을 거쳐 돌아올 때 브라우저
     //    컨텍스트가 바뀌어 값이 사라진다 (#106 과 같은 함정). 서명에 실어 보낸다.
     ...(src ? { s: src } : {}),
+    ...(aff ? { a: aff } : {}),
   };
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const sig = createHmac('sha256', secret).update(body).digest('base64url');
@@ -95,6 +128,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const returnTo = sanitizeReturnTo(req.body?.returnTo);
   const src = sanitizeSource(req.body?.src);
+  const aff = sanitizeAffiliateRef(req.body?.aff);
 
-  return res.status(200).json({ state: signState(returnTo, secret, src), returnTo, src });
+  return res.status(200).json({ state: signState(returnTo, secret, src, aff), returnTo, src });
 }

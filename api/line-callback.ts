@@ -4,7 +4,8 @@ import { createHmac, timingSafeEqual } from 'crypto';
 //    서버리스 함수가 ESM 으로 실행되는데, ESM 은 확장자 생략을 허용하지 않아
 //    모듈 로드 단계에서 ERR_MODULE_NOT_FOUND 로 함수가 통째로 죽는다 (#130).
 //    그 경우 응답이 JSON 이 아니라 500 text/plain 이라 화면에는 'Unknown error' 만 보인다.
-import { sanitizeSource, type LoginSource } from './line-login-state.js';
+import { sanitizeSource, type LoginSource, sanitizeAffiliateRef, type AffiliateRefInState } from './line-login-state.js';
+import { findActivePartner, getSupabase, isAffiliateEnabled, recordTouch } from './_affiliate.js';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 /** 유입경로 태그 접두사 — `line_src:welcome` 형태로 붙는다 */
@@ -21,7 +22,7 @@ const SOURCE_TAG_PREFIX = 'line_src:';
 function verifySignedState(
   state: string,
   secret: string
-): { returnTo: string; src: LoginSource | null } | null {
+): { returnTo: string; src: LoginSource | null; aff: AffiliateRefInState | null } | null {
   const dot = state.indexOf('.');
   if (dot <= 0) return null;
 
@@ -39,7 +40,7 @@ function verifySignedState(
     const r = typeof payload.r === 'string' ? payload.r : '/';
     // 오픈 리다이렉트 방지 — 서명되어 있어도 한 번 더 확인한다.
     const returnTo = r.startsWith('/') && !r.startsWith('//') ? r : '/';
-    return { returnTo, src: sanitizeSource(payload.s) };
+    return { returnTo, src: sanitizeSource(payload.s), aff: sanitizeAffiliateRef(payload.a) };
   } catch {
     return null;
   }
@@ -505,6 +506,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // 클라이언트의 localStorage 대조로 보호되므로 통과시킨다.
   let returnTo = '/';
   let loginSource: LoginSource | null = null;
+  let affiliateRef: AffiliateRefInState | null = null;
   if (typeof state === 'string' && state.includes('.')) {
     const verified = verifySignedState(state, channelSecret);
     if (!verified) {
@@ -513,6 +515,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     returnTo = verified.returnTo;
     loginSource = verified.src;
+    affiliateRef = verified.aff;
   }
 
   try {
@@ -572,6 +575,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       loginSource,
       String(req.headers['x-real-ip'] || req.headers['x-forwarded-for'] || '').split(',')[0].trim()
     );
+
+    // 4b. 어필리에이트 — 비로그인 클릭을 회원 터치로 승격 (설계 §5). 실패해도 로그인은 그대로.
+    if (affiliateRef && isAffiliateEnabled()) {
+      try {
+        const sb = getSupabase();
+        const partner = await findActivePartner(sb, affiliateRef.c);
+        if (partner) {
+          const r = await recordTouch(sb, {
+            lineUserId: profile.userId,
+            partnerId: partner.id,
+            touchedAt: new Date(affiliateRef.t),
+            source: 'login',
+            clickId: affiliateRef.k ?? null,
+            shopifyCustomerId: shopifyResult.shopifyCustomerId
+              ? String(shopifyResult.shopifyCustomerId).split('/').pop() ?? null
+              : null,
+          });
+          console.log(`[Affiliate] 로그인 승격 ${affiliateRef.c} → ${r}`);
+        }
+      } catch (err) {
+        console.error('[Affiliate] 🔴 로그인 승격 실패:', err);
+      }
+    }
 
     // 5. Return profile + Shopify token
     res.setHeader('Access-Control-Allow-Origin', corsOrigin);
