@@ -1,17 +1,27 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { Instagram, Mail, Sparkles, BadgePercent, Users, PartyPopper, ChevronLeft, Loader2, CheckCircle2 } from "lucide-react";
+import { Instagram, Mail, Sparkles, BadgePercent, Users, Megaphone, ChevronLeft, Loader2, CheckCircle2, Copy, Check } from "lucide-react";
 import { Footer } from "@/components/layout/Footer";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { LineLoginButton } from "@/components/auth/LineLoginButton";
+import { useAuthStore } from "@/stores/authStore";
+import { AffiliateApiError, fetchPartnerView, joinAffiliate, type PublicPartner } from "@/lib/affiliate-api";
+import { AFFILIATE_TERMS_VERSION } from "@/data/affiliate-terms";
 import biteMeLogo from "@/assets/bite-me-logo.png";
 
 const BENEFITS = [
   {
     icon: BadgePercent,
-    title: "成果報酬コミッション",
-    desc: "専用アフィリエイトコードでご紹介いただいた売上に応じてコミッションを還元。オープン記念として特別料率でご案内します。",
+    title: "成果報酬 10%",
+    desc: "あなたの紹介リンク経由のご注文（商品代金・割引後）の10%を成果報酬としてお支払いします。審査はなく、登録と同時にリンクが発行されます。",
+  },
+  {
+    icon: Megaphone,
+    title: "実績に応じた特別キャンペーン",
+    desc: "実績のあるパートナーには、期間限定で報酬率アップやフォロワー向け割引クーポン付きのキャンペーンをご案内します。",
   },
   {
     icon: Users,
@@ -21,10 +31,125 @@ const BENEFITS = [
 ];
 
 const STEPS = [
-  "下のフォームからInstagramアカウントとメールアドレスをご登録ください。",
-  "ご登録は受付順に承ります。担当者が順番に内容を確認いたします。",
-  "審査通過後、ご登録のメール宛に招待をお送りします。順次ご案内するため、少々お時間をいただく場合があります。",
+  "LINEでログインし、Instagramアカウント名を入力します。",
+  "満18歳以上の確約と利用規約への同意にチェックを入れて登録すると、その場で紹介リンクが発行されます。",
+  "リンクをシェアするだけ。成果はパートナーページでいつでも確認できます。",
 ];
+
+/**
+ * 가입 카드 — 로그인 → 체크박스 2개 → 등록 → 링크 (설계 §3·§7).
+ * 이미 파트너면 링크와 파트너 페이지로 가는 버튼만 보여준다.
+ */
+function JoinCard() {
+  const navigate = useNavigate();
+  const { user, isLoggedIn } = useAuthStore();
+  const token = user?.lineSessionToken;
+  const [instagram, setInstagram] = useState("");
+  const [adult, setAdult] = useState(false);
+  const [agree, setAgree] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [partner, setPartner] = useState<PublicPartner | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // 로그인돼 있으면 이미 파트너인지 먼저 본다 — 체크박스를 두 번 받지 않기 위해
+  useEffect(() => {
+    if (!isLoggedIn || !token) { setPartner(null); return; }
+    setChecking(true);
+    fetchPartnerView(token).then((v) => setPartner(v.partner)).catch(() => setPartner(null)).finally(() => setChecking(false));
+  }, [isLoggedIn, token]);
+
+  const submit = async () => {
+    if (!token || submitting) return;
+    if (!adult || !agree) { toast.error("年齢の確約と規約への同意が必要です。"); return; }
+    setSubmitting(true);
+    try {
+      const r = await joinAffiliate({ lineSessionToken: token, name: user?.displayName, instagram: instagram.trim() || undefined, termsVersion: AFFILIATE_TERMS_VERSION });
+      setPartner(r.partner);
+      toast.success(r.created ? "登録が完了しました。紹介リンクを発行しました。" : "すでに登録済みです。");
+    } catch (e) {
+      const code = e instanceof AffiliateApiError ? e.code : "";
+      if (code === "not_member") toast.error("会員情報を確認できませんでした。一度ログアウトし、LINEで再ログインしてからお試しください。");
+      else if (code === "not_eligible") toast.error("このアカウントは現在ご参加いただけません。お問い合わせください。");
+      else if (code === "unauthorized") toast.error("ログインの有効期限が切れました。再ログインしてください。");
+      else toast.error("登録に失敗しました。時間をおいて再度お試しください。");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const copy = async () => {
+    if (!partner) return;
+    try { await navigator.clipboard.writeText(partner.link); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch { toast.error("コピーできませんでした。"); }
+  };
+
+  if (!isLoggedIn || !token) {
+    return (
+      <div className="bg-card border border-border rounded-2xl px-6 py-8 space-y-4 text-center">
+        <h3 className="text-lg font-semibold">LINEで参加する</h3>
+        <p className="text-xs text-muted-foreground leading-relaxed">パートナー登録にはLINEログイン（会員登録）が必要です。ログイン後、この画面に戻ります。</p>
+        <LineLoginButton />
+      </div>
+    );
+  }
+
+  if (checking) {
+    return <div className="bg-card border border-border rounded-2xl px-6 py-10 flex justify-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
+  }
+
+  if (partner) {
+    return (
+      <div className="bg-card border border-border rounded-2xl px-6 py-8 text-center space-y-4">
+        <CheckCircle2 className="h-12 w-12 text-primary mx-auto" />
+        <h3 className="text-lg font-semibold">{partner.status === "active" ? "パートナー登録済み" : "参加は終了しています"}</h3>
+        {partner.status === "active" && (
+          <div className="flex items-center gap-2">
+            <code className="flex-1 truncate rounded-md bg-muted px-3 py-2 text-sm">{partner.link}</code>
+            <Button variant="outline" size="sm" onClick={copy} aria-label="コピー">{copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}</Button>
+          </div>
+        )}
+        <Button className="w-full" onClick={() => navigate("/partner")}>パートナーページへ</Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-card border border-border rounded-2xl px-6 py-8 space-y-5">
+      <div className="text-center space-y-1">
+        <h3 className="text-lg font-semibold">パートナー登録</h3>
+        <p className="text-xs text-muted-foreground">{user?.displayName} さんとして登録します</p>
+      </div>
+      <div className="space-y-2">
+        <label htmlFor="aff-ig" className="text-sm font-medium flex items-center gap-1.5"><Instagram className="h-4 w-4 text-primary" />Instagramアカウント（任意）</label>
+        <div className="relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">@</span>
+          <Input id="aff-ig" value={instagram} onChange={(e) => setInstagram(e.target.value)} placeholder="your_account" autoComplete="off" className="pl-7" disabled={submitting} />
+        </div>
+      </div>
+      <div className="space-y-3 text-sm">
+        <label className="flex items-start gap-2.5 cursor-pointer">
+          <Checkbox checked={adult} onCheckedChange={(v) => setAdult(v === true)} className="mt-0.5" />
+          <span>満18歳以上です</span>
+        </label>
+        <label className="flex items-start gap-2.5 cursor-pointer">
+          <Checkbox checked={agree} onCheckedChange={(v) => setAgree(v === true)} className="mt-0.5" />
+          <span>
+            <button type="button" className="underline hover:text-primary" onClick={(e) => { e.preventDefault(); navigate("/affiliate/terms"); }}>利用規約</button>
+            ・
+            <button type="button" className="underline hover:text-primary" onClick={(e) => { e.preventDefault(); navigate("/affiliate/terms#guideline"); }}>広告表示ガイドライン</button>
+            に同意します
+          </span>
+        </label>
+      </div>
+      <Button className="w-full" onClick={submit} disabled={submitting || !adult || !agree}>
+        {submitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />登録中...</> : "登録して紹介リンクを受け取る"}
+      </Button>
+      <p className="text-[11px] text-muted-foreground/80 leading-relaxed text-center">
+        成果対象は、お客様がLINEログイン後に行ったご注文のみです。投稿には「#PR」等の広告表示が必要です。
+      </p>
+    </div>
+  );
+}
 
 export default function Affiliate() {
   const navigate = useNavigate();
@@ -112,8 +237,8 @@ export default function Affiliate() {
         <section className="max-w-2xl mx-auto px-4 -mt-4">
           <div className="rounded-2xl bg-primary text-primary-foreground px-6 py-7 text-center shadow-sm">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold">
-              <PartyPopper className="h-3.5 w-3.5" />
-              オープン記念キャンペーン
+              <BadgePercent className="h-3.5 w-3.5" />
+              成果報酬
             </span>
             <div className="mt-3 flex items-end justify-center gap-1">
               <span className="text-6xl font-extrabold leading-none tracking-tight">10</span>
@@ -121,7 +246,7 @@ export default function Affiliate() {
             </div>
             <p className="mt-2 text-sm font-medium">ご紹介いただいた売上のコミッション率</p>
             <p className="mt-2 text-xs text-primary-foreground/80 leading-relaxed">
-              アフィリエイトプログラム開始を記念して、期間限定で特別コミッション率10%をご提供します。
+              審査なし・登録と同時にリンク発行。成果対象は<b>LINEログイン後のご注文のみ</b>です。
             </p>
           </div>
         </section>
@@ -146,7 +271,7 @@ export default function Affiliate() {
 
         {/* 流れ */}
         <section className="max-w-2xl mx-auto px-4 pb-10 space-y-4">
-          <h2 className="text-lg font-semibold text-center">ご招待までの流れ</h2>
+          <h2 className="text-lg font-semibold text-center">参加の流れ</h2>
           <ol className="space-y-3">
             {STEPS.map((step, i) => (
               <li key={i} className="flex gap-3">
@@ -157,20 +282,22 @@ export default function Affiliate() {
               </li>
             ))}
           </ol>
-          <p className="text-xs text-muted-foreground/70 text-center pt-2">
-            ※ ご登録は受付順（先着順）に順次ご案内いたします。
-          </p>
         </section>
 
-        {/* 応募フォーム */}
+        {/* 가입 */}
+        <section className="max-w-md mx-auto px-4 pb-10">
+          <JoinCard />
+        </section>
+
+        {/* 応募フォーム — LINE をお持ちでない方・コラボのご相談 (시트 접수, 그대로 둔다) */}
         <section className="max-w-md mx-auto px-4 pb-16">
+          <p className="text-xs text-muted-foreground text-center mb-3">LINEをお持ちでない方・企業/事務所からのコラボのご相談はこちら</p>
           {done ? (
             <div className="bg-card border border-border rounded-2xl px-6 py-10 text-center space-y-3">
               <CheckCircle2 className="h-12 w-12 text-primary mx-auto" />
-              <h3 className="text-lg font-semibold">ご応募ありがとうございます</h3>
+              <h3 className="text-lg font-semibold">お問い合わせありがとうございます</h3>
               <p className="text-sm text-muted-foreground leading-relaxed">
-                内容を確認のうえ、受付順にご登録のメール宛てご招待をお送りいたします。
-                今しばらくお待ちください。
+                内容を確認のうえ、ご登録のメール宛てにご連絡いたします。今しばらくお待ちください。
               </p>
               <Button variant="outline" className="mt-2" onClick={() => navigate("/")}>
                 トップへ戻る
@@ -179,9 +306,9 @@ export default function Affiliate() {
           ) : (
             <form onSubmit={handleSubmit} className="bg-card border border-border rounded-2xl px-6 py-8 space-y-5">
               <div className="text-center space-y-1">
-                <h3 className="text-lg font-semibold">応募する</h3>
+                <h3 className="text-lg font-semibold">お問い合わせ</h3>
                 <p className="text-xs text-muted-foreground">
-                  Instagramアカウントとメールアドレスをご登録ください。
+                  Instagramアカウントとメールアドレスをご登録ください。担当者からご連絡します。
                 </p>
               </div>
 
@@ -227,7 +354,7 @@ export default function Affiliate() {
                     送信中...
                   </>
                 ) : (
-                  "応募する"
+                  "送信する"
                 )}
               </Button>
 

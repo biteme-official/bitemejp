@@ -60,13 +60,35 @@ async function fetchAffiliate(secret: string): Promise<AffiliateData> {
   return res.json();
 }
 
-async function addPartner(secret: string, body: Record<string, string>): Promise<void> {
+async function postAdmin(secret: string, body: Record<string, unknown>): Promise<void> {
   const res = await fetch(`${ADMIN_API_BASE}/api/affiliate-admin`, {
     method: "POST",
     headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "add_partner", ...body }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `HTTP ${res.status}`);
+}
+const addPartner = (secret: string, body: Record<string, string>) => postAdmin(secret, { action: "add_partner", ...body });
+
+/** 상태 셀 — 활동/정지/탈퇴 전환 + 장부 0건이면 삭제 (테스트 파트너 정리용) */
+function PartnerActions({ secret, partner, onDone }: { secret: string; partner: Partner; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const run = async (body: Record<string, unknown>, confirmMsg?: string) => {
+    if (confirmMsg && !window.confirm(confirmMsg)) return;
+    setBusy(true);
+    try { await postAdmin(secret, body); onDone(); }
+    catch (e) { alert(e instanceof Error ? e.message : "실패"); }
+    finally { setBusy(false); }
+  };
+  const btn = "underline disabled:opacity-40";
+  return (
+    <span className="inline-flex gap-2 text-[11px] text-muted-foreground">
+      {partner.status !== "active" && <button className={btn} disabled={busy} onClick={() => run({ action: "set_status", partnerId: partner.id, status: "active" })}>활동</button>}
+      {partner.status !== "suspended" && <button className={btn} disabled={busy} onClick={() => run({ action: "set_status", partnerId: partner.id, status: "suspended" }, `${partner.code} 를 정지합니다. 살아 있는 터치가 지워지고 링크가 죽습니다.`)}>정지</button>}
+      {partner.status !== "withdrawn" && <button className={btn} disabled={busy} onClick={() => run({ action: "set_status", partnerId: partner.id, status: "withdrawn" }, `${partner.code} 를 탈퇴 처리합니다.`)}>탈퇴</button>}
+      <button className={`${btn} text-red-600`} disabled={busy} onClick={() => run({ action: "delete_partner", partnerId: partner.id }, `${partner.code} 를 삭제합니다. 장부에 주문이 있으면 거절됩니다.`)}>삭제</button>
+    </span>
+  );
 }
 
 const yen = (n: number) => `¥${Math.round(n).toLocaleString("ja-JP")}`;
@@ -199,12 +221,12 @@ export default function AffiliateTab({ secret }: { secret: string }) {
               <thead className="border-b text-muted-foreground">
                 <tr className="[&>th]:py-2 [&>th]:text-left [&>th]:font-medium">
                   <th>코드</th><th>이름</th><th>Instagram</th><th>할인코드</th><th>가입</th>
-                  <th className="text-right">이달 주문</th><th className="text-right">이달 매출</th><th className="text-right">확정 대기</th><th className="text-right">확정</th><th>상태</th>
+                  <th className="text-right">이달 주문</th><th className="text-right">이달 매출</th><th className="text-right">확정 대기</th><th className="text-right">확정</th><th>상태</th><th></th>
                 </tr>
               </thead>
               <tbody>
                 {data.partners.length === 0 && (
-                  <tr><td colSpan={10} className="py-6 text-center text-muted-foreground">파트너가 없습니다. 위에서 첫 파트너를 추가하세요.</td></tr>
+                  <tr><td colSpan={11} className="py-6 text-center text-muted-foreground">파트너가 없습니다. 셀프 가입(/affiliate)으로 들어옵니다.</td></tr>
                 )}
                 {data.partners.map((p) => (
                   <tr key={p.id} className="border-b last:border-0 [&>td]:py-2 [&>td]:align-top">
@@ -218,6 +240,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
                     <td className="text-right tabular-nums">{yen(p.month.pending)}</td>
                     <td className="text-right tabular-nums">{yen(p.month.confirmed)}</td>
                     <td>{p.status === "active" ? <Pill className="bg-emerald-50 text-emerald-700">활동</Pill> : <Pill className="bg-slate-100 text-slate-600">{p.status === "suspended" ? "정지" : "탈퇴"}</Pill>}</td>
+                    <td><PartnerActions secret={secret} partner={p} onDone={() => qc.invalidateQueries({ queryKey: ["affiliate-admin"] })} /></td>
                   </tr>
                 ))}
               </tbody>

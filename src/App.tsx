@@ -23,6 +23,8 @@ import TokushoHo from "./pages/TokushoHo";
 import About from "./pages/About";
 import DiscountRedirect from "./pages/DiscountRedirect";
 import AffiliateLink from "./pages/AffiliateLink";
+import AffiliateTerms from "./pages/AffiliateTerms";
+import Partner from "./pages/Partner";
 import BlogList from "./pages/BlogList";
 import BlogPost from "./pages/BlogPost";
 import Affiliate from "./pages/Affiliate";
@@ -88,6 +90,8 @@ const App = () => (
           <Route path="/blog" element={<BlogList />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/affiliate" element={<Affiliate />} />
+          <Route path="/affiliate/terms" element={<AffiliateTerms />} />
+          <Route path="/partner" element={<Partner />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
         <LineFloatingButton />

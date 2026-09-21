@@ -178,10 +178,11 @@ async function reconcileRecent(token: string) {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Vercel 크론은 CRON_SECRET. 수동 실행(게이트 확인)은 어드민 비밀도 허용 — 둘 다 없으면 잠긴다
   const auth = req.headers.authorization;
-  if (!process.env.CRON_SECRET || auth !== `Bearer ${process.env.CRON_SECRET}`) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  const okCron = !!process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`;
+  const okAdmin = !!process.env.ADMIN_SECRET && auth === `Bearer ${process.env.ADMIN_SECRET}`;
+  if (!okCron && !okAdmin) return res.status(401).json({ error: 'Unauthorized' });
   if (!isAffiliateEnabled()) return res.status(200).json({ ok: true, skipped: 'disabled' });
 
   const startedAt = Date.now();

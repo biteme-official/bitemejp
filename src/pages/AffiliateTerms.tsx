@@ -54,7 +54,7 @@ export default function AffiliateTerms() {
           <p>以上</p>
 
           <section id="guideline" className="border-t border-border pt-8">
-            <h2 className="text-base font-semibold text-foreground mb-2">別紙　広告表示ガイドライン</h2>
+            <h2 className="text-base font-semibold text-foreground mb-2">{"別紙　広告表示ガイドライン"}</h2>
             <p className="mb-4">{AD_DISCLOSURE_GUIDE.lead}</p>
             <div className="overflow-x-auto -mx-4 px-4">
               <table className="w-full text-xs border-collapse min-w-[520px]">

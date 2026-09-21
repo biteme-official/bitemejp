@@ -192,6 +192,40 @@ async function handleAddPartner(body: Record<string, unknown>, res: VercelRespon
   return res.status(201).json({ ok: true, partner, legacyCode });
 }
 
+/**
+ * 파트너 상태 변경 — active(활동) / suspended(정지, 第12条 2항) / withdrawn(탈퇴).
+ * 정지·탈퇴하면 살아 있는 터치를 지워 더 이상 귀속되지 않게 한다(第12条 4항).
+ */
+async function handleSetStatus(body: Record<string, unknown>, res: VercelResponse) {
+  const sb = getSupabase();
+  const id = Number(body.partnerId);
+  const status = String(body.status ?? '');
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'partnerId 필요' });
+  if (!['active', 'suspended', 'withdrawn'].includes(status)) return res.status(400).json({ error: 'status 는 active|suspended|withdrawn' });
+  const patch: Record<string, unknown> = { status };
+  if (status === 'withdrawn') patch.withdrawn_at = new Date().toISOString();
+  if (typeof body.memo === 'string') patch.memo = body.memo.slice(0, 500);
+  const { data, error } = await sb.from('aff_partners').update(patch).eq('id', id).select('*').maybeSingle();
+  if (error) return res.status(500).json({ error: error.message });
+  if (!data) return res.status(404).json({ error: '파트너 없음' });
+  if (status !== 'active') await sb.from('aff_touches').delete().eq('partner_id', id);
+  return res.status(200).json({ ok: true, partner: data });
+}
+
+/** 파트너 삭제 — 장부(aff_conversions)에 한 건이라도 있으면 거절. 테스트 파트너 정리용 */
+async function handleDeletePartner(body: Record<string, unknown>, res: VercelResponse) {
+  const sb = getSupabase();
+  const id = Number(body.partnerId);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'partnerId 필요' });
+  const { count, error: cErr } = await sb.from('aff_conversions').select('id', { count: 'exact', head: true }).eq('partner_id', id);
+  if (cErr) return res.status(500).json({ error: cErr.message });
+  if ((count ?? 0) > 0) return res.status(409).json({ error: `장부에 ${count}건이 있어 삭제 불가 — 정지(suspended)로 처리할 것` });
+  // 코드·클릭·터치는 FK cascade 로 함께 지워진다
+  const { error } = await sb.from('aff_partners').delete().eq('id', id);
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ ok: true, deleted: id });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!authorized(req)) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -200,6 +234,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === 'POST') {
       const body = (typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}) as Record<string, unknown>;
       if (body.action === 'add_partner') return await handleAddPartner(body, res);
+      if (body.action === 'set_status') return await handleSetStatus(body, res);
+      if (body.action === 'delete_partner') return await handleDeletePartner(body, res);
       return res.status(400).json({ error: `unknown action: ${String(body.action)}` });
     }
     return res.status(405).json({ error: 'Method not allowed' });
