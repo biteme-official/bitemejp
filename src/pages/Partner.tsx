@@ -52,6 +52,7 @@ export default function Partner() {
   const [state, setState] = useState<"loading" | "ok" | "not_partner" | "error">("loading");
   const [copied, setCopied] = useState(false);
   const [invoice, setInvoice] = useState("");
+  const [productUrl, setProductUrl] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -149,6 +150,23 @@ export default function Partner() {
           投稿には <b>#PR</b> 表示が必要です（<button className="underline" onClick={() => navigate("/affiliate/terms#guideline")}>広告表示ガイドライン</button>）。
         </p>
       </section>
+
+      {/* 상품 링크 만들기 — 상품 페이지의 「コピー」 버튼과 같은 결과. 주소를 붙여넣는 사람을 위해 */}
+      {!withdrawn && (
+        <section className="rounded-xl border border-border px-4 py-3 space-y-2">
+          <p className="text-sm font-medium">商品リンクを作る</p>
+          <p className="text-[11px] text-muted-foreground">商品ページの URL を貼り付けると、その商品に直接飛ぶ紹介リンクになります。商品ページの「パートナー：コピー」ボタンでも同じリンクが取れます。</p>
+          <div className="flex gap-2">
+            <Input value={productUrl} onChange={(e) => setProductUrl(e.target.value)} placeholder="https://biteme.co.jp/product/1234567890" />
+            <Button variant="outline" onClick={async () => {
+              const m = productUrl.match(/\/product\/(\d+)/);
+              if (!m) { toast.error("商品ページの URL（/product/番号）を貼り付けてください"); return; }
+              const link = `${partner.link}?p=/product/${m[1]}`;
+              try { await navigator.clipboard.writeText(link); toast.success("商品の紹介リンクをコピーしました"); } catch { toast.error("コピーできませんでした"); }
+            }}>コピー</Button>
+          </div>
+        </section>
+      )}
 
       {/* 캠페인 */}
       {campaigns.length > 0 && (

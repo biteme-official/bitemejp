@@ -17,6 +17,7 @@ import { useWishlistStore } from "@/stores/wishlistStore";
 import { useDiscountStore } from "@/stores/discountStore";
 import { ReviewWidget } from "@/components/product/ReviewWidget";
 import { useAuthStore } from "@/stores/authStore";
+import { PartnerProductLink } from "@/components/product/PartnerProductLink";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CartDrawer } from "@/components/cart/CartDrawer";
@@ -666,6 +667,8 @@ export default function ProductDetail() {
 
       {/* Product Info */}
       <div className="px-4 pt-4">
+        {/* 파트너에게만: 이 상품의 紹介リンク (#178) */}
+        <PartnerProductLink productNumericId={product?.id.split('/').pop() ?? null} />
         {/* Title & Price */}
         <div className="mb-4">
           <h1 className="text-xl font-bold text-foreground mb-2">{product.title}</h1>
