@@ -34,6 +34,9 @@ export default function AffiliateLink() {
       setAffiliateRef({ code, at });
 
       const lineSessionToken = useAuthStore.getState().user?.lineSessionToken;
+      // 비로그인이면 도착 페이지에 LINE 로그인 띠(LoginBanner, 웰컴 쿠폰 문구)가 보이게 스누즈를 푼다 (설계 §7).
+      // 구매자는 파트너 실적을 위해 로그인하지 않는다 — 자기 할인 때문에 한다.
+      if (!lineSessionToken) { try { localStorage.removeItem('login_banner_dismissed_at'); } catch { /* 무시 */ } }
       // keepalive: 곧바로 페이지가 바뀌어도 요청은 살아남는다. 응답은 기다리지 않는다.
       fetch('/api/aff-click', {
         method: 'POST',
