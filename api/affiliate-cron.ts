@@ -13,12 +13,14 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 import {
+  ADMIN_ORDER_FIELDS as ORDER_FIELDS,
   applyOrderAmount,
   getSupabase,
   isAffiliateEnabled,
   recordConversionFromOrder,
+  toOrderForAttribution,
+  type AdminOrderNode,
   type AffConversionRow,
-  type OrderForAttribution,
 } from './_affiliate.js';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
@@ -52,45 +54,6 @@ async function adminGraphQL(token: string, query: string, variables: Record<stri
 
 function numericId(gid: string): number {
   return Number(String(gid).split('/').pop());
-}
-
-interface AdminOrderNode {
-  id: string;
-  legacyResourceId: string;
-  name: string;
-  createdAt: string;
-  cancelledAt: string | null;
-  email: string | null;
-  currentSubtotalPriceSet: { shopMoney: { amount: string } };
-  discountCodes: string[];
-  customAttributes: Array<{ key: string; value: string | null }>;
-  customer: { id: string; email: string | null; tags: string[] } | null;
-  lineItems: { nodes: Array<{ product: { id: string } | null }> };
-}
-
-const ORDER_FIELDS = `
-  id legacyResourceId name createdAt cancelledAt email
-  currentSubtotalPriceSet { shopMoney { amount } }
-  discountCodes
-  customAttributes { key value }
-  customer { id email tags }
-  lineItems(first: 50) { nodes { product { id } } }
-`;
-
-/** Admin GraphQL 주문 → 웹훅 REST 모양. 판정 코드는 한 벌만 둔다 */
-function toOrderForAttribution(o: AdminOrderNode): OrderForAttribution {
-  return {
-    id: Number(o.legacyResourceId),
-    name: o.name,
-    order_number: Number(String(o.name).replace('#', '')) || 0,
-    created_at: o.createdAt,
-    email: o.email,
-    customer: o.customer ? { id: numericId(o.customer.id), email: o.customer.email, tags: o.customer.tags } : null,
-    current_subtotal_price: o.currentSubtotalPriceSet.shopMoney.amount,
-    discount_codes: (o.discountCodes ?? []).map((code) => ({ code })),
-    note_attributes: (o.customAttributes ?? []).map((a) => ({ name: a.key, value: a.value ?? '' })),
-    line_items: (o.lineItems?.nodes ?? []).map((l) => ({ product_id: l.product ? numericId(l.product.id) : null })),
-  };
 }
 
 // ── 1. 확정 ──────────────────────────────────────────────────────────────────

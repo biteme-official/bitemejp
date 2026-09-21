@@ -167,6 +167,22 @@ export function memberLineUserId(order: OrderForAttribution, lineUserId?: string
   return lineUserIdFromEmail(order.email ?? order.customer?.email ?? null);
 }
 
+/**
+ * 회원 판정 4번째 근거 — 카트 속성 aff_ref 의 clickId 가 「로그인 상태의 클릭」(aff_touches.click_id) 이면 그 LINE 회원.
+ * 왜: 주문의 고객 레코드가 LINE 연동 계정이 아닐 수 있다 — Storefront 토큰이 안 나오는 초기 가입자, Shop Pay 로 만들어진
+ *     별도 계정, 체크아웃 게스트 폴백(2026-09-21 소프트 오픈 #3728 실측: LINE 계정과 Shop 계정이 따로 있어 비회원으로 떨어짐).
+ *     카트 속성은 클릭한 그 브라우저에서 나온 것이므로, 그 클릭이 회원의 것이었으면 구매자도 그 회원이다.
+ */
+export async function memberLineUserIdByClick(sb: SupabaseClient, order: OrderForAttribution): Promise<string | null> {
+  const ref = attr(order, 'aff_ref');
+  if (!ref) return null;
+  const clickRaw = ref.split(':')[1];
+  if (!clickRaw || !/^\d+$/.test(clickRaw)) return null;
+  const { data, error } = await sb.from('aff_touches').select('line_user_id').eq('click_id', Number(clickRaw)).maybeSingle();
+  if (error) throw new Error(`aff_touches(click) 조회 실패: ${error.message}`);
+  return (data as { line_user_id: string } | null)?.line_user_id ?? null;
+}
+
 export function isMemberOrder(order: OrderForAttribution, lineUserId?: string | null): boolean {
   return memberLineUserId(order, lineUserId) !== null;
 }
@@ -355,7 +371,8 @@ export async function resolveRate(
 }
 
 /** 자기 링크로 자기 구매 — 약관 第4条 3항. 결제는 막지 않고 커미션만 0 */
-export function isSelfPurchase(partner: AffPartner, order: OrderForAttribution): boolean {
+export function isSelfPurchase(partner: AffPartner, order: OrderForAttribution, memberLineId?: string | null): boolean {
+  if (memberLineId && memberLineId === partner.line_user_id) return true;
   const customerId = order.customer?.id ? String(order.customer.id) : null;
   if (customerId && partner.shopify_customer_id && customerId === partner.shopify_customer_id) return true;
 
@@ -392,7 +409,7 @@ export async function recordConversionFromOrder(
     const orderedAt = order.created_at ? new Date(order.created_at) : new Date();
 
     // 회원 게이트가 맨 앞이다 (설계 §5). 비회원이면 코드·카트 ref 로 파트너를 알 수 있을 때만 기록한다.
-    const lineUserId = memberLineUserId(order, options.lineUserId);
+    const lineUserId = memberLineUserId(order, options.lineUserId) ?? (await memberLineUserIdByClick(sb, order));
     const member = lineUserId !== null;
     const decision = await decideAttribution(sb, order, orderedAt, { memberLineUserId: lineUserId });
     if (!decision) return { outcome: 'unattributed' };
@@ -402,7 +419,7 @@ export async function recordConversionFromOrder(
     const { rate, rateSource, campaignId } = await resolveRate(sb, partner.id, productIds, orderedAt, decision.campaignId);
 
     const eligible = eligibleAmountOf(order);
-    const self = isSelfPurchase(partner, order);
+    const self = isSelfPurchase(partner, order, lineUserId);
     // 정지·탈퇴한 파트너의 주문은 장부에는 남기되 커미션 0 (void) — 나중에 대조할 수 있게.
     // 비회원 주문도 같은 방식으로 nonmember·0 — 회원 한정이 거른 규모를 셀 수 있게.
     const inactive = partner.status !== 'active';
@@ -430,7 +447,8 @@ export async function recordConversionFromOrder(
         aff_ref: attr(order, 'aff_ref') ?? null,
         aff_ref_at: attr(order, 'aff_ref_at') ?? null,
         member,
-        member_hint: options.lineUserId === undefined ? 'payload' : 'admin',
+        member_line_user_id: lineUserId,
+        member_hint: options.lineUserId ? 'admin' : lineUserId && memberLineUserId(order, options.lineUserId) ? 'payload' : lineUserId ? 'click' : 'none',
         current_subtotal_price: order.current_subtotal_price ?? null,
         subtotal_price: order.subtotal_price ?? null,
       },
@@ -555,4 +573,62 @@ export async function applyCancelWebhook(order: { id: number; name?: string | nu
   } catch (err) {
     return { outcome: 'error', detail: err instanceof Error ? err.message : String(err) };
   }
+}
+
+// ── Admin GraphQL 주문 → 웹훅 모양 (크론 재대사·어드민 재판정 공용) ────────────
+
+export interface AdminOrderNode {
+  id: string;
+  legacyResourceId: string;
+  name: string;
+  createdAt: string;
+  cancelledAt: string | null;
+  email: string | null;
+  currentSubtotalPriceSet: { shopMoney: { amount: string } };
+  discountCodes: string[];
+  customAttributes: Array<{ key: string; value: string | null }>;
+  customer: { id: string; email: string | null; tags: string[] } | null;
+  lineItems: { nodes: Array<{ product: { id: string } | null }> };
+}
+
+export const ADMIN_ORDER_FIELDS = `
+  id legacyResourceId name createdAt cancelledAt email
+  currentSubtotalPriceSet { shopMoney { amount } }
+  discountCodes
+  customAttributes { key value }
+  customer { id email tags }
+  lineItems(first: 50) { nodes { product { id } } }
+`;
+
+const numericId = (gid: string): number => Number(String(gid).split('/').pop());
+
+export function toOrderForAttribution(o: AdminOrderNode): OrderForAttribution {
+  return {
+    id: Number(o.legacyResourceId),
+    name: o.name,
+    order_number: Number(String(o.name).replace('#', '')) || 0,
+    created_at: o.createdAt,
+    email: o.email,
+    customer: o.customer ? { id: numericId(o.customer.id), email: o.customer.email, tags: o.customer.tags } : null,
+    current_subtotal_price: o.currentSubtotalPriceSet.shopMoney.amount,
+    discount_codes: (o.discountCodes ?? []).map((code) => ({ code })),
+    note_attributes: (o.customAttributes ?? []).map((a) => ({ name: a.key, value: a.value ?? '' })),
+    line_items: (o.lineItems?.nodes ?? []).map((l) => ({ product_id: l.product ? numericId(l.product.id) : null })),
+  };
+}
+
+/**
+ * 어드민 「재판정」 — 장부의 한 건을 지우고 다시 판정한다. 판정 규칙이 바뀌었을 때 과거 주문을 바로잡는 용도.
+ * 지급 묶음에 들어간 건(payout_id)은 건드리지 않는다.
+ */
+export async function reevaluateOrder(order: OrderForAttribution, options: RecordOptions = {}): Promise<RecordResult & { before: string | null }> {
+  const sb = getSupabase();
+  const existing = await findConversionByOrderId(sb, order.id);
+  if (existing?.payout_id) return { outcome: 'error', detail: '정산 묶음에 들어간 주문은 재판정 불가', before: existing.status };
+  if (existing) {
+    const { error } = await sb.from('aff_conversions').delete().eq('id', existing.id);
+    if (error) return { outcome: 'error', detail: error.message, before: existing.status };
+  }
+  const r = await recordConversionFromOrder(order, options);
+  return { ...r, before: existing?.status ?? null };
 }
