@@ -1,3 +1,4 @@
+import { affiliateRefForLoginState } from '@/lib/affiliate-ref';
 const LINE_CHANNEL_ID = import.meta.env.VITE_LINE_CHANNEL_ID || '2009515277';
 
 function getCallbackUrl(): string {
@@ -23,10 +24,13 @@ function generateRandomState(): string {
  */
 async function issueState(returnTo: string, src?: LoginSource): Promise<string> {
   try {
+    // 어필리에이트 링크를 누른 뒤의 로그인이면 ref 를 state 에 실어 서버 터치로 승격시킨다
+    // (설계 §5). localStorage 로 나르지 않는 이유는 src 와 같다 — LINE 앱 브라우저를 거치면 비어 있다.
+    const aff = affiliateRefForLoginState();
     const res = await fetch('/api/line-login-state', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ returnTo, src }),
+      body: JSON.stringify({ returnTo, src, ...(aff ? { aff } : {}) }),
     });
     if (!res.ok) throw new Error(`state 발급 실패: ${res.status}`);
     const data = await res.json();

@@ -18,6 +18,7 @@
  * ⚠️ `api/` 안의 상대 import 는 반드시 `.js` 확장자 (2026-08-21 장애).
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 /** 기본 커미션 10% — 이용약관 第3条 1항. 우대는 전부 aff_campaigns 에 있다 */
 export const BASE_RATE = 0.10;
@@ -31,6 +32,41 @@ export const MANUAL_LINE_ID_PREFIX = 'manual:';
 export const LEGACY_CAMPAIGN_NAME = 'Collabs 이행 코드';
 
 const PLACEHOLDER_EMAIL_DOMAIN = '@line-user.biteme.co.jp';
+
+/** 파트너 코드 규격 — 대문자·숫자 4~12자 (어드민 등록 폼과 같은 규칙) */
+export const CODE_RE = /^[A-Z0-9]{4,12}$/;
+export function normalizeCode(raw: unknown): string | null {
+  const code = typeof raw === 'string' ? raw.trim().toUpperCase() : '';
+  return CODE_RE.test(code) ? code : null;
+}
+
+/**
+ * LINE 로그인 세션 토큰 검증 — api/line-callback.ts 의 signSessionToken 과 같은 규약
+ * (payload {u: lineUserId, c: shopifyCustomerId|null, e: 만료 ms}, HMAC-SHA256 base64url).
+ * 🔴 클라이언트가 보낸 userId 는 절대 믿지 않는다 — 여기서 꺼낸 값만 쓴다.
+ */
+export function verifyLineSession(
+  token: unknown,
+  secret: string
+): { lineUserId: string; shopifyCustomerId: string | null } | null {
+  if (typeof token !== 'string') return null;
+  const dot = token.indexOf('.');
+  if (dot <= 0) return null;
+  const body = token.slice(0, dot);
+  const expected = createHmac('sha256', secret).update(body).digest('base64url');
+  const a = Buffer.from(token.slice(dot + 1));
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'));
+    if (typeof payload?.e !== 'number' || Date.now() > payload.e) return null;
+    if (typeof payload?.u !== 'string' || !payload.u) return null;
+    const c = typeof payload.c === 'string' && payload.c ? payload.c : null;
+    return { lineUserId: payload.u, shopifyCustomerId: c };
+  } catch {
+    return null;
+  }
+}
 
 export function isAffiliateEnabled(): boolean {
   const v = (process.env.AFFILIATE_ENABLED || '').trim().toLowerCase();
@@ -119,13 +155,62 @@ function lineUserIdFromEmail(email: string | null | undefined): string | null {
  * ③ 자리표시자 이메일. Admin 조회가 실패해도(undefined) ②③으로 판정할 수 있어 조용히 비회원으로
  * 떨어지는 일이 줄어든다. 셋 다 없으면 비회원.
  */
-export function isMemberOrder(order: OrderForAttribution, lineUserId?: string | null): boolean {
-  if (lineUserId) return true;
+export function memberLineUserId(order: OrderForAttribution, lineUserId?: string | null): string | null {
+  if (lineUserId) return lineUserId;
   const rawTags = order.customer?.tags;
   const tags = Array.isArray(rawTags) ? rawTags : (rawTags ?? '').split(',');
-  if (tags.some((t) => t.trim().startsWith('line_id:'))) return true;
-  if (lineUserIdFromEmail(order.email ?? order.customer?.email ?? null)) return true;
-  return false;
+  const tag = tags.map((t) => t.trim()).find((t) => t.startsWith('line_id:'));
+  if (tag && tag.length > 'line_id:'.length) return tag.slice('line_id:'.length);
+  return lineUserIdFromEmail(order.email ?? order.customer?.email ?? null);
+}
+
+export function isMemberOrder(order: OrderForAttribution, lineUserId?: string | null): boolean {
+  return memberLineUserId(order, lineUserId) !== null;
+}
+
+// ── 터치 ─────────────────────────────────────────────────────────────────────
+
+export interface TouchInput {
+  lineUserId: string;
+  partnerId: number;
+  /** 클릭 시각. 로그인 승격이면 localStorage 에 있던 원래 클릭 시각 — 30일 창은 클릭 기준이다 */
+  touchedAt: Date;
+  source: 'link' | 'login';
+  clickId?: number | null;
+  shopifyCustomerId?: string | null;
+}
+
+/**
+ * 회원의 마지막 터치를 남긴다 (설계 §5 주 경로). line_user_id 당 한 행 — 더 최근 터치만 덮어쓴다.
+ * 로그인 승격이 옛 클릭 시각을 들고 와도 이미 있는 더 새 터치를 지우지 않기 위해 읽고 쓴다.
+ */
+export async function recordTouch(sb: SupabaseClient, t: TouchInput): Promise<'inserted' | 'updated' | 'kept'> {
+  const { data: existing, error: readErr } = await sb
+    .from('aff_touches')
+    .select('touched_at')
+    .eq('line_user_id', t.lineUserId)
+    .maybeSingle();
+  if (readErr) throw new Error(`aff_touches 조회 실패: ${readErr.message}`);
+  if (existing && new Date((existing as { touched_at: string }).touched_at).getTime() >= t.touchedAt.getTime()) return 'kept';
+
+  const row = {
+    line_user_id: t.lineUserId,
+    partner_id: t.partnerId,
+    touched_at: t.touchedAt.toISOString(),
+    source: t.source,
+    click_id: t.clickId ?? null,
+    shopify_customer_id: t.shopifyCustomerId ?? null,
+  };
+  const { error } = await sb.from('aff_touches').upsert(row, { onConflict: 'line_user_id' });
+  if (error) throw new Error(`aff_touches 저장 실패: ${error.message}`);
+  return existing ? 'updated' : 'inserted';
+}
+
+/** 활동 중인 파트너를 코드로 찾는다. 정지·탈퇴 파트너의 링크는 죽은 링크다(약관 第12条) */
+export async function findActivePartner(sb: SupabaseClient, code: string): Promise<AffPartner | null> {
+  const { data, error } = await sb.from('aff_partners').select('*').eq('code', code).eq('status', 'active').maybeSingle();
+  if (error) throw new Error(`aff_partners 조회 실패: ${error.message}`);
+  return (data as AffPartner | null) ?? null;
 }
 
 /** 귀속 기준액 = current_subtotal_price (2026-09-17 실측: 세 0·배송 별도·할인 후 상품 소계). 엔 정수 */
@@ -154,7 +239,7 @@ export async function decideAttribution(
   sb: SupabaseClient,
   order: OrderForAttribution,
   orderedAt: Date,
-  opts: { member: boolean } = { member: true }
+  opts: { memberLineUserId: string | null } = { memberLineUserId: null }
 ): Promise<ConversionDecision | null> {
   // 1) 코드
   const codes = (order.discount_codes ?? []).map((d) => d.code.toUpperCase()).filter(Boolean);
@@ -189,20 +274,20 @@ export async function decideAttribution(
     }
   }
 
-  // 3) 회원의 서버측 터치 — 회원 한정의 주 경로. 비회원은 터치가 있을 수 없으니 건너뛴다
-  const customerId = order.customer?.id;
-  if (opts.member && customerId) {
+  // 3) 회원의 서버측 터치 — 회원 한정의 주 경로. 키는 LINE userId (기기·브라우저 무관).
+  //    비회원은 터치가 있을 수 없으니 건너뛴다
+  if (opts.memberLineUserId) {
     const since = new Date(orderedAt.getTime() - ATTRIBUTION_WINDOW_DAYS * 86_400_000).toISOString();
     const { data, error } = await sb
       .from('aff_touches')
-      .select('partner_id, touched_at, partner:aff_partners(*)')
-      .eq('shopify_customer_id', String(customerId))
+      .select('partner_id, touched_at, click_id, partner:aff_partners(*)')
+      .eq('line_user_id', opts.memberLineUserId)
       .gte('touched_at', since)
       .maybeSingle();
     if (error) throw new Error(`aff_touches 조회 실패: ${error.message}`);
-    const row = data as { partner: AffPartner | AffPartner[] } | null;
+    const row = data as { click_id: number | null; partner: AffPartner | AffPartner[] } | null;
     const partner = row ? (Array.isArray(row.partner) ? row.partner[0] : row.partner) : null;
-    if (partner) return { partner, attribution: 'customer', campaignId: null, clickId: null };
+    if (partner) return { partner, attribution: 'customer', campaignId: null, clickId: row?.click_id ?? null };
   }
 
   return null;
@@ -291,8 +376,9 @@ export async function recordConversionFromOrder(
     const orderedAt = order.created_at ? new Date(order.created_at) : new Date();
 
     // 회원 게이트가 맨 앞이다 (설계 §5). 비회원이면 코드·카트 ref 로 파트너를 알 수 있을 때만 기록한다.
-    const member = isMemberOrder(order, options.lineUserId);
-    const decision = await decideAttribution(sb, order, orderedAt, { member });
+    const lineUserId = memberLineUserId(order, options.lineUserId);
+    const member = lineUserId !== null;
+    const decision = await decideAttribution(sb, order, orderedAt, { memberLineUserId: lineUserId });
     if (!decision) return { outcome: 'unattributed' };
 
     const { partner, attribution, clickId } = decision;
