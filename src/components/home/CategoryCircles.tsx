@@ -19,9 +19,10 @@ import { cn } from "@/lib/utils";
 /**
  * 배너 아래 「カテゴリー」 원형 아이콘 섹션 (#185, 시안의 Our Categories).
  *
- * 항목은 CategoryNav 와 같은 Shopify 메뉴에서 가져와 둘이 어긋나지 않게 한다.
- * 아이콘은 카테고리 이름의 키워드로 고르고, 매칭이 없으면 발바닥. 색은 파스텔 8색을 순환.
- * 어드민에서 메뉴를 바꿔도 코드 수정 없이 따라간다.
+ * 항목은 CategoryNav 와 같은 Shopify 메뉴에서 가져오되, **상품 카테고리만** 보여준다.
+ * 이름이 아래 키워드에 걸리는 것만 남기므로 브랜드 컬렉션(チェゴシム·SSFW·APPLE CIDER RECIPE 등)은
+ * 자동으로 빠진다(하영 결정 2026-09-21 — 아이콘이 너무 많아서). 브랜드는 상단 내비에서 그대로 간다.
+ * 새 상품 카테고리를 메뉴에 추가하면 여기 키워드도 한 줄 더해야 보인다. 색은 파스텔 8색을 순환.
  * 모바일은 가로 스크롤, PC 는 줄바꿈해 가운데 정렬 (가운데 정렬 + 가로 스크롤을 같이 쓰면 앞쪽이 잘려 못 간다).
  */
 const ICON_RULES: { test: RegExp; icon: LucideIcon }[] = [
@@ -30,9 +31,8 @@ const ICON_RULES: { test: RegExp; icon: LucideIcon }[] = [
   { test: /リビング|living|ベッド|home/i, icon: Sofa },
   { test: /衛生|ケア|clean|care/i, icon: Sparkles },
   { test: /食器|フード|ごはん|food|おやつ/i, icon: UtensilsCrossed },
-  { test: /衣類|服|ウェア|cloth|wear|ssfw/i, icon: Shirt },
+  { test: /衣類|服|ウェア|cloth|wear/i, icon: Shirt },
   { test: /猫|ねこ|cat/i, icon: Cat },
-  { test: /apple/i, icon: Apple },
 ];
 
 const PASTELS = [
@@ -46,8 +46,9 @@ const PASTELS = [
   "bg-rose-100 text-rose-500",
 ];
 
-function pickIcon(title: string): LucideIcon {
-  return ICON_RULES.find(r => r.test.test(title))?.icon ?? PawPrint;
+/** 카테고리 키워드에 걸리면 아이콘, 아니면(브랜드 등) undefined */
+function pickIcon(title: string): LucideIcon | undefined {
+  return ICON_RULES.find(r => r.test.test(title))?.icon;
 }
 
 interface CategoryCirclesProps {
@@ -66,12 +67,16 @@ export function CategoryCircles({ onSelect }: CategoryCirclesProps) {
       .filter(item => item.type === "COLLECTION" || item.url.includes("/collections/"))
       .forEach(item => {
         const handle = extractHandleFromUrl(item.url);
-        if (handle) items.push({ key: item.id, title: item.title, handle, icon: pickIcon(item.title) });
+        const icon = pickIcon(item.title);
+        if (handle && icon) items.push({ key: item.id, title: item.title, handle, icon });
       });
   } else {
     collections
       .filter(c => c.handle !== "frontpage")
-      .forEach(c => items.push({ key: c.id, title: c.title, handle: c.handle, icon: pickIcon(c.title) }));
+      .forEach(c => {
+        const icon = pickIcon(c.title);
+        if (icon) items.push({ key: c.id, title: c.title, handle: c.handle, icon });
+      });
   }
 
   if (items.length <= 1) return null;
