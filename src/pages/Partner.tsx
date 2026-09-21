@@ -84,7 +84,7 @@ export default function Partner() {
         <div className="max-w-md mx-auto py-10 text-center space-y-4">
           <h1 className="text-xl font-bold">まだパートナー登録がありません</h1>
           <p className="text-sm text-muted-foreground">登録は1分で完了します。紹介リンクはその場で発行されます。</p>
-          <Button onClick={() => navigate("/affiliate")}>パートナー登録へ</Button>
+          <Button onClick={() => navigate("/partner/join")}>パートナー登録へ</Button>
         </div>
       </PageFrame>
     );
