@@ -95,6 +95,9 @@ export interface AffPartner {
   email: string | null;
   status: 'active' | 'suspended' | 'withdrawn';
   joined_at: string;
+  terms_version?: string;
+  invoice_reg_no?: string | null;
+  withdrawn_at?: string | null;
 }
 
 export interface AffCampaign {
@@ -166,6 +169,19 @@ export function memberLineUserId(order: OrderForAttribution, lineUserId?: string
 
 export function isMemberOrder(order: OrderForAttribution, lineUserId?: string | null): boolean {
   return memberLineUserId(order, lineUserId) !== null;
+}
+
+/** 파트너 본인·가입 응답에 내보내는 공개 필드 — 내부 id·LINE id 는 내보내지 않는다 */
+export function publicPartner(p: AffPartner) {
+  return {
+    code: p.code,
+    link: `https://biteme.co.jp/a/${p.code}`,
+    status: p.status,
+    joinedAt: p.joined_at,
+    instagram: p.instagram,
+    invoiceRegNo: p.invoice_reg_no ?? null,
+    termsVersion: p.terms_version ?? null,
+  };
 }
 
 // ── 터치 ─────────────────────────────────────────────────────────────────────
