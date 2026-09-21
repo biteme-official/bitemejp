@@ -81,7 +81,7 @@ create table if not exists public.aff_touches (
   shopify_customer_id text   primary key,
   partner_id          bigint not null references public.aff_partners (id) on delete cascade,
   touched_at          timestamptz not null default now(),
-  source              text   not null default 'link'
+  source              text   not null default 'link'  -- 'link'(로그인 상태 클릭) | 'login'(로그인 시 localStorage ref 승격)
 );
 create index if not exists idx_aff_touches_touched on public.aff_touches (touched_at);
 
@@ -100,7 +100,8 @@ create table if not exists public.aff_conversions (
   rate_source     text   not null,                         -- 'base' | 'campaign:{id}'
   commission      integer not null check (commission >= 0),      -- round(eligible_amount * rate), 内税, 엔 정수
   status          text   not null default 'pending'
-                  check (status in ('pending', 'confirmed', 'reversed', 'self', 'void')),
+                  -- nonmember: 비회원 주문(회원 한정, 2026-09-21). 파트너는 알지만 커미션 0 — 걸러진 규모 집계용
+                  check (status in ('pending', 'confirmed', 'reversed', 'self', 'void', 'nonmember')),
   ordered_at      timestamptz not null,
   confirm_at      timestamptz not null,                    -- ordered_at + 30일 (확정 대기)
   confirmed_at    timestamptz,
@@ -159,3 +160,16 @@ alter table public.aff_clicks         enable row level security;
 alter table public.aff_touches        enable row level security;
 alter table public.aff_conversions    enable row level security;
 alter table public.aff_payouts        enable row level security;
+
+-- ── 권한 ───────────────────────────────────────────────────────────────────────
+-- 2026-09-21 실측: SQL 에디터에서 만든 표에 service_role 권한이 붙지 않아
+-- `/api/affiliate-admin` 이 "permission denied for table aff_partners" 로 500.
+-- 서버(service_role)만 접근한다 — anon·authenticated 에는 아무것도 주지 않는다.
+grant select, insert, update, delete on
+  public.aff_partners, public.aff_campaigns, public.aff_campaign_codes,
+  public.aff_clicks, public.aff_touches, public.aff_conversions, public.aff_payouts
+  to service_role;
+grant usage, select on
+  public.aff_partners_id_seq, public.aff_campaigns_id_seq, public.aff_campaign_codes_id_seq,
+  public.aff_clicks_id_seq, public.aff_conversions_id_seq, public.aff_payouts_id_seq
+  to service_role;

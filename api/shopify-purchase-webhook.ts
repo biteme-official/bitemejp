@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
+import { recordConversionFromOrder, type OrderForAttribution } from './_affiliate.js';
 
 // Vercel 자동 JSON 파싱 비활성화 — HMAC 검증에 raw body 필요
 export const config = { api: { bodyParser: false } };
@@ -22,6 +23,7 @@ const METAFIELD_NAMESPACE = 'custom';
 const NOTIFIED_KEY = 'line_last_order_notified';
 
 interface ShopifyLineItem {
+  product_id?: number | null;
   variant_id: number | null;
   title: string;
   variant_title: string | null;
@@ -30,7 +32,7 @@ interface ShopifyLineItem {
   vendor: string | null;
 }
 
-interface ShopifyOrder {
+interface ShopifyOrder extends OrderForAttribution {
   id: number;
   order_number: number;
   total_price: string;
@@ -336,13 +338,14 @@ function formatFulfillmentMessage(f: ShopifyFulfillment, orderNumber: number | n
 }
 
 /** 주문 확인 알림. 실패해도 절대 throw 하지 않는다 — GA4 전송과 웹훅 200 을 지킨다. */
-async function notifyOrderCreated(order: ShopifyOrder): Promise<void> {
+/** 조회한 LINE 대상을 돌려준다 — 어필리에이트 갈래가 회원 판정에 재사용한다(Shopify 를 두 번 부르지 않기 위해) */
+async function notifyOrderCreated(order: ShopifyOrder): Promise<LineTarget | null> {
   const target = await resolveLineTarget(order.email ?? order.customer?.email, order.customer?.id);
-  if (!target) return;
+  if (!target) return null;
 
   if (target.lastNotifiedOrderId === String(order.id)) {
     console.log(`[LINE Notify] 이미 발송한 주문 — 건너뜀 #${order.order_number}`);
-    return;
+    return target;
   }
 
   const result = await pushLineMessage(target.lineUserId, formatOrderMessage(order));
@@ -350,6 +353,7 @@ async function notifyOrderCreated(order: ShopifyOrder): Promise<void> {
     console.log(`[LINE Notify] 주문 확인 발송 완료 #${order.order_number}`);
     if (target.customerGid) await markNotified(target.customerGid, order.id);
   }
+  return target;
 }
 
 /** 배송 시작 알림. 주문번호를 얻기 위해 Admin 으로 주문을 한 번 조회한다. */
@@ -447,10 +451,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   // LINE 알림은 GA4 와 독립적으로 처리한다. 한쪽이 실패해도 다른 쪽은 나가야 한다.
+  // lineUserId: null = 조회했더니 LINE 유저 아님, undefined = 조회 자체가 실패 → 어필리에이트가 페이로드로 재판정
+  let lineUserId: string | null | undefined;
   try {
-    await notifyOrderCreated(order);
+    lineUserId = (await notifyOrderCreated(order))?.lineUserId ?? null;
   } catch (err) {
     console.error('[LINE Notify] 🔴 주문 알림 처리 중 예외:', err);
+  }
+
+  // 어필리에이트 장부 (#178). AFFILIATE_ENABLED 가 꺼져 있으면 아무것도 하지 않는다.
+  // recordConversionFromOrder 는 내부에서 모든 예외를 삼키지만, 방어를 한 겹 더 둔다 —
+  // 이 갈래가 어떤 이유로든 웹훅 200 을 막으면 GA4·LINE 까지 재전송으로 흔들린다.
+  // 회원 한정(설계 §5): LINE 알림이 이미 조회한 결과를 넘겨 회원 게이트에 쓴다.
+  try {
+    const r = await recordConversionFromOrder(order, { lineUserId });
+    if (r.outcome === 'error') console.error('[Affiliate] 🔴 적재 실패:', r.detail);
+  } catch (err) {
+    console.error('[Affiliate] 🔴 처리 중 예외:', err);
   }
 
   return res.status(200).json({ ok: true });
