@@ -156,7 +156,7 @@ export function HeroBanner() {
               {inner}
             </a>
           ) : (
-            <div key={banner.id} className="relative w-full flex-shrink-0">
+            <div key={banner.id} onClick={onClick} className="relative w-full flex-shrink-0">
               {inner}
             </div>
           );

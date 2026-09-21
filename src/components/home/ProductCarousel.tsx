@@ -102,8 +102,8 @@ export function ProductCarousel({
     const el = scrollRef.current;
     if (el?.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
     setDragging(false);
-    // moved 플래그는 뒤따라오는 click 캡처에서 읽고 지운다
-    if (drag.current && !drag.current.moved) drag.current = null;
+    // moved 플래그는 뒤따라오는 click 캡처에서 읽고 지운다. pointercancel 뒤엔 click 이 안 오므로 바로 비운다
+    if (e.type === "pointercancel" || (drag.current && !drag.current.moved)) drag.current = null;
   };
   const onClickCapture = (e: React.MouseEvent<HTMLDivElement>) => {
     if (drag.current?.moved) {

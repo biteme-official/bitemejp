@@ -95,6 +95,9 @@ export function Header({ onSearch, onCollectionSelect }: HeaderProps) {
   const [isSearchOpen, setIsSearchOpen] = useState(
     () => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("q")
   );
+  // 포커스는 사용자가 아이콘으로 펼친 직후에만. ?q= 로 처음부터 펼쳐진 경우까지 포커스하면
+  // 결과 위로 최근 검색어 드롭다운이 열리고 모바일은 키보드가 튀어나온다(리뷰 지적)
+  const [focusSearch, setFocusSearch] = useState(false);
   const [menu, setMenu] = useState<ShopifyMenu | null>(null);
   const [collections, setCollections] = useState<ShopifyCollection[]>([]);
   const navigate = useNavigate();
@@ -362,7 +365,7 @@ export function Header({ onSearch, onCollectionSelect }: HeaderProps) {
             aria-label="検索"
             aria-expanded={isSearchOpen}
             className={cn("hidden md:inline-flex text-foreground", isSearchOpen && "text-primary")}
-            onClick={() => setIsSearchOpen((v) => !v)}
+            onClick={() => { setFocusSearch(!isSearchOpen); setIsSearchOpen((v) => !v); }}
           >
             <Search className="h-6 w-6" />
           </Button>
@@ -423,7 +426,7 @@ export function Header({ onSearch, onCollectionSelect }: HeaderProps) {
       {/* Search Bar — 모바일 상시, PC 는 아이콘으로 펼쳤을 때만 */}
       <div className={cn("border-b border-border", !isSearchOpen && "md:hidden")}>
         <div className="max-w-7xl mx-auto px-4 py-3 md:max-w-2xl">
-          <SearchAutocomplete onSearch={handleSearch} autoFocus={isSearchOpen} />
+          <SearchAutocomplete onSearch={handleSearch} autoFocus={focusSearch} />
         </div>
       </div>
     </header>
