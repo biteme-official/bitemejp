@@ -437,3 +437,106 @@ export async function recordConversionFromOrder(
     return { outcome: 'error', detail: err instanceof Error ? err.message : String(err) };
   }
 }
+
+// ── 환불·취소·확정 (설계 §8 04·08, 약관 第4条) ──────────────────────────────
+
+export interface AffConversionRow {
+  id: number;
+  order_id: string;
+  order_name: string | null;
+  partner_id: number;
+  eligible_amount: number;
+  rate: number;
+  commission: number;
+  status: 'pending' | 'confirmed' | 'reversed' | 'self' | 'void' | 'nonmember';
+  confirm_at: string;
+  payout_id: number | null;
+}
+
+/**
+ * 주문의 (환불 반영 후) 기준액으로 장부 한 건을 다시 계산한다.
+ *  - 기준액 0 또는 취소 → reversed (커미션 0)
+ *  - 기준액이 줄었으면 커미션 재계산 (부분 환불 — 약관 第4条 2항)
+ *  - self·void·nonmember 는 커미션이 애초에 0 이라 금액만 갱신
+ * 이미 정산 묶음(payout_id)에 들어간 건은 상태를 바꾸되 금액은 Phase 3 회수 로직이 다룬다 — 여기서 덮어쓰지 않는다.
+ * 돌려주는 값은 무엇을 했는지(로그·게이트용).
+ */
+export async function applyOrderAmount(
+  sb: SupabaseClient,
+  row: AffConversionRow,
+  newEligible: number,
+  cancelled: boolean,
+  reason: string
+): Promise<'reversed' | 'recalculated' | 'unchanged'> {
+  const zeroCommission = row.status === 'self' || row.status === 'void' || row.status === 'nonmember';
+  const eligible = Math.max(0, Math.round(newEligible));
+
+  if (cancelled || eligible === 0) {
+    if (row.status === 'reversed') return 'unchanged';
+    const patch: Record<string, unknown> = {
+      status: 'reversed',
+      reversed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    // 지급 전이면 금액도 0 으로. 지급 후면 금액은 남겨 Phase 3 회수 근거로 쓴다
+    if (!row.payout_id) { patch.eligible_amount = eligible; patch.commission = 0; }
+    const { error } = await sb.from('aff_conversions').update(patch).eq('id', row.id);
+    if (error) throw new Error(`aff_conversions 회수 실패: ${error.message}`);
+    console.log(`[Affiliate] 회수 ${row.order_name ?? row.order_id} (${reason}) ¥${row.commission} → 0`);
+    return 'reversed';
+  }
+
+  if (eligible >= row.eligible_amount) return 'unchanged';
+  if (row.payout_id) return 'unchanged'; // 지급 후 부분 환불은 Phase 3 에서
+  const commission = zeroCommission ? 0 : Math.round(eligible * Number(row.rate));
+  const { error } = await sb
+    .from('aff_conversions')
+    .update({ eligible_amount: eligible, commission, updated_at: new Date().toISOString() })
+    .eq('id', row.id);
+  if (error) throw new Error(`aff_conversions 재계산 실패: ${error.message}`);
+  console.log(`[Affiliate] 부분 환불 ${row.order_name ?? row.order_id} (${reason}) ¥${row.eligible_amount}→¥${eligible} 커미션 ¥${row.commission}→¥${commission}`);
+  return 'recalculated';
+}
+
+export async function findConversionByOrderId(sb: SupabaseClient, orderId: string | number): Promise<AffConversionRow | null> {
+  const { data, error } = await sb.from('aff_conversions').select('*').eq('order_id', String(orderId)).maybeSingle();
+  if (error) throw new Error(`aff_conversions 조회 실패: ${error.message}`);
+  return (data as AffConversionRow | null) ?? null;
+}
+
+/** refunds/create 웹훅 페이로드 중 쓰는 것. refund_line_items[].subtotal = 할인 후 상품 소계(배송비 제외) */
+export interface RefundPayload {
+  id: number;
+  order_id: number;
+  refund_line_items?: Array<{ subtotal?: string | number | null; quantity?: number }> | null;
+}
+
+/** refunds/create — 환불된 상품 소계만큼 기준액을 줄인다. 배송비 환불은 커미션과 무관. 절대 throw 하지 않는다 */
+export async function applyRefundWebhook(refund: RefundPayload): Promise<RecordResult> {
+  if (!isAffiliateEnabled()) return { outcome: 'disabled' };
+  try {
+    const sb = getSupabase();
+    const row = await findConversionByOrderId(sb, refund.order_id);
+    if (!row) return { outcome: 'unattributed' };
+    const refunded = (refund.refund_line_items ?? []).reduce((s, l) => s + (Number(l.subtotal ?? 0) || 0), 0);
+    if (refunded <= 0) return { outcome: 'duplicate', detail: '상품 환불 없음(배송비 등)' };
+    const r = await applyOrderAmount(sb, row, row.eligible_amount - refunded, false, `refund ${refund.id}`);
+    return { outcome: r === 'unchanged' ? 'duplicate' : 'inserted', detail: r };
+  } catch (err) {
+    return { outcome: 'error', detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** orders/cancelled — 전액 회수. 절대 throw 하지 않는다 */
+export async function applyCancelWebhook(order: { id: number; name?: string | null }): Promise<RecordResult> {
+  if (!isAffiliateEnabled()) return { outcome: 'disabled' };
+  try {
+    const sb = getSupabase();
+    const row = await findConversionByOrderId(sb, order.id);
+    if (!row) return { outcome: 'unattributed' };
+    const r = await applyOrderAmount(sb, row, 0, true, 'cancelled');
+    return { outcome: r === 'unchanged' ? 'duplicate' : 'inserted', detail: r };
+  } catch (err) {
+    return { outcome: 'error', detail: err instanceof Error ? err.message : String(err) };
+  }
+}

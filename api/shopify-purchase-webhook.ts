@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
-import { recordConversionFromOrder, type OrderForAttribution } from './_affiliate.js';
+import { applyCancelWebhook, applyRefundWebhook, recordConversionFromOrder, type OrderForAttribution } from './_affiliate.js';
 
 // Vercel 자동 JSON 파싱 비활성화 — HMAC 검증에 raw body 필요
 export const config = { api: { bodyParser: false } };
@@ -427,6 +427,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await notifyFulfillmentCreated(JSON.parse(rawBody));
     } catch (err) {
       console.error('[LINE Notify] 🔴 배송 알림 처리 중 예외:', err);
+    }
+    return res.status(200).json({ ok: true });
+  }
+
+  // 어필리에이트 환불·취소 회수 (#178 Phase 1). REPORT 앱으로 등록한 웹훅 — 서명은 REPORT client secret.
+  // 이 두 토픽은 이 함수에서 어필리에이트 일만 하므로 GA4·LINE 과 섞이지 않는다. 어떤 경우에도 200.
+  if (topic === 'refunds/create' || topic === 'orders/cancelled') {
+    try {
+      const payload = JSON.parse(rawBody);
+      const r = topic === 'refunds/create' ? await applyRefundWebhook(payload) : await applyCancelWebhook(payload);
+      if (r.outcome === 'error') console.error(`[Affiliate] 🔴 ${topic} 처리 실패:`, r.detail);
+      else console.log(`[Affiliate] ${topic} → ${r.outcome}${r.detail ? ` (${r.detail})` : ''}`);
+    } catch (err) {
+      console.error(`[Affiliate] 🔴 ${topic} 예외:`, err);
     }
     return res.status(200).json({ ok: true });
   }
