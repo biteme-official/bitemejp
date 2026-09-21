@@ -184,9 +184,9 @@ export function PartnerProductLink({ productNumericId }: { productNumericId: str
               <DrawerDescription>お気に入りの商品を紹介して、報酬を受け取る。</DrawerDescription>
             </DrawerHeader>
             <ul className="space-y-2 text-sm mb-5">
-              <li className="flex gap-2"><span className="text-primary font-bold">10%</span><span>紹介リンク経由のご注文（商品代金・割引後）の{pct}%が報酬に。月末締め・翌月末払い</span></li>
-              <li className="flex gap-2"><span className="text-primary font-bold">1分</span><span>審査なし。登録と同時に紹介リンクが発行されます</span></li>
-              <li className="flex gap-2"><span className="text-primary font-bold">条件</span><span>成果対象はお客様が<b>LINEログイン後</b>に行ったご注文のみ。投稿には「#PR」等の広告表示が必要です</span></li>
+              <li className="flex gap-2"><span className="text-primary font-bold shrink-0 w-9 whitespace-nowrap">10%</span><span>紹介リンク経由のご注文（商品代金・割引後）の{pct}%が報酬に。月末締め・翌月末払い</span></li>
+              <li className="flex gap-2"><span className="text-primary font-bold shrink-0 w-9 whitespace-nowrap">1分</span><span>審査なし。登録と同時に紹介リンクが発行されます</span></li>
+              <li className="flex gap-2"><span className="text-primary font-bold shrink-0 w-9 whitespace-nowrap">条件</span><span>成果対象はお客様が<b>LINEログイン後</b>に行ったご注文のみ。投稿には「#PR」等の広告表示が必要です</span></li>
             </ul>
 
             {guest ? (
