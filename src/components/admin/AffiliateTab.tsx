@@ -33,7 +33,7 @@ interface Conversion {
   rate: number;
   rate_source: string;
   commission: number;
-  status: "pending" | "confirmed" | "reversed" | "self" | "void";
+  status: "pending" | "confirmed" | "reversed" | "self" | "void" | "nonmember";
   ordered_at: string;
   confirm_at: string;
 }
@@ -46,6 +46,8 @@ interface AffiliateData {
   enabled: boolean;
   baseRate: number;
   monthStart: string;
+  /** 회원 한정이 거른 비회원 주문 — 이달 건수·매출 (커미션은 항상 0) */
+  nonmember: { orders: number; sales: number };
   partners: Partner[];
   recent: Conversion[];
   campaigns: Campaign[];
@@ -72,7 +74,7 @@ const pct = (r: number) => `${Math.round(r * 1000) / 10}%`;
 const day = (iso: string) => iso.slice(0, 10);
 
 const STATUS_LABEL: Record<Conversion["status"], string> = {
-  pending: "확정 대기", confirmed: "확정", reversed: "환불 회수", self: "자기구매", void: "무효",
+  pending: "확정 대기", confirmed: "확정", reversed: "환불 회수", self: "자기구매", void: "무효", nonmember: "비회원",
 };
 const STATUS_CLASS: Record<Conversion["status"], string> = {
   pending: "bg-amber-50 text-amber-700",
@@ -80,6 +82,7 @@ const STATUS_CLASS: Record<Conversion["status"], string> = {
   reversed: "bg-red-50 text-red-700",
   self: "bg-slate-100 text-slate-600",
   void: "bg-slate-100 text-slate-500",
+  nonmember: "bg-slate-100 text-slate-500",
 };
 const ATTR_LABEL: Record<Conversion["attribution"], string> = { code: "코드", ref: "링크", customer: "고객" };
 
@@ -163,16 +166,18 @@ export default function AffiliateTab({ secret }: { secret: string }) {
         <span className="font-semibold">{data.enabled ? "● 장부 기록 중" : "○ 꺼짐 — AFFILIATE_ENABLED 미설정"}</span>
         <span>기본 커미션 {pct(data.baseRate)}</span>
         <span>귀속 창 30일 · 확정 대기 30일</span>
+        <span>회원(LINE 로그인) 주문만 커미션</span>
         <span className="text-muted-foreground">이달 집계 기준 {day(data.monthStart)} (JST)</span>
       </div>
 
       {/* 이달 요약 */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         {[
           ["이달 귀속 주문", `${totals.orders}건`],
           ["이달 귀속 매출", yen(totals.sales)],
           ["커미션 확정 대기", yen(totals.pending)],
           ["커미션 확정", yen(totals.confirmed)],
+          ["비회원이라 제외", `${data.nonmember.orders}건 · ${yen(data.nonmember.sales)}`],
         ].map(([k, v]) => (
           <Card key={k}><CardContent className="p-4">
             <p className="text-[11px] text-muted-foreground">{k}</p>

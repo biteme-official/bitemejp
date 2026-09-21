@@ -9,6 +9,11 @@
  *  - Shopify 를 다시 부르지 않는다. 판정에 필요한 값은 웹훅 페이로드와 우리 DB 에서만 읽는다
  *    (웹훅 5초 제한 — 초과가 쌓이면 Shopify 가 웹훅을 자동 삭제한다).
  *  - `AFFILIATE_ENABLED` 환경변수가 킬스위치다. 배포 없이 끌 수 있어야 한다.
+ *  - **회원 한정(설계 §5, 2026-09-21 확정)** — 구매자가 회원(LINE 로그인 고객)일 때만 커미션이 생긴다.
+ *    회원 판정은 «로그인했는가»가 아니라 «주문 고객이 line_id 표식을 가진 계정인가» — 체크아웃이 토큰
+ *    무효 시 게스트로 재시도하는 폴백과 초기 가입자(UNIDENTIFIED_CUSTOMER)를 둘 다 흡수하기 위해서다.
+ *    비회원 주문은 파트너를 알 수 있을 때(코드·카트 ref)만 status=nonmember·커미션 0 으로 남긴다 —
+ *    회원 한정이 얼마를 걸렀는지 어드민에서 보기 위해.
  *
  * ⚠️ `api/` 안의 상대 import 는 반드시 `.js` 확장자 (2026-08-21 장애).
  */
@@ -75,7 +80,8 @@ export interface OrderForAttribution {
   order_number: number;
   created_at?: string | null;
   email?: string | null;
-  customer?: { id: number; email?: string | null } | null;
+  /** REST 웹훅 페이로드의 customer.tags 는 쉼표 구분 문자열이다 (Admin GraphQL 이면 배열) */
+  customer?: { id: number; email?: string | null; tags?: string | string[] | null } | null;
   current_subtotal_price?: string | null;
   subtotal_price?: string | null;
   discount_codes?: Array<{ code: string; amount?: string; type?: string }> | null;
@@ -84,6 +90,12 @@ export interface OrderForAttribution {
 }
 
 export type Attribution = 'code' | 'ref' | 'customer';
+
+/** 웹훅이 LINE 알림용으로 이미 조회한 결과를 넘겨받는다 — 어필리에이트 갈래가 Shopify 를 다시 부르지 않기 위해 */
+export interface RecordOptions {
+  /** resolveLineTarget 이 찾은 LINE userId. null = 조회했지만 LINE 유저 아님, undefined = 조회 못 함(예외 등) */
+  lineUserId?: string | null;
+}
 
 export interface ConversionDecision {
   partner: AffPartner;
@@ -99,6 +111,21 @@ function lineUserIdFromEmail(email: string | null | undefined): string | null {
   if (!email || !email.endsWith(PLACEHOLDER_EMAIL_DOMAIN)) return null;
   const local = email.slice(0, -PLACEHOLDER_EMAIL_DOMAIN.length);
   return local.startsWith('line_') ? local.slice('line_'.length) : null;
+}
+
+/**
+ * 회원 주문인가 — 주문 고객이 LINE 연동 표식을 가진 계정인지.
+ * 순서: ① 웹훅이 Admin 으로 이미 확인한 lineUserId → ② 페이로드 customer.tags 의 `line_id:` →
+ * ③ 자리표시자 이메일. Admin 조회가 실패해도(undefined) ②③으로 판정할 수 있어 조용히 비회원으로
+ * 떨어지는 일이 줄어든다. 셋 다 없으면 비회원.
+ */
+export function isMemberOrder(order: OrderForAttribution, lineUserId?: string | null): boolean {
+  if (lineUserId) return true;
+  const rawTags = order.customer?.tags;
+  const tags = Array.isArray(rawTags) ? rawTags : (rawTags ?? '').split(',');
+  if (tags.some((t) => t.trim().startsWith('line_id:'))) return true;
+  if (lineUserIdFromEmail(order.email ?? order.customer?.email ?? null)) return true;
+  return false;
 }
 
 /** 귀속 기준액 = current_subtotal_price (2026-09-17 실측: 세 0·배송 별도·할인 후 상품 소계). 엔 정수 */
@@ -126,7 +153,8 @@ function daysBetween(a: Date, b: Date): number {
 export async function decideAttribution(
   sb: SupabaseClient,
   order: OrderForAttribution,
-  orderedAt: Date
+  orderedAt: Date,
+  opts: { member: boolean } = { member: true }
 ): Promise<ConversionDecision | null> {
   // 1) 코드
   const codes = (order.discount_codes ?? []).map((d) => d.code.toUpperCase()).filter(Boolean);
@@ -161,9 +189,9 @@ export async function decideAttribution(
     }
   }
 
-  // 3) 로그인 고객의 서버측 터치
+  // 3) 회원의 서버측 터치 — 회원 한정의 주 경로. 비회원은 터치가 있을 수 없으니 건너뛴다
   const customerId = order.customer?.id;
-  if (customerId) {
+  if (opts.member && customerId) {
     const since = new Date(orderedAt.getTime() - ATTRIBUTION_WINDOW_DAYS * 86_400_000).toISOString();
     const { data, error } = await sb
       .from('aff_touches')
@@ -244,7 +272,7 @@ export function isSelfPurchase(partner: AffPartner, order: OrderForAttribution):
 // ── 적재 ─────────────────────────────────────────────────────────────────────
 
 export interface RecordResult {
-  outcome: 'disabled' | 'unattributed' | 'inserted' | 'duplicate' | 'error';
+  outcome: 'disabled' | 'unattributed' | 'inserted' | 'nonmember' | 'duplicate' | 'error';
   detail?: string;
 }
 
@@ -252,14 +280,19 @@ export interface RecordResult {
  * orders/create 한 건을 장부에 앉힌다. **절대 throw 하지 않는다.**
  * order_id 유니크 + ignoreDuplicates 로 웹훅 재전송에도 두 번 쌓이지 않는다.
  */
-export async function recordConversionFromOrder(order: OrderForAttribution): Promise<RecordResult> {
+export async function recordConversionFromOrder(
+  order: OrderForAttribution,
+  options: RecordOptions = {}
+): Promise<RecordResult> {
   if (!isAffiliateEnabled()) return { outcome: 'disabled' };
 
   try {
     const sb = getSupabase();
     const orderedAt = order.created_at ? new Date(order.created_at) : new Date();
 
-    const decision = await decideAttribution(sb, order, orderedAt);
+    // 회원 게이트가 맨 앞이다 (설계 §5). 비회원이면 코드·카트 ref 로 파트너를 알 수 있을 때만 기록한다.
+    const member = isMemberOrder(order, options.lineUserId);
+    const decision = await decideAttribution(sb, order, orderedAt, { member });
     if (!decision) return { outcome: 'unattributed' };
 
     const { partner, attribution, clickId } = decision;
@@ -268,10 +301,11 @@ export async function recordConversionFromOrder(order: OrderForAttribution): Pro
 
     const eligible = eligibleAmountOf(order);
     const self = isSelfPurchase(partner, order);
-    // 정지·탈퇴한 파트너의 주문은 장부에는 남기되 커미션 0 (void) — 나중에 대조할 수 있게
+    // 정지·탈퇴한 파트너의 주문은 장부에는 남기되 커미션 0 (void) — 나중에 대조할 수 있게.
+    // 비회원 주문도 같은 방식으로 nonmember·0 — 회원 한정이 거른 규모를 셀 수 있게.
     const inactive = partner.status !== 'active';
-    const commission = self || inactive ? 0 : Math.round(eligible * rate);
-    const status = self ? 'self' : inactive ? 'void' : 'pending';
+    const commission = !member || self || inactive ? 0 : Math.round(eligible * rate);
+    const status = !member ? 'nonmember' : self ? 'self' : inactive ? 'void' : 'pending';
     const confirmAt = new Date(orderedAt.getTime() + CONFIRM_WAIT_DAYS * 86_400_000);
 
     const row = {
@@ -293,6 +327,8 @@ export async function recordConversionFromOrder(order: OrderForAttribution): Pro
         discount_codes: order.discount_codes ?? [],
         aff_ref: attr(order, 'aff_ref') ?? null,
         aff_ref_at: attr(order, 'aff_ref_at') ?? null,
+        member,
+        member_hint: options.lineUserId === undefined ? 'payload' : 'admin',
         current_subtotal_price: order.current_subtotal_price ?? null,
         subtotal_price: order.subtotal_price ?? null,
       },
@@ -309,7 +345,8 @@ export async function recordConversionFromOrder(order: OrderForAttribution): Pro
       `[Affiliate] ${inserted ? '적재' : '중복(무시)'} ${row.order_name} → ${partner.code} ` +
       `${attribution} ¥${eligible} × ${rate} = ¥${commission} (${status}) [${rateSource}]`
     );
-    return { outcome: inserted ? 'inserted' : 'duplicate' };
+    if (!inserted) return { outcome: 'duplicate' };
+    return { outcome: member ? 'inserted' : 'nonmember' };
   } catch (err) {
     return { outcome: 'error', detail: err instanceof Error ? err.message : String(err) };
   }

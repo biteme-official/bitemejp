@@ -68,7 +68,14 @@ async function handleGet(res: VercelResponse) {
 
   type MonthRow = { partner_id: number; status: string; commission: number; eligible_amount: number };
   const stats = new Map<number, { orders: number; sales: number; pending: number; confirmed: number; self: number }>();
+  // 회원 한정이 거른 것 — 비회원 주문은 파트너별 성과에 넣지 않고 따로 센다
+  const nonmember = { orders: 0, sales: 0 };
   for (const r of (monthQ.data ?? []) as MonthRow[]) {
+    if (r.status === 'nonmember') {
+      nonmember.orders += 1;
+      nonmember.sales += r.eligible_amount;
+      continue;
+    }
     const s = stats.get(r.partner_id) ?? { orders: 0, sales: 0, pending: 0, confirmed: 0, self: 0 };
     s.orders += 1;
     s.sales += r.eligible_amount;
@@ -99,6 +106,7 @@ async function handleGet(res: VercelResponse) {
     enabled: isAffiliateEnabled(),
     baseRate: BASE_RATE,
     monthStart: since,
+    nonmember,
     partners,
     recent,
     campaigns: campaignsQ.data ?? [],
