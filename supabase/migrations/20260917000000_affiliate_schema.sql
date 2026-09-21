@@ -160,3 +160,16 @@ alter table public.aff_clicks         enable row level security;
 alter table public.aff_touches        enable row level security;
 alter table public.aff_conversions    enable row level security;
 alter table public.aff_payouts        enable row level security;
+
+-- ── 권한 ───────────────────────────────────────────────────────────────────────
+-- 2026-09-21 실측: SQL 에디터에서 만든 표에 service_role 권한이 붙지 않아
+-- `/api/affiliate-admin` 이 "permission denied for table aff_partners" 로 500.
+-- 서버(service_role)만 접근한다 — anon·authenticated 에는 아무것도 주지 않는다.
+grant select, insert, update, delete on
+  public.aff_partners, public.aff_campaigns, public.aff_campaign_codes,
+  public.aff_clicks, public.aff_touches, public.aff_conversions, public.aff_payouts
+  to service_role;
+grant usage, select on
+  public.aff_partners_id_seq, public.aff_campaigns_id_seq, public.aff_campaign_codes_id_seq,
+  public.aff_clicks_id_seq, public.aff_conversions_id_seq, public.aff_payouts_id_seq
+  to service_role;
