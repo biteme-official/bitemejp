@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { ShopifyProduct, CollectionImage, fetchProducts, fetchCollectionProducts, fetchBestSellingProducts, fetchNewProducts, formatPrice, getPreorderDate, fetchProductDiscounts } from '@/lib/shopify';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -95,7 +95,6 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
     availability: "all",
   });
 
-  const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
 
@@ -196,10 +195,10 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
     return count;
   }, [filters, maxPrice]);
 
+  // 이동은 카드 안의 Link(진짜 <a>)가 한다 — Ctrl+클릭 새 탭이 되도록 (#185). 여기선 트래킹·스크롤 저장만
   const handleProductClick = (numericId: string, title?: string, price?: number) => {
     track('product_click', { product_id: numericId, product_title: title, price, collection: collectionHandle ?? undefined });
     saveScrollPosition(location.pathname);
-    navigate(`/product/${numericId}`);
   };
 
   const getQuery = useCallback(() => {
@@ -424,8 +423,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
               return (
                 <div
                   key={product.node.id}
-                  className="bg-card rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow cursor-pointer group"
-                  onClick={() => handleProductClick(product.node.id.split('/').pop()!, product.node.title, parseFloat(product.node.priceRange.minVariantPrice.amount))}
+                  className="relative bg-card rounded-xl overflow-hidden border border-border hover:shadow-lg transition-shadow group"
                 >
                   <div className="aspect-square bg-muted relative overflow-hidden">
                     {image ? (
@@ -495,7 +493,14 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                   </div>
                   <div className="p-4">
                     <h3 className="font-medium text-sm line-clamp-2 mb-1 group-hover:text-primary transition-colors">
-                      {product.node.title}
+                      {/* 상품명 링크의 ::after 를 카드 전체로 늘려 어디를 눌러도 이동(stretched link). 버튼들은 z-10 으로 위에 */}
+                      <Link
+                        to={`/product/${product.node.id.split('/').pop()}`}
+                        onClick={() => handleProductClick(product.node.id.split('/').pop()!, product.node.title, parseFloat(product.node.priceRange.minVariantPrice.amount))}
+                        className="after:absolute after:inset-0 after:content-['']"
+                      >
+                        {product.node.title}
+                      </Link>
                     </h3>
                     <div
                       className="jdgm-widget jdgm-preview-badge mb-2"
@@ -550,15 +555,16 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                           );
                         })()}
                       </div>
-                      <Button
-                        size="sm"
-                        variant="secondary"
+                      {/* 메인 섹션 카드(ProductCard)와 같은 둥근 장바구니 버튼 (#185) */}
+                      <button
+                        type="button"
+                        aria-label="カートに追加"
                         onClick={(e) => handleAddToCart(e, product)}
-                        className="h-8 w-8 p-0 flex-shrink-0"
+                        className="relative z-10 shrink-0 w-8 h-8 rounded-full bg-foreground text-background flex items-center justify-center hover:bg-primary transition-colors disabled:opacity-40 disabled:hover:bg-foreground"
                         disabled={isCompletelyOutOfStock}
                       >
                         <ShoppingCart className="h-4 w-4" />
-                      </Button>
+                      </button>
                     </div>
                   </div>
                 </div>

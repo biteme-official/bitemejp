@@ -6,6 +6,7 @@ import { Footer } from "@/components/layout/Footer";
 import { HeroBanner } from "@/components/home/HeroBanner";
 import { AffiliatePromo } from "@/components/home/AffiliatePromo";
 import { NewProducts } from "@/components/home/NewProducts";
+import { CategoryCircles } from "@/components/home/CategoryCircles";
 import { CategorySections } from "@/components/home/CategorySections";
 import { InstagramReels } from "@/components/home/InstagramReels";
 import { ProductGrid } from "@/components/shop/ProductGrid";
@@ -64,6 +65,7 @@ const Index = () => {
       {!isFiltered && (
         <div className="max-w-7xl mx-auto">
           <HeroBanner />
+          <CategoryCircles />
           <AffiliatePromo />
           <NewProducts />
           <CategorySections />

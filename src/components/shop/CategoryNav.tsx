@@ -1,8 +1,22 @@
 import { useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { extractHandleFromUrl } from '@/lib/shopify';
 import { useCategoryMenu } from '@/hooks/useCategoryMenu';
 import { track } from '@/lib/track';
+
+/**
+ * 1차 카테고리는 칩이 아니라 텍스트 링크 (#185, 시안의 상단 내비).
+ * 활성 항목은 굵게 + 브랜드색 밑줄. PC 는 가운데 정렬, 모바일은 가로 스크롤.
+ * 진짜 <a>(/?collection=…) 라 Ctrl+클릭·휠클릭이면 새 탭. 같은 탭 클릭은 preventDefault 하고
+ * 기존 onSelect 로 쿼리만 바꾼다(ALL 클릭 시 검색어까지 지우는 기존 동작 유지).
+ */
+const isPlainLeftClick = (e: React.MouseEvent) =>
+  e.button === 0 && !e.metaKey && !e.ctrlKey && !e.shiftKey && !e.altKey;
+const TOP_LINK =
+  'flex-shrink-0 px-3 py-2.5 text-sm whitespace-nowrap border-b-2 transition-colors';
+const TOP_LINK_ACTIVE = 'font-bold text-foreground border-primary';
+const TOP_LINK_IDLE = 'font-medium text-muted-foreground border-transparent hover:text-foreground';
 
 interface CategoryNavProps {
   selectedCollection: string | null;
@@ -50,19 +64,15 @@ export function CategoryNav({ selectedCollection, onSelect }: CategoryNavProps) 
       {/* Top-level category chips */}
       <div
         ref={topRef}
-        className="max-w-7xl mx-auto flex gap-2 overflow-x-auto scrollbar-hide px-4 py-2"
+        className="max-w-7xl mx-auto flex gap-1 md:gap-2 md:justify-center overflow-x-auto scrollbar-hide px-2 md:px-4"
       >
-        <button
-          onClick={() => onSelect(null)}
-          className={cn(
-            'flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
-            !selectedCollection
-              ? 'bg-foreground text-background'
-              : 'bg-secondary text-foreground hover:bg-secondary/80'
-          )}
+        <Link
+          to="/"
+          onClick={(e) => { if (isPlainLeftClick(e)) { e.preventDefault(); onSelect(null); } }}
+          className={cn(TOP_LINK, !selectedCollection ? TOP_LINK_ACTIVE : TOP_LINK_IDLE)}
         >
-          ALL
-        </button>
+          すべて
+        </Link>
 
         {topItems.map(item => {
           const handle = extractHandleFromUrl(item.url);
@@ -72,19 +82,19 @@ export function CategoryNav({ selectedCollection, onSelect }: CategoryNavProps) 
               child => extractHandleFromUrl(child.url) === selectedCollection
             );
 
+          if (!handle) return null;
           return (
-            <button
+            <Link
               key={item.id}
-              onClick={() => { if (handle) { track('category_click', { name: item.title, handle }); onSelect(handle); } }}
-              className={cn(
-                'flex-shrink-0 px-4 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap',
-                isActive
-                  ? 'bg-foreground text-background'
-                  : 'bg-secondary text-foreground hover:bg-secondary/80'
-              )}
+              to={`/?collection=${encodeURIComponent(handle)}`}
+              onClick={(e) => {
+                track('category_click', { name: item.title, handle });
+                if (isPlainLeftClick(e)) { e.preventDefault(); onSelect(handle); }
+              }}
+              className={cn(TOP_LINK, isActive ? TOP_LINK_ACTIVE : TOP_LINK_IDLE)}
             >
               {item.title}
-            </button>
+            </Link>
           );
         })}
       </div>
@@ -100,7 +110,7 @@ export function CategoryNav({ selectedCollection, onSelect }: CategoryNavProps) 
           <button
             onClick={() => {
               const handle = extractHandleFromUrl(activeTopItem!.url);
-              handle && onSelect(handle);
+              if (handle) onSelect(handle);
             }}
             className={cn(
               'flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap',
