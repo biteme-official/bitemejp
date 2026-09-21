@@ -1245,6 +1245,29 @@ export async function fetchCollectionProducts(handle: string, first: number = 20
   };
 }
 
+/**
+ * localStorage.affiliate_ref → 카트 속성 두 줄. 키·형식은 src/lib/affiliate-ref.ts 와 같다
+ * (그 모듈은 /a/:code 가 쓰며 별도 PR 로 들어온다 — 결제 경로 PR 은 단독으로 두기 위해 여기서 직접 읽는다).
+ * 30일이 지난 ref 는 싣지 않는다. 특별 코드(affiliate_discount)와 달리 체크아웃 후에도 지우지 않는다.
+ */
+function readAffiliateRefAttributes(): { key: string; value: string }[] {
+  try {
+    const raw = localStorage.getItem('affiliate_ref');
+    if (!raw) return [];
+    const v = JSON.parse(raw) as { code?: unknown; at?: unknown; clickId?: unknown };
+    const code = typeof v.code === 'string' ? v.code.trim().toUpperCase() : '';
+    if (!/^[A-Z0-9]{4,12}$/.test(code) || typeof v.at !== 'number') return [];
+    if (Date.now() - v.at > 30 * 24 * 60 * 60 * 1000) return [];
+    const ref = typeof v.clickId === 'number' && v.clickId > 0 ? `${code}:${v.clickId}` : code;
+    return [
+      { key: 'aff_ref', value: ref },
+      { key: 'aff_ref_at', value: new Date(v.at).toISOString() },
+    ];
+  } catch {
+    return [];
+  }
+}
+
 export async function createStorefrontCheckout(items: { variantId: string; quantity: number }[], formEmail?: string): Promise<string> {
   const affiliateDiscount = localStorage.getItem('affiliate_discount');
   return createStorefrontCheckoutWithDiscount(items, affiliateDiscount, formEmail);
@@ -1332,6 +1355,11 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
   const [clientId, sessionId] = await Promise.all([getGA4ClientId(), getGA4SessionId()]);
   if (clientId) trackingAttributes.push({ key: 'ga_client_id', value: clientId });
   if (sessionId) trackingAttributes.push({ key: 'ga_session_id', value: sessionId });
+  // 어필리에이트 링크 귀속 — 보조 경로 (#178 설계 §5). 주 경로는 서버측 회원 터치이고,
+  // 이 두 줄은 그 터치가 누락됐을 때 웹훅이 note_attributes 로 읽는 안전망이다.
+  // 값 규약: aff_ref = "CODE" 또는 "CODE:clickId", aff_ref_at = 클릭 시각 ISO.
+  // ⚠️ 결제 경로다 — 어떤 예외도 밖으로 내지 않고, 실패하면 그냥 안 싣는다.
+  for (const a of readAffiliateRefAttributes()) trackingAttributes.push(a);
   if (trackingAttributes.length > 0) input.attributes = trackingAttributes;
 
   let data = await storefrontApiRequest(CART_CREATE_MUTATION, { input });
