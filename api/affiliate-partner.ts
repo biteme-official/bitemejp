@@ -75,7 +75,9 @@ async function buildView(partner: AffPartner) {
   const codeByCampaign = new Map(((codesQ.data ?? []) as Array<{ campaign_id: number; shopify_code: string }>).map((c) => [c.campaign_id, c.shopify_code]));
   const campaigns = ((campQ.data ?? []) as Array<{ id: number; name: string; starts_at: string; ends_at: string; commission_rate: number; discount_percent: number | null; scope: string; target_ids: string[] }>)
     .filter((c) => c.scope === 'all' || (c.scope === 'partners' && (c.target_ids ?? []).includes(String(partner.id))) || c.scope === 'products')
-    .map((c) => ({ name: c.name, startsAt: c.starts_at, endsAt: c.ends_at, commissionRate: Number(c.commission_rate), discountPercent: c.discount_percent, scope: c.scope, code: codeByCampaign.get(c.id) ?? null }));
+    .map((c) => ({ name: c.name, startsAt: c.starts_at, endsAt: c.ends_at, commissionRate: Number(c.commission_rate), discountPercent: c.discount_percent, scope: c.scope, code: codeByCampaign.get(c.id) ?? null,
+      // 상품 한정 캠페인만 대상 상품 id 를 준다 — 상품 페이지가 「이 상품은 n%」를 계산한다. 상품 id 는 공개 정보
+      targetIds: c.scope === 'products' ? (c.target_ids ?? []).map((t) => String(t).split('/').pop() ?? String(t)) : [] }));
 
   return {
     ok: true,

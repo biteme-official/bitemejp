@@ -19,7 +19,7 @@ export interface PartnerView {
   funnel: { clicks: number; orders: number; confirmed: number; paid: number };
   commission: { pendingThisMonth: number; confirmedThisMonth: number; pendingTotal: number; confirmedUnpaid: number };
   recent: Array<{ order: string | null; attribution: string; amount: number; commission: number; status: string; orderedAt: string; confirmAt: string }>;
-  campaigns: Array<{ name: string; startsAt: string; endsAt: string; commissionRate: number; discountPercent: number | null; scope: string; code: string | null }>;
+  campaigns: Array<{ name: string; startsAt: string; endsAt: string; commissionRate: number; discountPercent: number | null; scope: string; code: string | null; targetIds: string[] }>;
   payouts: Array<{ period: string; gross: number; withholding: number; net: number; status: string; paid_at: string | null; dispute_until: string | null }>;
 }
 
