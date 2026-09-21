@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { ShopifyProduct, fetchNewProducts, fetchProductDiscounts } from "@/lib/shopify";
 import { useDiscountStore } from "@/stores/discountStore";
 import { ProductCarousel, ProductCarouselSkeleton } from "./ProductCarousel";
 
 export function NewProducts() {
-  const navigate = useNavigate();
   const [products, setProducts] = useState<ShopifyProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const { productDiscounts: discountMap, setProductDiscounts } = useDiscountStore();
@@ -42,7 +40,7 @@ export function NewProducts() {
       products={products.slice(0, 8)}
       badge={{ label: "NEW", className: "bg-emerald-500 text-white" }}
       discountMap={discountMap}
-      onMore={() => navigate("/?sort=created_at_desc")}
+      moreTo="/?sort=created_at_desc"
       trackName="new"
       className="mt-8"
       style={{ animationDelay: "0.2s" }}

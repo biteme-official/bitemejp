@@ -1,11 +1,9 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { ShopifyProduct, fetchBestSellingProducts, fetchProductDiscounts } from "@/lib/shopify";
 import { useDiscountStore } from "@/stores/discountStore";
 import { ProductCarousel, ProductCarouselSkeleton } from "./ProductCarousel";
 
 export function PopularProducts() {
-  const navigate = useNavigate();
   const [products, setProducts] = useState<ShopifyProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const { productDiscounts: discountMap, setProductDiscounts } = useDiscountStore();
@@ -39,7 +37,7 @@ export function PopularProducts() {
       products={products.slice(0, 8)}
       badge={{ label: "BEST" }}
       discountMap={discountMap}
-      onMore={() => navigate("/?collection=%E4%BA%BA%E6%B0%97%E5%95%86%E5%93%81")}
+      moreTo="/?collection=%E4%BA%BA%E6%B0%97%E5%95%86%E5%93%81"
       trackName="best_selling"
       className="mt-8"
       style={{ animationDelay: "0.3s" }}

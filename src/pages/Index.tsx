@@ -65,7 +65,7 @@ const Index = () => {
       {!isFiltered && (
         <div className="max-w-7xl mx-auto">
           <HeroBanner />
-          <CategoryCircles onSelect={handleCollectionSelect} />
+          <CategoryCircles />
           <AffiliatePromo />
           <NewProducts />
           <CategorySections />

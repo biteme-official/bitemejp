@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
   ShopifyCollection,
   ShopifyProduct,
@@ -31,7 +30,6 @@ interface CategoryData {
 }
 
 export function CategorySections() {
-  const navigate = useNavigate();
   const [sections, setSections] = useState<CategoryData[]>([]);
   const [loading, setLoading] = useState(true);
   const [discountMap, setDiscountMap] = useState<Record<string, number>>({});
@@ -104,7 +102,7 @@ export function CategorySections() {
             discountMap={discountMap}
             collectionDiscountPct={collDiscountPct}
             moreLabel="もっと見る"
-            onMore={() => navigate(`/?collection=${collection.handle}`)}
+            moreTo={`/?collection=${encodeURIComponent(collection.handle)}`}
             trackName={collection.handle}
           />
         );

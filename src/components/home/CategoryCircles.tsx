@@ -11,6 +11,7 @@ import {
   Sparkles,
   UtensilsCrossed,
 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { extractHandleFromUrl } from "@/lib/shopify";
 import { useCategoryMenu } from "@/hooks/useCategoryMenu";
 import { track } from "@/lib/track";
@@ -23,6 +24,7 @@ import { cn } from "@/lib/utils";
  * 이름이 아래 키워드에 걸리는 것만 남기므로 브랜드 컬렉션(チェゴシム·SSFW·APPLE CIDER RECIPE 등)은
  * 자동으로 빠진다(하영 결정 2026-09-21 — 아이콘이 너무 많아서). 브랜드는 상단 내비에서 그대로 간다.
  * 새 상품 카테고리를 메뉴에 추가하면 여기 키워드도 한 줄 더해야 보인다. 색은 파스텔 8색을 순환.
+ * 항목은 진짜 링크(/?collection=…)라 Ctrl+클릭으로 새 탭에 열린다. 같은 탭에서는 라우터가 쿼리만 바꾼다.
  * 모바일은 가로 스크롤, PC 는 줄바꿈해 가운데 정렬 (가운데 정렬 + 가로 스크롤을 같이 쓰면 앞쪽이 잘려 못 간다).
  */
 const ICON_RULES: { test: RegExp; icon: LucideIcon }[] = [
@@ -51,11 +53,7 @@ function pickIcon(title: string): LucideIcon | undefined {
   return ICON_RULES.find(r => r.test.test(title))?.icon;
 }
 
-interface CategoryCirclesProps {
-  onSelect: (handle: string | null) => void;
-}
-
-export function CategoryCircles({ onSelect }: CategoryCirclesProps) {
+export function CategoryCircles() {
   const { menu, collections } = useCategoryMenu();
 
   const items: { key: string; title: string; handle: string | null; icon: LucideIcon }[] = [
@@ -86,12 +84,11 @@ export function CategoryCircles({ onSelect }: CategoryCirclesProps) {
       <h2 className="text-lg md:text-xl font-bold text-foreground text-center mb-4">カテゴリー</h2>
       <div className="flex gap-3 md:gap-5 md:gap-y-6 px-4 overflow-x-auto scrollbar-hide md:overflow-visible md:flex-wrap md:justify-center pb-1">
         {items.map(({ key, title, handle, icon: Icon }, i) => (
-          <button
+          <Link
             key={key}
-            type="button"
+            to={handle ? `/?collection=${encodeURIComponent(handle)}` : "/"}
             onClick={() => {
               if (handle) track("category_click", { name: title, handle, source: "home_circles" });
-              onSelect(handle);
             }}
             className="group flex-shrink-0 flex flex-col items-center gap-2 w-[72px] md:w-24"
           >
@@ -106,7 +103,7 @@ export function CategoryCircles({ onSelect }: CategoryCirclesProps) {
             <span className="text-[11px] md:text-xs font-medium text-foreground text-center leading-tight line-clamp-2 break-keep">
               {title}
             </span>
-          </button>
+          </Link>
         ))}
       </div>
     </section>

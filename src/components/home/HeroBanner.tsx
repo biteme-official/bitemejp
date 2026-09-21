@@ -136,24 +136,31 @@ export function HeroBanner() {
         className="flex transition-transform duration-500 ease-in-out"
         style={{ transform: `translateX(-${currentIndex * 100}%)` }}
       >
-        {banners.map((banner) => (
-          <div
-            key={banner.id}
-            className="relative w-full flex-shrink-0"
-            onClick={() => {
-              track('banner_click', { banner_title: banner.text.headline || banner.fields['title'] || banner.handle, banner_id: banner.id, position: currentIndex });
-              if (banner.linkUrl) window.location.href = banner.linkUrl;
-            }}
-            style={{ cursor: banner.linkUrl ? 'pointer' : 'default' }}
-          >
-            <img
-              src={banner.image!.url}
-              alt={banner.image!.altText || banner.text.headline || "Banner"}
-              className="w-full h-auto block"
-            />
-            <BannerText text={banner.text} />
-          </div>
-        ))}
+        {banners.map((banner) => {
+          const inner = (
+            <>
+              <img
+                src={banner.image!.url}
+                alt={banner.image!.altText || banner.text.headline || "Banner"}
+                className="w-full h-auto block"
+                draggable={false}
+              />
+              <BannerText text={banner.text} />
+            </>
+          );
+          const onClick = () =>
+            track('banner_click', { banner_title: banner.text.headline || banner.fields['title'] || banner.handle, banner_id: banner.id, position: currentIndex });
+          // 링크가 있으면 진짜 <a> — Ctrl+클릭 새 탭·링크 복사가 된다. 절대 URL 일 수 있어 Link 대신 a
+          return banner.linkUrl ? (
+            <a key={banner.id} href={banner.linkUrl} onClick={onClick} className="relative w-full flex-shrink-0 block">
+              {inner}
+            </a>
+          ) : (
+            <div key={banner.id} className="relative w-full flex-shrink-0">
+              {inner}
+            </div>
+          );
+        })}
       </div>
 
       {/* Navigation Arrows */}

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { ShopifyProduct } from "@/lib/shopify";
 import { ProductOptionDialog } from "@/components/shop/ProductOptionDialog";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,7 +14,9 @@ import { ProductBadge, ProductCard } from "./ProductCard";
  * 화살표는 넘칠 때만 보이고, 양 끝에 닿으면 그쪽 화살표가 사라진다.
  * 모바일은 손가락 스크롤이 자연스러워 화살표를 감춘다(md 이상에서만 표시).
  * PC 는 마우스 휠이 세로라 가로 목록이 안 넘어간다(하영 2026-09-21) → 마우스로 잡고 끌어서 넘기게 한다.
- * 끌고 난 뒤 손을 떼는 순간의 click 은 카드 이동으로 새면 안 되므로 캡처 단계에서 막는다.
+ * 끌고 난 뒤 손을 떼는 순간의 click 은 카드 이동으로 새면 안 되므로 캡처 단계에서 preventDefault 한다
+ * (카드 링크는 react-router Link 라 defaultPrevented 면 이동하지 않는다).
+ * 카드가 <a> 라 브라우저의 "링크 끌기"(dragstart)가 몇 px 만에 포인터를 가로채므로 트랙 안에서는 막는다.
  * 카드의 장바구니 버튼은 하단 ALL 그리드와 같은 옵션 다이얼로그를 띄운다.
  */
 interface ProductCarouselProps {
@@ -25,7 +27,8 @@ interface ProductCarouselProps {
   discountMap?: Record<string, number>;
   collectionDiscountPct?: number;
   moreLabel?: string;
-  onMore?: () => void;
+  /** 「もっと見る」 링크 주소. 진짜 링크라 새 탭 열기가 된다 */
+  moreTo?: string;
   /** 클릭 트래킹용 섹션 식별자 */
   trackName?: string;
   className?: string;
@@ -62,12 +65,11 @@ export function ProductCarousel({
   discountMap = {},
   collectionDiscountPct = 0,
   moreLabel = "すべて見る",
-  onMore,
+  moreTo,
   trackName,
   className,
   style,
 }: ProductCarouselProps) {
-  const navigate = useNavigate();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [canPrev, setCanPrev] = useState(false);
   const [canNext, setCanNext] = useState(false);
@@ -137,15 +139,14 @@ export function ProductCarousel({
     el.scrollBy({ left: dir * el.clientWidth * 0.8, behavior: "smooth" });
   };
 
+  // 이동은 카드 안의 Link 가 한다. 여기서는 트래킹만
   const handleClick = (product: ShopifyProduct) => {
-    const numericId = product.node.id.split("/").pop()!;
     track("product_click", {
-      product_id: numericId,
+      product_id: product.node.id.split("/").pop(),
       product_title: product.node.title,
       price: parseFloat(product.node.priceRange.minVariantPrice.amount),
       collection: trackName,
     });
-    navigate(`/product/${numericId}`);
   };
 
   if (products.length === 0) return null;
@@ -155,14 +156,14 @@ export function ProductCarousel({
       {/* 제목은 PC 에서 가운데, 모바일은 긴 제목이 더보기와 겹치지 않게 왼쪽 정렬 */}
       <div className="relative flex items-center justify-between md:justify-center gap-3 px-4 mb-4">
         <h2 className="text-lg md:text-xl font-bold text-foreground text-left md:text-center break-keep">{title}</h2>
-        {onMore && (
-          <button
-            onClick={onMore}
+        {moreTo && (
+          <Link
+            to={moreTo}
             className="shrink-0 md:absolute md:right-4 flex items-center gap-0.5 text-xs md:text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             {moreLabel}
             <ChevronRight className="h-4 w-4" />
-          </button>
+          </Link>
         )}
       </div>
 
@@ -174,6 +175,7 @@ export function ProductCarousel({
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
           onClickCapture={onClickCapture}
+          onDragStart={(e) => e.preventDefault()}
           className={cn(
             "flex gap-3 md:gap-4 px-4 overflow-x-auto pb-2 scrollbar-hide md:cursor-grab",
             dragging ? "cursor-grabbing select-none" : "scroll-smooth",

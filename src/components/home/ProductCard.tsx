@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { Heart, ShoppingCart } from "lucide-react";
 import { ShopifyProduct, formatPrice, getPreorderDate } from "@/lib/shopify";
 import { useWishlistStore } from "@/stores/wishlistStore";
@@ -12,6 +13,11 @@ import { cn } from "@/lib/utils";
  * (기존 jdgm-preview-badge div 는 스크립트가 없어 한 번도 그려진 적이 없어 함께 뺐다)
  *
  * 할인율 우선순위: Cart API 자동할인(discountPct) > 컬렉션 핸들의 "-NN-off" > compareAtPrice.
+ *
+ * 상품 이동은 div onClick 이 아니라 진짜 <a>(react-router Link) 로 한다 — 그래야 Ctrl+클릭·휠클릭·
+ * 우클릭 "새 탭에서 열기"·링크 복사가 된다(하영 2026-09-21 "왜 새 탭에서 안 열려?").
+ * 버튼(찜·장바구니)을 <a> 안에 넣으면 HTML 이 깨지므로, 상품명만 링크로 두고 ::after 를 카드 전체로
+ * 늘려 어디를 눌러도 이동하게 한다(stretched link). 버튼은 z-10 으로 그 위에 띄운다.
  */
 export interface ProductBadge {
   label: string;
@@ -26,7 +32,8 @@ interface ProductCardProps {
   discountPct?: number;
   /** 컬렉션 핸들에서 뽑은 할인율(%) */
   collectionDiscountPct?: number;
-  onClick: (product: ShopifyProduct) => void;
+  /** 링크 클릭 직전 호출(트래킹용). 이동 자체는 브라우저/라우터가 한다 */
+  onClick?: (product: ShopifyProduct, e: React.MouseEvent<HTMLAnchorElement>) => void;
   onAddToCart: (product: ShopifyProduct) => void;
   className?: string;
 }
@@ -69,6 +76,7 @@ export function ProductCard({
   const { isWishlisted, toggleItem } = useWishlistStore();
   const node = product.node;
   const image = node.images.edges[0]?.node;
+  const productUrl = `/product/${node.id.split("/").pop()}`;
   const isAvailable = node.variants.edges.some(v => v.node.availableForSale);
   const preorderDate = getPreorderDate(node.tags ?? []);
   const { pct, final, original } = resolvePrice(product, discountPct, collectionDiscountPct);
@@ -76,9 +84,8 @@ export function ProductCard({
 
   return (
     <div
-      onClick={() => onClick(product)}
       className={cn(
-        "group bg-card rounded-xl border border-border overflow-hidden shadow-sm hover:shadow-card hover:-translate-y-0.5 transition-all cursor-pointer",
+        "group relative bg-card rounded-xl border border-border overflow-hidden shadow-sm hover:shadow-card hover:-translate-y-0.5 transition-all",
         className,
       )}
     >
@@ -154,7 +161,13 @@ export function ProductCard({
 
       <div className="p-2.5 md:p-3">
         <h3 className="text-[11px] md:text-xs font-medium text-foreground line-clamp-2 mb-1.5 min-h-[30px] md:min-h-[32px]">
-          {node.title}
+          <Link
+            to={productUrl}
+            onClick={(e) => onClick?.(product, e)}
+            className="after:absolute after:inset-0 after:content-['']"
+          >
+            {node.title}
+          </Link>
         </h3>
         <div className="flex items-end justify-between gap-2">
           <div className="min-w-0">
@@ -172,7 +185,7 @@ export function ProductCard({
             aria-label="カートに追加"
             disabled={!isAvailable}
             onClick={(e) => { e.stopPropagation(); onAddToCart(product); }}
-            className="shrink-0 w-7 h-7 rounded-full bg-foreground text-background flex items-center justify-center hover:bg-primary transition-colors disabled:opacity-40 disabled:hover:bg-foreground"
+            className="relative z-10 shrink-0 w-7 h-7 rounded-full bg-foreground text-background flex items-center justify-center hover:bg-primary transition-colors disabled:opacity-40 disabled:hover:bg-foreground"
           >
             <ShoppingCart className="h-3.5 w-3.5" />
           </button>
