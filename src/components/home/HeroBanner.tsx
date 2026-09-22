@@ -30,6 +30,11 @@ function badgeLabel(raw: string): string {
  * 딤(그라데이션)은 깔지 않는다 — 배경이 밝은 단색인 배너라 글자만 진하게 얹으면 된다. 따라서 이미지는 밝은 배경이어야 한다.
  * 글자 크기는 배너 폭에 비례(vw)하되 모바일에서 너무 작아지지 않게 clamp 로 하한을 둔다.
  *
+ * 모바일(#194)은 문구를 이미지 왼쪽 빈 공간(폭 55%) 안에만 그린다 — PC 기준 `pr-38%` 를 그대로 두면
+ * 헤드라인이 오른쪽 상품 사진 위로 넘어간다. 화살표를 모바일에서 감추므로 왼쪽 여백도 1rem 이면 된다.
+ * 일본어 헤드라인은 띄어쓰기가 없어 `break-keep` 이면 좁은 칸에서 아예 못 접고 넘치므로 모바일은
+ * 자연 줄바꿈(가능한 브라우저는 `auto-phrase` 로 어절 단위), PC 만 break-keep.
+ *
  * 배너 전체가 이미 클릭 영역이라 CTA 는 별도 링크가 아니라 글자만(중첩 a/button 을 피한다).
  */
 function BannerText({ text }: { text: ShopifyBanner["text"] }) {
@@ -37,7 +42,7 @@ function BannerText({ text }: { text: ShopifyBanner["text"] }) {
   if (!headline && !subtext && !buttonLabel) return null;
 
   return (
-    <div className="absolute inset-0 flex flex-col justify-center pl-[max(6%,3rem)] pr-[38%] text-neutral-900 pointer-events-none">
+    <div className="absolute inset-0 flex flex-col justify-center pl-4 pr-[46%] md:pl-[max(6%,3rem)] md:pr-[38%] text-neutral-900 pointer-events-none">
       {badge && (
         <span className="self-start mb-[1.2vw] px-[0.9em] py-[0.2em] rounded-full bg-primary text-primary-foreground font-bold tracking-wider text-[clamp(9px,1.1vw,14px)]">
           {badgeLabel(badge)}
@@ -49,7 +54,7 @@ function BannerText({ text }: { text: ShopifyBanner["text"] }) {
         </p>
       )}
       {headline && (
-        <p className="mt-[1.2vw] font-black leading-[1.25] break-keep text-[clamp(15px,5vw,62px)]">
+        <p className="mt-[1.2vw] font-black leading-[1.25] [word-break:auto-phrase] md:break-keep text-[clamp(15px,5vw,62px)]">
           {headline}
         </p>
       )}
@@ -68,6 +73,7 @@ export function HeroBanner() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bannersLengthRef = useRef(0);
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     fetchBanners(25)
@@ -119,6 +125,24 @@ export function HeroBanner() {
     startTimer();
   }, [startTimer]);
 
+  // 모바일 스와이프(#194). 가로 40px 이상 + 세로보다 가로가 큰 움직임만 넘김으로 본다(세로 스크롤 중 오작동 방지).
+  // 손가락이 움직인 터치 뒤엔 브라우저가 click 을 안 내므로 <a> 슬라이드가 링크로 새지 않는다.
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  };
+  const onTouchEnd = (e: React.TouchEvent) => {
+    const start = touchStart.current;
+    touchStart.current = null;
+    if (!start || bannersLengthRef.current <= 1) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;
+    if (dx < 0) goNext();
+    else goPrev();
+  };
+
   if (loading) {
     return (
       <div className="w-full">
@@ -135,6 +159,8 @@ export function HeroBanner() {
       <div
         className="flex transition-transform duration-500 ease-in-out"
         style={{ transform: `translateX(-${currentIndex * 100}%)` }}
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
       >
         {banners.map((banner) => {
           const inner = (
@@ -163,18 +189,20 @@ export function HeroBanner() {
         })}
       </div>
 
-      {/* Navigation Arrows */}
+      {/* Navigation Arrows — 모바일은 스와이프로 넘기고 감춘다. 이미지에 박힌 제목 첫 글자를 가리던 것(#194) */}
       {banners.length > 1 && (
         <>
           <button
             onClick={goPrev}
-            className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-background/60 backdrop-blur-sm flex items-center justify-center hover:bg-background/80 transition-colors"
+            aria-label="前へ"
+            className="hidden md:flex absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-background/60 backdrop-blur-sm items-center justify-center hover:bg-background/80 transition-colors"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
           <button
             onClick={goNext}
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-background/60 backdrop-blur-sm flex items-center justify-center hover:bg-background/80 transition-colors"
+            aria-label="次へ"
+            className="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-background/60 backdrop-blur-sm items-center justify-center hover:bg-background/80 transition-colors"
           >
             <ChevronRight className="h-4 w-4" />
           </button>

@@ -25,7 +25,9 @@ import { cn } from "@/lib/utils";
  * 자동으로 빠진다(하영 결정 2026-09-21 — 아이콘이 너무 많아서). 브랜드는 상단 내비에서 그대로 간다.
  * 새 상품 카테고리를 메뉴에 추가하면 여기 키워드도 한 줄 더해야 보인다. 색은 파스텔 8색을 순환.
  * 항목은 진짜 링크(/?collection=…)라 Ctrl+클릭으로 새 탭에 열린다. 같은 탭에서는 라우터가 쿼리만 바꾼다.
- * 모바일은 가로 스크롤, PC 는 줄바꿈해 가운데 정렬 (가운데 정렬 + 가로 스크롤을 같이 쓰면 앞쪽이 잘려 못 간다).
+ * 모바일(#194)은 4열로 줄바꿈해 전부 보이게 한다 — 가로 스크롤이면 7개 중 4.4개만 보이고 나머지는
+ * 스크롤되는 줄 모르면 영영 못 본다. 칸 폭은 (행 폭 − 간격 3개)/4 라 360~430px 어디서나 4개가 꼭 맞고,
+ * 마지막 줄(3개)은 가운데 정렬. PC 는 자유 줄바꿈 + 가운데 정렬 그대로.
  */
 const ICON_RULES: { test: RegExp; icon: LucideIcon }[] = [
   { test: /おもちゃ|toy/i, icon: Bone },
@@ -82,7 +84,7 @@ export function CategoryCircles() {
   return (
     <section className="mt-8 animate-fade-up" style={{ animationDelay: "0.1s" }}>
       <h2 className="text-lg md:text-xl font-bold text-foreground text-center mb-4">カテゴリー</h2>
-      <div className="flex gap-3 md:gap-5 md:gap-y-6 px-4 overflow-x-auto scrollbar-hide md:overflow-visible md:flex-wrap md:justify-center pb-1">
+      <div className="flex flex-wrap justify-center gap-x-2 gap-y-4 md:gap-x-5 md:gap-y-6 px-4 pb-1">
         {items.map(({ key, title, handle, icon: Icon }, i) => (
           <Link
             key={key}
@@ -90,17 +92,17 @@ export function CategoryCircles() {
             onClick={() => {
               if (handle) track("category_click", { name: title, handle, source: "home_circles" });
             }}
-            className="group flex-shrink-0 flex flex-col items-center gap-2 w-[72px] md:w-24"
+            className="group flex-shrink-0 flex flex-col items-center gap-2 w-[calc((100%-1.5rem)/4)] md:w-24"
           >
             <span
               className={cn(
-                "w-16 h-16 md:w-[88px] md:h-[88px] rounded-full flex items-center justify-center shadow-sm transition-transform duration-200 group-hover:scale-105 group-hover:shadow-md",
+                "w-[60px] h-[60px] md:w-[88px] md:h-[88px] rounded-full flex items-center justify-center shadow-sm transition-transform duration-200 group-hover:scale-105 group-hover:shadow-md",
                 PASTELS[i % PASTELS.length],
               )}
             >
               <Icon className="h-6 w-6 md:h-8 md:w-8" strokeWidth={1.8} />
             </span>
-            <span className="text-[11px] md:text-xs font-medium text-foreground text-center leading-tight line-clamp-2 break-keep">
+            <span className="text-xs font-medium text-foreground text-center leading-tight line-clamp-2 break-keep">
               {title}
             </span>
           </Link>
