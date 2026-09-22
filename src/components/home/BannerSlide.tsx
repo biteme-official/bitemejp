@@ -119,7 +119,7 @@ function TextLayer({ banner, layout }: { banner: HomeBanner; layout: Layout }) {
         )}
         {t.headline && (
           <p
-            className="font-black leading-[1.25] whitespace-pre-line [word-break:auto-phrase]"
+            className="font-black leading-[1.25] whitespace-pre-line [word-break:auto-phrase] [overflow-wrap:anywhere]"
             style={{ fontSize: layout.headline, marginTop: t.subtext ? layout.gap : 0 }}
           >
             {t.headline}
