@@ -5,6 +5,8 @@
  *                                             엣지 60초 캐시. 노출 기간 판정은 프론트가 한다(캐시 때문에 서버에서 거르지 않음)
  *  POST /api/home-banners  action=save        { doc }                          문서 저장(+ 타임스탬프 백업)
  *  POST /api/home-banners  action=upload      { name, type, data(base64) }     이미지 업로드 → { url }
+ *  POST /api/home-banners  action=clean       { url }                          AI 로 이미지 속 글자를 지운 사본 → { url, width, height }
+ *                                             Gemini 이미지 편집(GEMINI_API_KEY). 결과는 images/clean-… 에 저장
  *
  * 저장소: Supabase Storage 공개 버킷 `home-banners`
  *   banners.json            현재 문서
@@ -23,6 +25,14 @@ const BUCKET = 'home-banners';
 const DOC_PATH = 'banners.json';
 const MAX_BANNERS = 30;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+/** 글자 지우기에 넣을 수 있는 원본 — Shopify CDN 과 우리 버킷만(임의 URL 을 서버가 대신 받아오지 않게) */
+const CLEAN_SOURCE_HOSTS = ['cdn.shopify.com'];
+const GEMINI_MODEL = process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
+const CLEAN_PROMPT =
+  'Remove ALL text, letters, logos, captions and speech-bubble labels from this product photo. ' +
+  'Fill the removed areas naturally so they match the surrounding background. ' +
+  'Keep everything else — the product, the pet, colors, lighting and framing — exactly the same. Output only the edited image.';
+
 const ALLOWED_TYPES: Record<string, string> = {
   'image/jpeg': 'jpg',
   'image/png': 'png',
@@ -150,6 +160,50 @@ async function writeJson(sb: SupabaseClient, path: string, doc: Doc) {
   if (error) throw error;
 }
 
+// ── AI 글자 지우기 ──────────────────────────────────────────────────────────
+/** PNG/JPEG 헤더에서 크기. 못 읽으면 null */
+function imageSize(buf: Buffer): { width: number; height: number } | null {
+  if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) {
+    return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+  }
+  if (buf.length > 4 && buf[0] === 0xff && buf[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < buf.length) {
+      if (buf[i] !== 0xff) { i++; continue; }
+      const marker = buf[i + 1];
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+        return { height: buf.readUInt16BE(i + 5), width: buf.readUInt16BE(i + 7) };
+      }
+      i += 2 + buf.readUInt16BE(i + 2);
+    }
+  }
+  return null;
+}
+
+async function cleanTextWithGemini(src: Buffer, mime: string): Promise<{ data: Buffer; mime: string }> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error('GEMINI_API_KEY 미설정 — Vercel 환경변수에 넣어야 AI 글자 지우기가 됩니다');
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: CLEAN_PROMPT }, { inline_data: { mime_type: mime, data: src.toString('base64') } }] }],
+      generationConfig: { responseModalities: ['IMAGE'] },
+    }),
+  });
+  const json = (await res.json()) as {
+    error?: { message?: string };
+    candidates?: { content?: { parts?: { inlineData?: { mimeType: string; data: string }; text?: string }[] } }[];
+  };
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${json.error?.message ?? 'unknown'}`);
+  const part = json.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
+  if (!part?.inlineData) {
+    const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text).filter(Boolean).join(' ');
+    throw new Error(`Gemini 가 이미지를 안 돌려줬습니다${text ? `: ${text.slice(0, 200)}` : ''}`);
+  }
+  return { data: Buffer.from(part.inlineData.data, 'base64'), mime: part.inlineData.mimeType || 'image/png' };
+}
+
 // ── 핸들러 ────────────────────────────────────────────────────────────────
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'GET') {
@@ -200,6 +254,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (error) throw error;
       const { data: pub } = sb.storage.from(BUCKET).getPublicUrl(path);
       return res.status(200).json({ ok: true, url: pub.publicUrl });
+    }
+
+    if (action === 'clean') {
+      const src = urlOrNull(body.url);
+      if (!src) return res.status(400).json({ error: 'url 이 필요합니다' });
+      const host = new URL(src).hostname;
+      const ownBucket = (process.env.SUPABASE_URL || '').includes(host);
+      if (!CLEAN_SOURCE_HOSTS.includes(host) && !ownBucket) return res.status(400).json({ error: 'Shopify CDN 이미지만 지울 수 있습니다' });
+      // 원본을 1024 폭으로 받아 보낸다(모델 출력이 그 근처라 더 커도 의미 없음)
+      const fetchUrl = host === 'cdn.shopify.com' ? `${src}${src.includes('?') ? '&' : '?'}width=1024` : src;
+      const srcRes = await fetch(fetchUrl);
+      if (!srcRes.ok) return res.status(400).json({ error: `원본 이미지를 못 받았습니다 (${srcRes.status})` });
+      const srcMime = srcRes.headers.get('content-type')?.split(';')[0] || 'image/jpeg';
+      const srcBuf = Buffer.from(await srcRes.arrayBuffer());
+      const out = await cleanTextWithGemini(srcBuf, srcMime);
+      const ext = ALLOWED_TYPES[out.mime] ?? 'png';
+      const path = `images/clean-${Date.now().toString(36)}.${ext}`;
+      const { error } = await sb.storage.from(BUCKET).upload(path, out.data, { contentType: out.mime, upsert: false, cacheControl: '31536000' });
+      if (error) throw error;
+      const { data: pub } = sb.storage.from(BUCKET).getPublicUrl(path);
+      const size = imageSize(out.data) ?? { width: 1024, height: 1024 };
+      return res.status(200).json({ ok: true, url: pub.publicUrl, ...size });
     }
 
     return res.status(400).json({ error: `알 수 없는 action: ${String(action)}` });

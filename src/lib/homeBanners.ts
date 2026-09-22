@@ -104,8 +104,14 @@ export function emptyBanner(): HomeBanner {
   };
 }
 
+/** 자르기는 Shopify CDN 이미지에서만 된다(우리 버킷은 변환 파라미터를 무시). AI 로 지운 사진은 자를 필요도 없다 */
+export function photoCroppable(p: HomeBannerPhoto): boolean {
+  return p.url.includes("cdn.shopify.com");
+}
+
 /** 위를 잘라낸 상품 사진 URL. 폭은 배너용으로 1000 이면 충분 */
 export function photoUrl(p: HomeBannerPhoto, width = 1000): string {
+  if (!photoCroppable(p)) return p.url;
   const crop = Math.min(0.6, Math.max(0, p.cropTop));
   const h = Math.max(1, Math.round(p.height * (1 - crop)));
   const sep = p.url.includes("?") ? "&" : "?";

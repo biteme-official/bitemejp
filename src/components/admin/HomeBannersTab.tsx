@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Copy, ImagePlus, Plus, Search, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, ImagePlus, Plus, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,7 @@ import {
   importFromShopify,
   isHomeBannerLive,
   newBannerId,
+  photoCroppable,
   photoUrl,
 } from "@/lib/homeBanners";
 import { cn } from "@/lib/utils";
@@ -129,6 +130,7 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
   const [productInput, setProductInput] = useState("");
   const [product, setProduct] = useState<ProductForBanner | null>(null);
   const [productLoading, setProductLoading] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -263,6 +265,29 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
       ...(selected.name ? {} : { name: product.title }),
       ...(selected.link ? {} : { link: product.url }),
     });
+  };
+
+  /** AI(Gemini) 로 사진 속 글자를 지운 사본을 만들어 그걸로 바꾼다. 자르기는 0 으로 — 글자가 없어졌으니 */
+  const cleanPhoto = async () => {
+    if (!selected?.photo) return;
+    setCleaning(true);
+    try {
+      const res = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+        body: JSON.stringify({ action: "clean", url: selected.photo.url }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `실패 (${res.status})`);
+      const photo = { url: json.url as string, width: json.width as number, height: json.height as number, cropTop: 0 };
+      const bg = await sampleCorner(photoUrl(photo, 200));
+      updateBanner(selected.id, { photo, ...(bg ? { bg } : {}) });
+      toast.success("글자를 지운 사진으로 바꿨습니다 — 미리보기 확인 후 저장");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "글자 지우기 실패");
+    } finally {
+      setCleaning(false);
+    }
   };
 
   const save = async () => {
@@ -442,6 +467,14 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
                     </div>
                   )}
                   {selected.photo && (
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" className="h-8 text-xs" disabled={cleaning} onClick={cleanPhoto}>
+                        <Sparkles className="h-3.5 w-3.5 mr-1" />{cleaning ? "지우는 중… (10~20초)" : "AI 로 글자 지우기"}
+                      </Button>
+                      <span className="text-[11px] text-muted-foreground">사진은 그대로 두고 글자만 지운 사본을 만듭니다. 마음에 안 들면 위에서 사진을 다시 고르면 원본으로</span>
+                    </div>
+                  )}
+                  {selected.photo && photoCroppable(selected.photo) && (
                     <div className="flex items-center gap-3">
                       <Label className="text-xs shrink-0">위 자르기 {Math.round(selected.photo.cropTop * 100)}%</Label>
                       <Slider
