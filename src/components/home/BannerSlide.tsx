@@ -162,7 +162,7 @@ export function BannerSlide({ banner, settings, device, className }: BannerSlide
     >
       <div className="relative w-full" style={{ aspectRatio: layout.aspect }}>
         {banner.photo?.url ? (
-          <div className="absolute overflow-hidden" style={photoBox}>
+          <div className="absolute overflow-hidden" style={{ ...photoBox, borderRadius: "2.5cqw" }}>
             <img src={photoUrl(banner.photo)} alt={alt} draggable={false} className="w-full h-full object-cover object-center" />
           </div>
         ) : image && (tall && !banner.mobileImage ? (
