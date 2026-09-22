@@ -30,6 +30,8 @@ interface Layout {
   aspect: string;
   left: string;
   width: string;
+  /** 상품 사진 모드일 때 문구 칸 폭 — 사진 칸 앞에서 끝나야 한다 */
+  widthPhoto: string;
   top: string;
   bottom: string;
   badge: string;
@@ -44,6 +46,7 @@ const PC: Layout = {
   aspect: "1200 / 504",
   left: "6%",
   width: "54%",
+  widthPhoto: "46%",
   top: "16%",
   bottom: "14%",
   badge: "clamp(9px, 1.1cqw, 14px)",
@@ -58,6 +61,7 @@ const MOBILE_STRIP: Layout = {
   aspect: "1200 / 504",
   left: "4%",
   width: "55%",
+  widthPhoto: "47%",
   top: "8%",
   bottom: "11%",
   badge: "2.6cqw",
@@ -71,6 +75,7 @@ const MOBILE_TALL: Layout = {
   aspect: "4 / 3",
   left: "5%",
   width: "90%",
+  widthPhoto: "90%",
   top: "6%",
   bottom: "7%",
   badge: "2.8cqw",
@@ -100,7 +105,7 @@ function TextLayer({ banner, layout }: { banner: HomeBanner; layout: Layout }) {
   return (
     <div
       className={cn("absolute inset-y-0 pointer-events-none", color)}
-      style={{ left: layout.left, width: layout.width }}
+      style={{ left: layout.left, width: banner.photo ? layout.widthPhoto : layout.width }}
     >
       {/* 위 기준선에서 아래로 */}
       <div className="absolute inset-x-0 flex flex-col items-start" style={{ top: layout.top }}>
