@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import AffiliateTab from "@/components/admin/AffiliateTab";
+import HomeBannersTab from "@/components/admin/HomeBannersTab";
 
 // Admin API base URL — 별도 Vercel 프로젝트로 분리된 경우 해당 URL, 동일 origin이면 빈 문자열
 const ADMIN_API_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL as string) ?? '';
@@ -2493,6 +2494,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               <TabsTrigger value="members" className="text-xs px-4">회원 분석</TabsTrigger>
               <TabsTrigger value="weekly" className="text-xs px-4">주간회고</TabsTrigger>
               <TabsTrigger value="affiliate" className="text-xs px-4">어필리에이트</TabsTrigger>
+              <TabsTrigger value="banners" className="text-xs px-4">메인 배너</TabsTrigger>
             </TabsList>
 
             {/* ══ 대시보드 탭 ══ */}
@@ -2746,6 +2748,11 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
             <TabsContent value="affiliate" className="space-y-5 mt-0">
               {/* 탭을 열기 전에는 마운트하지 않는다 — 장부 조회 5개가 딸려 들어간다 */}
               {activeTab === "affiliate" && <AffiliateTab secret={secret} />}
+            </TabsContent>
+
+            {/* ══ 메인 배너 탭 ══ */}
+            <TabsContent value="banners" className="space-y-5 mt-0">
+              {activeTab === "banners" && <HomeBannersTab secret={secret} />}
             </TabsContent>
           </Tabs>
         )}

@@ -914,7 +914,8 @@ export function isBannerLive(banner: ShopifyBanner, now: number = Date.now()): b
   return true;
 }
 
-export async function fetchBanners(first: number = 10): Promise<ShopifyBanner[]> {
+/** @param includeScheduled true 면 예약(미래) 배너도 준다 — 어드민 「메인 배너」 가져오기용 */
+export async function fetchBanners(first: number = 10, includeScheduled = false): Promise<ShopifyBanner[]> {
   const data = await storefrontApiRequest(GET_BANNERS_QUERY, { first });
   if (!data) return [];
 
@@ -946,7 +947,7 @@ export async function fetchBanners(first: number = 10): Promise<ShopifyBanner[]>
     }
 
     return { id: node.id, handle: node.handle, image, linkUrl, text, fields };
-  }).filter((b: ShopifyBanner) => isBannerLive(b) && isBannerVisible(b)).sort((a, b) => {
+  }).filter((b: ShopifyBanner) => (includeScheduled || isBannerLive(b)) && isBannerVisible(b)).sort((a, b) => {
     const aOrder = parseInt(a.fields['sort_order'] ?? '9999', 10);
     const bOrder = parseInt(b.fields['sort_order'] ?? '9999', 10);
     return aOrder - bOrder;
