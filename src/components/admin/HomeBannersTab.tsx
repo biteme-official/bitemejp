@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Copy, ImagePlus, Plus, Trash2, Upload } from "lucide-react";
+import { ArrowDown, ArrowUp, Copy, ImagePlus, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BannerSlide } from "@/components/home/BannerSlide";
 import {
@@ -13,11 +14,14 @@ import {
   HomeBanner,
   HomeBannersDoc,
   MobileRatio,
+  ProductForBanner,
   emptyBanner,
   fetchHomeBanners,
+  fetchProductForBanner,
   importFromShopify,
   isHomeBannerLive,
   newBannerId,
+  photoUrl,
 } from "@/lib/homeBanners";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +35,9 @@ import { cn } from "@/lib/utils";
  * Shopify CDN 그대로). 「저장」을 누르는 순간부터 메인은 이 문서만 읽는다.
  *
  * 저장은 문서 전체를 한 번에 — 저장 전엔 서버에 아무것도 안 바뀐다. 이미지 업로드만 즉시 올라간다.
+ *
+ * 「상품 링크로」: 디자이너 배너 없이 상품 링크만 주면 그 상품 이미지들을 보여주고, 고른 한 장을 오른쪽에 놓는다.
+ * 상품 썸네일은 위 25~30% 에 제목이 박혀 있어 「위 자르기」(기본 28%)로 잘라낸다 — 미리보기 보며 조절.
  */
 const API = "/api/home-banners";
 
@@ -55,7 +62,7 @@ function jstLocalToIso(local: string): string | null {
 
 function statusOf(b: HomeBanner, now: number): { label: string; className: string } {
   if (!b.enabled) return { label: "꺼짐", className: "bg-neutral-100 text-neutral-500" };
-  if (!b.pcImage) return { label: "이미지 없음", className: "bg-red-50 text-red-600" };
+  if (!b.pcImage && !b.photo) return { label: "이미지 없음", className: "bg-red-50 text-red-600" };
   if (b.startAt && now < Date.parse(b.startAt)) return { label: "예약", className: "bg-sky-50 text-sky-700" };
   if (b.endAt && now > Date.parse(b.endAt)) return { label: "종료", className: "bg-neutral-100 text-neutral-500" };
   return { label: "노출중", className: "bg-emerald-50 text-emerald-700" };
@@ -119,6 +126,9 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
   const [uploading, setUploading] = useState<"pc" | "mobile" | null>(null);
   const pcFileRef = useRef<HTMLInputElement>(null);
   const mobileFileRef = useRef<HTMLInputElement>(null);
+  const [productInput, setProductInput] = useState("");
+  const [product, setProduct] = useState<ProductForBanner | null>(null);
+  const [productLoading, setProductLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -152,6 +162,11 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    setProduct(null);
+    setProductInput("");
+  }, [selectedId]);
 
   const dirty = doc !== null && JSON.stringify(doc) !== savedJson;
   const selected = useMemo(() => doc?.banners.find((b) => b.id === selectedId) ?? null, [doc, selectedId]);
@@ -220,6 +235,34 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
       if (pcFileRef.current) pcFileRef.current.value = "";
       if (mobileFileRef.current) mobileFileRef.current.value = "";
     }
+  };
+
+  const loadProduct = async () => {
+    if (!productInput.trim()) return;
+    setProductLoading(true);
+    try {
+      const p = await fetchProductForBanner(productInput);
+      if (!p) throw new Error("상품을 못 찾았습니다 — biteme.co.jp/product/숫자 링크나 숫자 ID");
+      setProduct(p);
+      if (p.images.length === 0) toast.error("이 상품엔 이미지가 없습니다");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "상품 조회 실패");
+    } finally {
+      setProductLoading(false);
+    }
+  };
+
+  /** 상품 이미지 한 장 고르기 — 위 28% 잘라서 오른쪽에. 이름·링크는 비어 있을 때만 채운다 */
+  const pickProductImage = async (img: ProductForBanner["images"][number]) => {
+    if (!selected || !product) return;
+    const photo = { url: img.url, width: img.width, height: img.height, cropTop: 0.28 };
+    const bg = await sampleCorner(photoUrl(photo, 200));
+    updateBanner(selected.id, {
+      photo,
+      ...(bg ? { bg } : {}),
+      ...(selected.name ? {} : { name: product.title }),
+      ...(selected.link ? {} : { link: product.url }),
+    });
   };
 
   const save = async () => {
@@ -293,7 +336,7 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
                 )}
               >
                 <div className="w-16 h-7 rounded bg-muted overflow-hidden flex-shrink-0" style={{ background: b.bg }}>
-                  {b.pcImage && <img src={b.pcImage} alt="" className="w-full h-full object-cover" />}
+                  {b.photo ? <img src={photoUrl(b.photo, 200)} alt="" className="w-full h-full object-contain" /> : b.pcImage && <img src={b.pcImage} alt="" className="w-full h-full object-cover" />}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{b.name || b.text.headline || "(이름 없음)"}</p>
@@ -354,6 +397,65 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
                 <div>
                   <Label className="text-xs">링크 (누르면 가는 곳)</Label>
                   <Input className="h-8 text-xs" value={selected.link ?? ""} onChange={(e) => updateBanner(selected.id, { link: e.target.value || null })} placeholder="https://biteme.co.jp/?collection=…" />
+                </div>
+
+                {/* 상품 링크로 — 사진 모드 */}
+                <div className="rounded-lg border p-3 space-y-2 bg-muted/20">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold">상품 링크로 만들기</Label>
+                    {selected.photo && (
+                      <button type="button" className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-0.5" onClick={() => updateBanner(selected.id, { photo: null })}>
+                        <X className="h-3 w-3" />상품 사진 빼기
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Input
+                      className="h-8 text-xs"
+                      value={productInput}
+                      onChange={(e) => setProductInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") loadProduct(); }}
+                      placeholder="https://biteme.co.jp/product/1034661… 또는 숫자 ID"
+                    />
+                    <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" disabled={productLoading} onClick={loadProduct}>
+                      <Search className="h-3.5 w-3.5 mr-1" />{productLoading ? "조회 중…" : "이미지 보기"}
+                    </Button>
+                  </div>
+                  {product && product.images.length > 0 && (
+                    <div>
+                      <p className="text-[11px] text-muted-foreground mb-1 truncate">{product.title} — 글자 없는 사진을 고르세요</p>
+                      <div className="grid grid-cols-6 gap-1.5">
+                        {product.images.map((img) => (
+                          <button
+                            key={img.url}
+                            type="button"
+                            onClick={() => pickProductImage(img)}
+                            className={cn(
+                              "aspect-square rounded border overflow-hidden bg-white hover:ring-2 hover:ring-primary/50",
+                              selected.photo?.url === img.url && "ring-2 ring-primary",
+                            )}
+                          >
+                            <img src={`${img.url}${img.url.includes("?") ? "&" : "?"}width=160`} alt="" className="w-full h-full object-cover" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {selected.photo && (
+                    <div className="flex items-center gap-3">
+                      <Label className="text-xs shrink-0">위 자르기 {Math.round(selected.photo.cropTop * 100)}%</Label>
+                      <Slider
+                        className="flex-1"
+                        min={0}
+                        max={60}
+                        step={1}
+                        value={[Math.round(selected.photo.cropTop * 100)]}
+                        onValueChange={([v]) => selected.photo && updateBanner(selected.id, { photo: { ...selected.photo, cropTop: v / 100 } })}
+                      />
+                      <span className="text-[11px] text-muted-foreground shrink-0">썸네일 위쪽 제목을 잘라냄</span>
+                    </div>
+                  )}
+                  {selected.photo && <p className="text-[11px] text-muted-foreground">상품 사진이 있으면 아래 PC·모바일 이미지는 안 씁니다.</p>}
                 </div>
 
                 <div className="grid grid-cols-[1fr_auto] gap-2 items-end">

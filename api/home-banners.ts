@@ -61,10 +61,11 @@ type CtaStyle = 'text' | 'button';
 type MobileRatio = '4:3' | '1:1' | 'strip';
 
 interface BannerText { badge: string; subtext: string; headline: string; cta: string; tone: Tone; ctaStyle: CtaStyle }
+interface Photo { url: string; width: number; height: number; cropTop: number }
 interface Banner {
   id: string; name: string; enabled: boolean;
   startAt: string | null; endAt: string | null; link: string | null;
-  pcImage: string | null; mobileImage: string | null; bg: string; text: BannerText;
+  pcImage: string | null; photo: Photo | null; mobileImage: string | null; bg: string; text: BannerText;
 }
 interface Doc { version: 1; updatedAt: string; settings: { mobileRatio: MobileRatio }; banners: Banner[] }
 
@@ -85,6 +86,16 @@ const urlOrNull = (v: unknown): string | null => {
     return null;
   }
 };
+const photoOrNull = (v: unknown): Photo | null => {
+  if (!v || typeof v !== 'object') return null;
+  const p = v as Record<string, unknown>;
+  const url = urlOrNull(p.url);
+  const width = Number(p.width);
+  const height = Number(p.height);
+  if (!url || !(width > 0) || !(height > 0)) return null;
+  const cropTop = Number(p.cropTop);
+  return { url, width: Math.round(width), height: Math.round(height), cropTop: Number.isFinite(cropTop) ? Math.min(0.6, Math.max(0, cropTop)) : 0 };
+};
 const color = (v: unknown): string => (typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v) ? v.toLowerCase() : '#f5f5f5');
 
 function normalizeDoc(input: unknown): Doc | null {
@@ -93,7 +104,7 @@ function normalizeDoc(input: unknown): Doc | null {
   if (!Array.isArray(d.banners)) return null;
   const settingsIn = (d.settings ?? {}) as Record<string, unknown>;
   const ratio = settingsIn.mobileRatio;
-  const mobileRatio: MobileRatio = ratio === '1:1' || ratio === 'strip' ? ratio : '4:3';
+  const mobileRatio: MobileRatio = ratio === '1:1' || ratio === '4:3' ? ratio : 'strip';
 
   const banners: Banner[] = d.banners.slice(0, MAX_BANNERS).map((raw, i) => {
     const b = (raw ?? {}) as Record<string, unknown>;
@@ -106,6 +117,7 @@ function normalizeDoc(input: unknown): Doc | null {
       endAt: isoOrNull(b.endAt),
       link: urlOrNull(b.link),
       pcImage: urlOrNull(b.pcImage),
+      photo: photoOrNull(b.photo),
       mobileImage: urlOrNull(b.mobileImage),
       bg: color(b.bg),
       text: {

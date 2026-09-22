@@ -1,4 +1,4 @@
-import { HomeBanner, HomeBannersSettings, hasText } from "@/lib/homeBanners";
+import { HomeBanner, HomeBannersSettings, hasText, photoUrl } from "@/lib/homeBanners";
 import { cn } from "@/lib/utils";
 
 /**
@@ -14,6 +14,9 @@ import { cn } from "@/lib/utils";
  *  - strip : PC 이미지(1200×504) 그대로. 문구는 왼쪽 55% 안에만
  *  - 4:3 / 1:1 : 세로가 있는 틀. 모바일 이미지가 있으면 꽉 채우고, 없으면 배경색 위에 PC 이미지를
  *    아래쪽에 가로형 그대로 깔고 위 띠에 문구를 쓴다(문구가 없는 이미지 배너는 가운데 정렬).
+ *
+ * 상품 사진 모드(banner.photo): 디자이너 배너 없이 배경색 + 오른쪽 상품 사진(위 글자 잘라낸 것) + 왼쪽 문구.
+ * 사진 칸 자리도 고정(PHOTO_BOX).
  */
 interface BannerSlideProps {
   banner: HomeBanner;
@@ -76,6 +79,13 @@ const MOBILE_TALL: Layout = {
   cta: "3.4cqw",
   gap: "1.8cqw",
 };
+
+/** 상품 사진 칸 — 틀 기준 %. 가로형은 오른쪽 세로 꽉, 세로 틀은 오른쪽 아래 */
+const PHOTO_BOX = {
+  pc: { right: "4%", top: "5%", bottom: "5%", width: "40%" },
+  strip: { right: "3%", top: "5%", bottom: "5%", width: "42%" },
+  tall: { right: "4%", top: "auto", bottom: "4%", width: "56%", height: "56%" },
+} as const;
 
 function layoutFor(device: "pc" | "mobile", settings: HomeBannersSettings): Layout {
   if (device === "pc") return PC;
@@ -143,6 +153,7 @@ export function BannerSlide({ banner, settings, device, className }: BannerSlide
   const alt = banner.text.headline || banner.name || "Banner";
   const tall = device === "mobile" && settings.mobileRatio !== "strip";
   const image = device === "mobile" && banner.mobileImage ? banner.mobileImage : banner.pcImage;
+  const photoBox = device === "pc" ? PHOTO_BOX.pc : tall ? PHOTO_BOX.tall : PHOTO_BOX.strip;
 
   return (
     <div
@@ -150,7 +161,11 @@ export function BannerSlide({ banner, settings, device, className }: BannerSlide
       style={{ containerType: "inline-size", background: banner.bg }}
     >
       <div className="relative w-full" style={{ aspectRatio: layout.aspect }}>
-        {image && (tall && !banner.mobileImage ? (
+        {banner.photo?.url ? (
+          <div className="absolute overflow-hidden" style={photoBox}>
+            <img src={photoUrl(banner.photo)} alt={alt} draggable={false} className="w-full h-full object-cover object-center" />
+          </div>
+        ) : image && (tall && !banner.mobileImage ? (
           // 세로 틀인데 모바일 이미지가 없다 — PC 이미지를 가로형 그대로. 문구가 있으면 아래, 없으면 가운데
           <img
             src={image}

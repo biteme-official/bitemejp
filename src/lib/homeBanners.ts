@@ -1,4 +1,4 @@
-import { fetchBanners, ShopifyBanner } from "@/lib/shopify";
+import { fetchBanners, ShopifyBanner, storefrontApiRequest } from "@/lib/shopify";
 
 /**
  * 메인 배너 — 어드민 「메인 배너」 탭에서 직접 관리하는 자체 데이터 (#194).
@@ -27,6 +27,20 @@ export interface HomeBannerText {
   ctaStyle: CtaStyle;
 }
 
+/**
+ * 상품 사진으로 만든 배너(#194 — "상품 링크 주면 썸네일로"). 디자이너 배너 없이 상품 이미지 한 장을
+ * 오른쪽에 놓고 배경색을 채운다. 상품 썸네일은 위 25~30% 에 제목 글자가 박혀 있어 `cropTop` 만큼 위를
+ * 잘라낸다(Shopify CDN `crop=bottom` 이 잘라 주므로 이미지 가공 서버가 없다).
+ */
+export interface HomeBannerPhoto {
+  /** 원본 이미지 URL(Shopify CDN) */
+  url: string;
+  width: number;
+  height: number;
+  /** 위에서 잘라낼 비율 0~0.6 */
+  cropTop: number;
+}
+
 export interface HomeBanner {
   id: string;
   /** 관리용 이름(화면엔 안 나옴) */
@@ -36,8 +50,10 @@ export interface HomeBanner {
   startAt: string | null;
   endAt: string | null;
   link: string | null;
-  /** PC 이미지 1200×504 */
+  /** PC 이미지 1200×504. photo 가 있으면 안 쓴다 */
   pcImage: string | null;
+  /** 상품 사진 모드 — 있으면 pcImage/mobileImage 대신 이걸 오른쪽에 놓는다 */
+  photo: HomeBannerPhoto | null;
   /** 모바일 이미지(settings.mobileRatio 비율). 없으면 PC 이미지를 배경색 위에 얹는다 */
   mobileImage: string | null;
   /** 배경색 — 모바일에서 PC 이미지 바깥을 채우는 색. 업로드 때 이미지 모서리에서 자동으로 뽑는다 */
@@ -57,7 +73,7 @@ export interface HomeBannersDoc {
   banners: HomeBanner[];
 }
 
-export const DEFAULT_SETTINGS: HomeBannersSettings = { mobileRatio: "4:3" };
+export const DEFAULT_SETTINGS: HomeBannersSettings = { mobileRatio: "strip" };
 
 export const EMPTY_TEXT: HomeBannerText = {
   badge: "",
@@ -81,9 +97,48 @@ export function emptyBanner(): HomeBanner {
     endAt: null,
     link: null,
     pcImage: null,
+    photo: null,
     mobileImage: null,
     bg: "#f5f5f5",
     text: { ...EMPTY_TEXT },
+  };
+}
+
+/** 위를 잘라낸 상품 사진 URL. 폭은 배너용으로 1000 이면 충분 */
+export function photoUrl(p: HomeBannerPhoto, width = 1000): string {
+  const crop = Math.min(0.6, Math.max(0, p.cropTop));
+  const h = Math.max(1, Math.round(p.height * (1 - crop)));
+  const sep = p.url.includes("?") ? "&" : "?";
+  return `${p.url}${sep}width=${Math.min(width, p.width)}&height=${Math.round(h * Math.min(width, p.width) / p.width)}&crop=bottom`;
+}
+
+export function bannerImage(b: HomeBanner): boolean {
+  return Boolean(b.photo?.url || b.pcImage);
+}
+
+export interface ProductForBanner {
+  id: string;
+  title: string;
+  url: string;
+  images: { url: string; width: number; height: number }[];
+}
+
+/** 상품 링크(https://biteme.co.jp/product/1234…) 또는 숫자 ID → 상품 제목·이미지 목록 */
+export async function fetchProductForBanner(input: string): Promise<ProductForBanner | null> {
+  const m = input.trim().match(/(?:\/product\/|^)(\d{6,})/);
+  if (!m) return null;
+  const gid = `gid://shopify/Product/${m[1]}`;
+  const data = await storefrontApiRequest(
+    `query ($id: ID!) { product(id: $id) { id title images(first: 12) { edges { node { url width height } } } } }`,
+    { id: gid },
+  );
+  const node = data?.data?.product;
+  if (!node) return null;
+  return {
+    id: node.id,
+    title: node.title,
+    url: `https://biteme.co.jp/product/${m[1]}`,
+    images: (node.images?.edges ?? []).map((e: { node: { url: string; width: number; height: number } }) => e.node),
   };
 }
 
@@ -94,7 +149,7 @@ export function hasText(t: HomeBannerText): boolean {
 /** 지금 이 배너를 보여줄 때인지 (예약 노출). 문서는 60초 엣지 캐시라 그 오차는 있다 */
 export function isHomeBannerLive(b: HomeBanner, now: number = Date.now()): boolean {
   if (!b.enabled) return false;
-  if (!b.pcImage) return false;
+  if (!bannerImage(b)) return false;
   if (b.startAt && now < Date.parse(b.startAt)) return false;
   if (b.endAt && now > Date.parse(b.endAt)) return false;
   return true;
@@ -150,6 +205,7 @@ export function fromShopifyBanner(b: ShopifyBanner): HomeBanner {
     endAt: iso(fields["end_at"] ?? fields["end_date"]),
     link: b.linkUrl,
     pcImage: b.image?.url ?? null,
+    photo: null,
     mobileImage: null,
     bg: "#f5f5f5",
     text: {
