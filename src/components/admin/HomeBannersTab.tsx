@@ -61,11 +61,15 @@ function statusOf(b: HomeBanner, now: number): { label: string; className: strin
   return { label: "노출중", className: "bg-emerald-50 text-emerald-700" };
 }
 
-/** 이미지 왼쪽 위 모서리 색 — 모바일에서 PC 이미지 바깥을 채울 배경색 후보 */
-function sampleCorner(file: File): Promise<string | null> {
+/**
+ * 이미지 왼쪽 위 모서리 색 — 모바일에서 PC 이미지 바깥을 채울 배경색 후보.
+ * 업로드 파일은 data: URL 로 읽는다(blob: 은 사이트 CSP img-src 에 막힘). 원격 주소(Shopify CDN·우리 버킷)는
+ * CORS 를 열어 두고 있어 crossOrigin 으로 읽으면 캔버스가 안 더러워진다. 못 읽으면 null.
+ */
+function sampleCorner(src: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const url = URL.createObjectURL(file);
     const img = new Image();
+    if (!src.startsWith("data:")) img.crossOrigin = "anonymous";
     img.onload = () => {
       try {
         const c = document.createElement("canvas");
@@ -78,16 +82,14 @@ function sampleCorner(file: File): Promise<string | null> {
         resolve(`#${[r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("")}`);
       } catch {
         resolve(null);
-      } finally {
-        URL.revokeObjectURL(url);
       }
     };
     img.onerror = () => resolve(null);
-    img.src = url;
+    img.src = src;
   });
 }
 
-function fileToBase64(file: File): Promise<string> {
+function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(String(r.result));
@@ -96,13 +98,11 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-async function uploadImage(secret: string, file: File): Promise<string> {
-  if (file.size > 3 * 1024 * 1024) throw new Error("이미지는 3MB 까지");
-  const data = await fileToBase64(file);
+async function uploadImage(secret: string, file: File, dataUrl: string): Promise<string> {
   const res = await fetch(API, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
-    body: JSON.stringify({ action: "upload", name: file.name, type: file.type, data }),
+    body: JSON.stringify({ action: "upload", name: file.name, type: file.type, data: dataUrl }),
   });
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || `업로드 실패 (${res.status})`);
@@ -132,7 +132,11 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
           setSavedJson(JSON.stringify(d));
           setSelectedId(d.banners[0]?.id ?? null);
         } else {
-          const banners = await importFromShopify();
+          const imported = await importFromShopify();
+          // 배경색은 이미지 모서리에서 — 세로 틀로 바꿨을 때 바로 어울리게
+          const banners = await Promise.all(
+            imported.map(async (b) => ({ ...b, bg: (b.pcImage && (await sampleCorner(b.pcImage))) || b.bg })),
+          );
           if (cancelled) return;
           const d: HomeBannersDoc = { version: 1, updatedAt: "", settings: { mobileRatio: "strip" }, banners };
           setDoc(d);
@@ -199,9 +203,14 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
 
   const onPickImage = async (kind: "pc" | "mobile", file: File | undefined) => {
     if (!file || !selected) return;
+    if (file.size > 3 * 1024 * 1024) {
+      toast.error("이미지는 3MB 까지");
+      return;
+    }
     setUploading(kind);
     try {
-      const [url, corner] = await Promise.all([uploadImage(secret, file), kind === "pc" ? sampleCorner(file) : Promise.resolve(null)]);
+      const dataUrl = await fileToDataUrl(file);
+      const [url, corner] = await Promise.all([uploadImage(secret, file, dataUrl), kind === "pc" ? sampleCorner(dataUrl) : Promise.resolve(null)]);
       updateBanner(selected.id, kind === "pc" ? { pcImage: url, ...(corner ? { bg: corner } : {}) } : { mobileImage: url });
       toast.success("이미지 올림 — 「저장」해야 반영");
     } catch (e) {

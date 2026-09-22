@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
  * 붙는다. 헤드라인이 한 줄이든 세 줄이든 CTA 자리는 안 움직인다.
  *
  * 모바일 틀(settings.mobileRatio):
- *  - strip : PC 이미지(1200×504) 그대로. 문구는 왼쪽 52% 안에만
+ *  - strip : PC 이미지(1200×504) 그대로. 문구는 왼쪽 55% 안에만
  *  - 4:3 / 1:1 : 세로가 있는 틀. 모바일 이미지가 있으면 꽉 채우고, 없으면 배경색 위에 PC 이미지를
  *    아래쪽에 가로형 그대로 깔고 위 띠에 문구를 쓴다(문구가 없는 이미지 배너는 가운데 정렬).
  */
@@ -36,15 +36,16 @@ interface Layout {
   gap: string;
 }
 
+// 문구 칸은 왼쪽 6%~60%. 헤드라인 11자(「新作おもちゃ4アイテム」)가 1280px 에서 한 줄에 들어가는 크기(4.6cqw)
 const PC: Layout = {
   aspect: "1200 / 504",
   left: "6%",
-  width: "50%",
-  top: "20%",
-  bottom: "16%",
+  width: "54%",
+  top: "16%",
+  bottom: "14%",
   badge: "clamp(9px, 1.1cqw, 14px)",
   subtext: "clamp(11px, 2.6cqw, 34px)",
-  headline: "clamp(15px, 5cqw, 62px)",
+  headline: "clamp(15px, 4.6cqw, 62px)",
   cta: "clamp(10px, 2.1cqw, 26px)",
   gap: "1.2cqw",
 };
