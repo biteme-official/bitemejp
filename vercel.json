@@ -55,6 +55,9 @@
   "functions": {
     "api/kr-reviews.ts": {
       "includeFiles": "data/**"
+    },
+    "api/home-banners.ts": {
+      "maxDuration": 60
     }
   },
   "rewrites": [

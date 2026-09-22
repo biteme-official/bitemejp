@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import AffiliateTab from "@/components/admin/AffiliateTab";
+import HomeBannersTab from "@/components/admin/HomeBannersTab";
 
 // Admin API base URL — 별도 Vercel 프로젝트로 분리된 경우 해당 URL, 동일 origin이면 빈 문자열
 const ADMIN_API_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL as string) ?? '';
@@ -2483,7 +2484,9 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
           </div>
         )}
 
-        {(data || shopify) && (
+        {/* 탭 틀은 분석 데이터와 무관하게 그린다 — 어필리에이트·메인 배너 탭은 분석 API 가 죽어도(프리뷰는 CORS 로
+            늘 실패) 써야 한다(#194). 분석 탭 내용만 데이터가 있을 때 */}
+        {!isLoading && (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
             <TabsList className="h-9">
               <TabsTrigger value="dashboard" className="text-xs px-4">대시보드</TabsTrigger>
@@ -2493,8 +2496,16 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               <TabsTrigger value="members" className="text-xs px-4">회원 분석</TabsTrigger>
               <TabsTrigger value="weekly" className="text-xs px-4">주간회고</TabsTrigger>
               <TabsTrigger value="affiliate" className="text-xs px-4">어필리에이트</TabsTrigger>
+              <TabsTrigger value="banners" className="text-xs px-4">메인 배너</TabsTrigger>
             </TabsList>
 
+            {!data && !shopify && !["affiliate", "banners"].includes(activeTab) && (
+              <p className="text-xs text-muted-foreground py-8 text-center">
+                분석 데이터를 못 불러왔습니다. 어필리에이트·메인 배너 탭은 이 상태에서도 쓸 수 있습니다.
+              </p>
+            )}
+
+            {(data || shopify) && (<>
             {/* ══ 대시보드 탭 ══ */}
             <TabsContent value="dashboard" className="space-y-5 mt-0">
               {/* ── 핵심 비즈니스 지표 ── */}
@@ -2741,11 +2752,17 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
                 GA4 + Shopify + Instagram · {RANGE_LABELS[range]} 데이터
               </p>
             </TabsContent>
+            </>)}
 
             {/* ══ 어필리에이트 탭 (#178 Phase 0) ══ */}
             <TabsContent value="affiliate" className="space-y-5 mt-0">
               {/* 탭을 열기 전에는 마운트하지 않는다 — 장부 조회 5개가 딸려 들어간다 */}
               {activeTab === "affiliate" && <AffiliateTab secret={secret} />}
+            </TabsContent>
+
+            {/* ══ 메인 배너 탭 ══ */}
+            <TabsContent value="banners" className="space-y-5 mt-0">
+              {activeTab === "banners" && <HomeBannersTab secret={secret} />}
             </TabsContent>
           </Tabs>
         )}
