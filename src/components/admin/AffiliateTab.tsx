@@ -334,6 +334,13 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
     catch (e) { alert(e instanceof Error ? e.message : "실패"); }
     finally { setBusy(null); }
   };
+  const remove = async (c: Campaign) => {
+    if (!window.confirm(`「${c.name}」 를 삭제합니다. 이 캠페인이 적용된 주문이 있으면 거절됩니다.`)) return;
+    setBusy(c.id);
+    try { await postAdmin(secret, { action: "delete_campaign", campaignId: c.id }); onDone(); }
+    catch (e) { alert(e instanceof Error ? e.message : "실패"); }
+    finally { setBusy(null); }
+  };
   const now = Date.now();
   const stateOf = (c: Campaign) =>
     !c.active || new Date(c.ends_at).getTime() <= now ? "ended" : new Date(c.starts_at).getTime() > now ? "scheduled" : "live";
@@ -369,9 +376,12 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
                   {st === "scheduled" && <Pill className="bg-sky-50 text-sky-700">예정</Pill>}
                   {st === "ended" && <Pill className="bg-slate-100 text-slate-600">종료</Pill>}
                 </td>
-                <td>
+                <td className="whitespace-nowrap space-x-2">
                   {st !== "ended" && c.created_by !== "system" && (
                     <button className="text-[11px] underline text-muted-foreground disabled:opacity-40" disabled={busy === c.id} onClick={() => end(c)}>종료</button>
+                  )}
+                  {c.result.orders === 0 && c.created_by !== "system" && (
+                    <button className="text-[11px] underline text-red-600 disabled:opacity-40" disabled={busy === c.id} onClick={() => remove(c)}>삭제</button>
                   )}
                 </td>
               </tr>

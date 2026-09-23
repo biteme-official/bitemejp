@@ -4,6 +4,7 @@
  *  GET  /api/affiliate-admin              파트너 목록(이달·누적 성과, 이달 클릭) + 최근 전환 + 캠페인(전용 코드·성과)
  *  POST action=create_campaign            캠페인 생성 → (할인 있으면) 파트너별 Shopify 전용 코드 → LINE 통지 (Phase 3)
  *  POST action=end_campaign { campaignId } 캠페인 종료 + 전용 코드 비활성 (Phase 3)
+ *  POST action=delete_campaign { campaignId } 적용 주문 0건인 캠페인 삭제(잘못 만든 것 정리)
  *  POST /api/affiliate-admin  action=add_partner
  *       { code, name, instagram?, email?, discountCode? }
  *       Phase 2 셀프 가입 전까지 하영이 어드민에서 파트너를 앉힌다.
@@ -25,7 +26,7 @@ import {
   toOrderForAttribution,
   type AdminOrderNode,
 } from './_affiliate.js';
-import { createCampaign, endCampaign, parseCampaignInput } from './_affiliate-campaign.js';
+import { createCampaign, deleteCampaign, endCampaign, parseCampaignInput } from './_affiliate-campaign.js';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 const CODE_RE = /^[A-Z0-9]{4,12}$/;
@@ -162,6 +163,14 @@ async function handleEndCampaign(body: Record<string, unknown>, res: VercelRespo
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'campaignId 필요' });
   const r = await endCampaign(getSupabase(), id);
   if (typeof r === 'string') return res.status(400).json({ error: r });
+  return res.status(200).json({ ok: true, ...r });
+}
+
+async function handleDeleteCampaign(body: Record<string, unknown>, res: VercelResponse) {
+  const id = Number(body.campaignId);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'campaignId 필요' });
+  const r = await deleteCampaign(getSupabase(), id);
+  if (typeof r === 'string') return res.status(409).json({ error: r });
   return res.status(200).json({ ok: true, ...r });
 }
 
@@ -316,6 +325,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (body.action === 'reevaluate_order') return await handleReevaluate(body, res);
       if (body.action === 'create_campaign') return await handleCreateCampaign(body, res);
       if (body.action === 'end_campaign') return await handleEndCampaign(body, res);
+      if (body.action === 'delete_campaign') return await handleDeleteCampaign(body, res);
       return res.status(400).json({ error: `unknown action: ${String(body.action)}` });
     }
     return res.status(405).json({ error: 'Method not allowed' });

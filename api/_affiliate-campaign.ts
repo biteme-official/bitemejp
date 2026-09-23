@@ -349,3 +349,36 @@ export async function endCampaign(sb: SupabaseClient, campaignId: number): Promi
   }
   return { deactivated, errors };
 }
+
+/**
+ * 삭제 — 잘못 만든 캠페인 정리용. 장부에 그 캠페인이 걸린 주문이 한 건이라도 있으면 거절(종료를 쓸 것).
+ * 전용 코드는 Shopify 에서도 지운다. 코드·행은 FK cascade 로 함께 사라진다.
+ */
+export async function deleteCampaign(sb: SupabaseClient, campaignId: number): Promise<{ deletedCodes: number } | string> {
+  const { data: camp, error } = await sb.from('aff_campaigns').select('id, created_by').eq('id', campaignId).maybeSingle();
+  if (error) return error.message;
+  if (!camp) return '캠페인 없음';
+  if ((camp as { created_by: string | null }).created_by === 'system') return '시스템 캠페인은 지울 수 없음';
+
+  const { count, error: cErr } = await sb.from('aff_conversions').select('id', { count: 'exact', head: true }).eq('campaign_id', campaignId);
+  if (cErr) return cErr.message;
+  if ((count ?? 0) > 0) return `이 캠페인이 적용된 주문이 ${count}건 있어 삭제 불가 — 종료로 처리할 것`;
+
+  const { data: codeRows } = await sb.from('aff_campaign_codes').select('shopify_discount_gid').eq('campaign_id', campaignId);
+  const gids = ((codeRows ?? []) as Array<{ shopify_discount_gid: string }>).map((r) => r.shopify_discount_gid).filter((g) => g.startsWith('gid://'));
+  if (gids.length > 0) {
+    const token = await getAdminToken();
+    for (const id of gids) {
+      const data = await adminGraphQL<{ discountCodeDelete: { userErrors: UserError[] } }>(
+        token,
+        `mutation($id: ID!) { discountCodeDelete(id: $id) { deletedCodeDiscountId userErrors { field message } } }`,
+        { id }
+      );
+      const errs = data.discountCodeDelete.userErrors;
+      if (errs.length) return `Shopify 코드 삭제 실패: ${errs.map((e) => e.message).join(' / ')}`;
+    }
+  }
+  const { error: dErr } = await sb.from('aff_campaigns').delete().eq('id', campaignId);
+  if (dErr) return dErr.message;
+  return { deletedCodes: gids.length };
+}
