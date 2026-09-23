@@ -374,7 +374,7 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead className="border-b text-muted-foreground">
-          <tr className="[&>th]:py-2 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
+          <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
             <th>이름</th><th>기간</th><th>대상</th><th className="text-right">커미션</th><th className="text-right">고객 할인</th><th>전용 코드</th>
             <th className="text-right">주문</th><th className="text-right">매출</th><th className="text-right">커미션 합</th><th>상태</th><th></th>
           </tr>
@@ -386,7 +386,7 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
           {campaigns.map((c) => {
             const st = stateOf(c);
             return (
-              <tr key={c.id} className="border-b last:border-0 [&>td]:py-2 [&>td]:align-top">
+              <tr key={c.id} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
                 <td>{c.name}</td>
                 <td className="text-muted-foreground whitespace-nowrap">{day(c.starts_at)} ~ {c.ends_at.startsWith("2099") ? "종료 없음" : day(c.ends_at)}</td>
                 <td className="text-muted-foreground">{c.scope === "all" ? "전원" : c.scope === "partners" ? `파트너 ${c.target_ids.length}명` : `상품 ${c.target_ids.length}개`}</td>
@@ -517,13 +517,13 @@ function SettlementCard({ secret, settlement, onDone }: { secret: string; settle
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead className="border-b text-muted-foreground">
-                  <tr className="[&>th]:py-2 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
+                  <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
                     <th></th><th>코드</th><th>이름</th><th>등록번호</th><th className="text-right">총액(이월 포함)</th><th className="text-right">원천징수</th><th className="text-right">지급액</th><th>상태</th><th>지급일</th><th>이의신청 기한</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={r.id} className="border-b last:border-0 [&>td]:py-2">
+                    <tr key={r.id} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3">
                       <td>{r.status === "payable" && <input type="checkbox" aria-label={`${r.partner_code} 지급 선택`} checked={picked.includes(r.id)} onChange={() => setPicked((cur) => (cur.includes(r.id) ? cur.filter((x) => x !== r.id) : [...cur, r.id]))} />}</td>
                       <td className="font-mono">{r.partner_code}{r.partner_status !== "active" && <span className="ml-1 text-[10px] text-amber-700">{r.partner_status === "suspended" ? "정지" : "탈퇴"}</span>}</td>
                       <td>{r.partner_name}</td>
@@ -658,7 +658,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="border-b text-muted-foreground">
-                <tr className="[&>th]:py-2 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
+                <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
                   <th></th><th>코드</th><th>이름</th><th>Instagram</th><th>가입</th>
                   <th className="text-right">이달 클릭</th><th className="text-right">이달 주문</th><th className="text-right">이달 매출</th><th className="text-right">이달 커미션</th>
                   <th className="text-right">누적 주문</th><th className="text-right">누적 매출</th><th className="text-right">누적 커미션</th>
@@ -670,7 +670,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
                   <tr><td colSpan={15} className="py-6 text-center text-muted-foreground">파트너가 없습니다. 셀프 가입(/affiliate · 상품 상세)으로 들어옵니다.</td></tr>
                 )}
                 {sorted.map((p) => (
-                  <tr key={p.id} className={`border-b last:border-0 [&>td]:py-2 [&>td]:align-top ${selected.includes(p.id) ? "bg-sky-50/60" : ""}`}>
+                  <tr key={p.id} className={`border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top ${selected.includes(p.id) ? "bg-sky-50/60" : ""}`}>
                     <td><input type="checkbox" aria-label={`${p.code} 선택`} checked={selected.includes(p.id)} disabled={p.status !== "active"} onChange={() => toggle(p.id)} /></td>
                     <td className="font-mono font-medium">{p.code}</td>
                     <td>
@@ -711,7 +711,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
         <CardContent className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="border-b text-muted-foreground">
-              <tr className="[&>th]:py-2 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
+              <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
                 <th>주문</th><th>주문일</th><th>파트너</th><th>귀속</th><th className="text-right">기준액</th><th className="text-right">요율</th><th className="text-right">커미션</th><th>상태</th><th>확정 예정</th><th></th>
               </tr>
             </thead>
@@ -720,7 +720,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
                 <tr><td colSpan={10} className="py-6 text-center text-muted-foreground">아직 귀속된 주문이 없습니다.</td></tr>
               )}
               {data.recent.map((c) => (
-                <tr key={c.id} className="border-b last:border-0 [&>td]:py-2">
+                <tr key={c.id} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3">
                   <td className="font-mono">{c.order_name ?? "—"}</td>
                   <td className="text-muted-foreground">{day(c.ordered_at)}</td>
                   <td className="font-mono">{c.partner_code}</td>
