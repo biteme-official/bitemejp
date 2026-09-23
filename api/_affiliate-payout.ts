@@ -156,7 +156,10 @@ export async function markPaid(sb: SupabaseClient, payoutIds: number[], paidAt =
   if (payoutIds.length === 0) return 'payoutIds 필요';
   const { data, error } = await sb.from('aff_payouts').select('id, status').in('id', payoutIds);
   if (error) return error.message;
-  const bad = ((data ?? []) as Array<{ id: number; status: string }>).filter((p) => p.status !== 'payable');
+  const found = (data ?? []) as Array<{ id: number; status: string }>;
+  const missing = payoutIds.filter((id) => !found.some((p) => p.id === id));
+  if (missing.length > 0) return `없는 정산 id: ${missing.join(', ')}`;
+  const bad = found.filter((p) => p.status !== 'payable');
   if (bad.length > 0) return `지급 대상(payable)이 아닌 건이 섞여 있음: ${bad.map((b) => `#${b.id} ${b.status}`).join(', ')}`;
   const disputeUntil = new Date(paidAt.getTime() + DISPUTE_DAYS * 86400_000 + 9 * 3600_000).toISOString().slice(0, 10);
   const { error: uErr } = await sb
