@@ -44,6 +44,13 @@ function PageFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** 支払予定日 = 締め月の翌月末 (規約 第5条) */
+const dueOf = (period: string) => {
+  const [y, m] = period.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m + 1, 0));
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+};
+
 export default function Partner() {
   const navigate = useNavigate();
   const { user, isLoggedIn, logout } = useAuthStore();
@@ -234,11 +241,13 @@ export default function Partner() {
           <ul className="space-y-1 text-sm">
             {payouts.map((p) => (
               <li key={p.period} className="flex justify-between rounded-lg border border-border px-4 py-2">
-                <span>{p.period}</span><span className="tabular-nums">{yen(p.net)} · {p.status === "paid" ? `支払済 ${p.paid_at ? day(p.paid_at) : ""}` : p.status === "carried" ? "繰越" : "支払予定"}</span>
+                <span>{p.period}</span><span className="tabular-nums">{yen(p.net)} · {p.status === "paid" ? `支払済 ${p.paid_at ? day(p.paid_at) : ""}` : p.status === "carried" ? "繰越（¥3,000未満）" : `支払予定 ${dueOf(p.period)}`}</span>
               </li>
             ))}
           </ul>
         )}
+        {/* 계좌는 우리 시스템에 담지 않는다 — 지급 대상이 된 파트너에게만 インケア 가 직접 받는다 (2026-09-23 결정) */}
+        <p className="text-[11px] text-muted-foreground mt-2">お支払い対象（¥3,000以上）になった方には、振込先口座のご登録方法を運営会社（株式会社インケア）から個別にご案内します。口座情報はこのページでは登録しません。</p>
       </section>
 
       {/* 설정 */}

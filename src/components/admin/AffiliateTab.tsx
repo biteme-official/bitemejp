@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 /**
  * 어드민 「어필리에이트」 탭 (Issue #178)
  *
- * 장부 + 파트너 현황(성과순) + 캠페인 만들기·종료(Phase 3). 정산·이상 감지는 다음 PR.
+ * 장부 + 파트너 현황(성과순) + 캠페인 만들기·종료 + 월 정산(Phase 3). 이상 감지는 다음 PR.
  * 데이터는 /api/affiliate-admin (Bearer ADMIN_SECRET) 하나로 온다.
  */
 
@@ -40,6 +40,30 @@ interface Conversion {
   status: "pending" | "confirmed" | "reversed" | "self" | "void" | "nonmember";
   ordered_at: string;
   confirm_at: string;
+  payout_id: number | null;
+}
+interface Payout {
+  id: number;
+  partner_id: number;
+  period: string;
+  gross: number;
+  withholding: number;
+  net: number;
+  status: "draft" | "carried" | "payable" | "paid" | "void";
+  carried_from: number[];
+  paid_at: string | null;
+  dispute_until: string | null;
+  partner_code: string;
+  partner_name: string;
+  invoice_reg_no: string | null;
+  partner_status: string;
+  due_date: string;
+}
+interface Settlement {
+  minPayout: number;
+  currentPeriod: string;
+  unsettled: { conversions: number; amount: number; partners: number };
+  payouts: Payout[];
 }
 interface Campaign {
   id: number; name: string; starts_at: string; ends_at: string;
@@ -63,6 +87,7 @@ interface AffiliateData {
   partners: Partner[];
   recent: Conversion[];
   campaigns: Campaign[];
+  settlement: Settlement;
 }
 
 async function fetchAffiliate(secret: string): Promise<AffiliateData> {
@@ -349,7 +374,7 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead className="border-b text-muted-foreground">
-          <tr className="[&>th]:py-2 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
+          <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
             <th>이름</th><th>기간</th><th>대상</th><th className="text-right">커미션</th><th className="text-right">고객 할인</th><th>전용 코드</th>
             <th className="text-right">주문</th><th className="text-right">매출</th><th className="text-right">커미션 합</th><th>상태</th><th></th>
           </tr>
@@ -361,7 +386,7 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
           {campaigns.map((c) => {
             const st = stateOf(c);
             return (
-              <tr key={c.id} className="border-b last:border-0 [&>td]:py-2 [&>td]:align-top">
+              <tr key={c.id} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
                 <td>{c.name}</td>
                 <td className="text-muted-foreground whitespace-nowrap">{day(c.starts_at)} ~ {c.ends_at.startsWith("2099") ? "종료 없음" : day(c.ends_at)}</td>
                 <td className="text-muted-foreground">{c.scope === "all" ? "전원" : c.scope === "partners" ? `파트너 ${c.target_ids.length}명` : `상품 ${c.target_ids.length}개`}</td>
@@ -392,6 +417,149 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
       <p className="text-[11px] text-muted-foreground mt-2">주문·매출·커미션 합 = 그 캠페인 요율이 적용된 확정 대기+확정 건.</p>
     </div>
   );
+}
+
+const PAYOUT_LABEL: Record<Payout["status"], string> = { draft: "작성 중", carried: "이월", payable: "지급 대상", paid: "지급 완료", void: "무효" };
+const PAYOUT_CLASS: Record<Payout["status"], string> = {
+  draft: "bg-slate-100 text-slate-600",
+  carried: "bg-slate-100 text-slate-600",
+  payable: "bg-amber-50 text-amber-700",
+  paid: "bg-emerald-50 text-emerald-700",
+  void: "bg-slate-100 text-slate-500",
+};
+
+/** 'YYYY-MM' 의 전달 */
+const prevPeriod = (p: string) => {
+  const [y, m] = p.split("-").map(Number);
+  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
+};
+
+/** 경영지원에 넘길 명세 CSV — 엑셀에서 한글이 안 깨지게 BOM */
+function downloadCsv(period: string, rows: Payout[]) {
+  const head = ["정산월", "파트너 코드", "이름", "적격청구서 등록번호", "총액(이월 포함·엔)", "원천징수(엔)", "지급액(엔)", "상태", "지급 예정일", "지급일", "이의신청 기한", "파트너 상태"];
+  const esc = (v: unknown) => {
+    const t = v == null ? "" : String(v);
+    return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+  };
+  const lines = rows.map((r) => [r.period, r.partner_code, r.partner_name, r.invoice_reg_no ?? "", r.gross, r.withholding, r.net, PAYOUT_LABEL[r.status], r.due_date, r.paid_at ? day(r.paid_at) : "", r.dispute_until ?? "", r.partner_status].map(esc).join(","));
+  const blob = new Blob(["﻿" + [head.join(","), ...lines].join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `affiliate-payouts-${period}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function SettlementCard({ secret, settlement, onDone }: { secret: string; settlement: Settlement; onDone: () => void }) {
+  const periods = [...new Set(settlement.payouts.map((p) => p.period))];
+  const closable = prevPeriod(settlement.currentPeriod);
+  const [period, setPeriod] = useState<string>(periods[0] ?? closable);
+  const [picked, setPicked] = useState<number[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const rows = settlement.payouts.filter((p) => p.period === period);
+  const payableRows = rows.filter((r) => r.status === "payable");
+  const sum = (rs: Payout[]) => rs.reduce((a, r) => a + r.net, 0);
+
+  const run = async (body: Record<string, unknown>, confirmMsg: string, done: (r: Record<string, unknown>) => string) => {
+    if (!window.confirm(confirmMsg)) return;
+    setBusy(true); setMsg(null);
+    try { const r = await postAdmin<Record<string, unknown>>(secret, body); setMsg(done(r)); setPicked([]); onDone(); }
+    catch (e) { setMsg(e instanceof Error ? e.message : "실패"); }
+    finally { setBusy(false); }
+  };
+  const close = () => run(
+    { action: "close_month", period: closable },
+    `${closable} 월을 마감합니다.\n${closable} 말일까지 확정된 커미션과 이월분을 파트너별로 묶습니다. ¥${settlement.minPayout.toLocaleString()} 미만은 다음 달로 이월됩니다.\n지급 처리 전이면 다시 마감할 수 있습니다.`,
+    (r) => { setPeriod(closable); return `${closable} 마감 — 지급 대상 ${r.payable}명 · ${yen(Number(r.totalPayable))}, 이월 ${r.carried}명 (전환 ${r.conversions}건)`; }
+  );
+  const pay = () => run(
+    { action: "mark_paid", payoutIds: picked },
+    `${picked.length}명 지급 완료로 표시합니다. 오늘이 지급일이 되고, 이의신청 기한은 30일 뒤입니다. 되돌릴 수 없습니다.`,
+    (r) => `${r.paid}명 지급 완료로 표시했습니다.`
+  );
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">정산</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          월 1회 · 익월 말 지급 · ¥{settlement.minPayout.toLocaleString()} 미만은 다음 달로 이월(약관 第5条). 원천징수는 세무사 확인 전까지 0. 계좌는 시스템에 담지 않는다 — 지급 대상에게 따로 받는다.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-wrap items-center gap-3 text-xs">
+          <span className="rounded border px-3 py-2">
+            다음 마감에 들어갈 확정분 <b className="tabular-nums">{yen(settlement.unsettled.amount)}</b>
+            <span className="text-muted-foreground"> · {settlement.unsettled.conversions}건 · {settlement.unsettled.partners}명</span>
+          </span>
+          <button className="h-8 rounded bg-foreground text-background px-3 disabled:opacity-40" disabled={busy} onClick={close}>
+            {closable} 마감{periods.includes(closable) ? " (다시)" : ""}
+          </button>
+          {msg && <span className="text-muted-foreground">{msg}</span>}
+        </div>
+
+        {periods.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-4 text-center">아직 마감한 달이 없습니다. 첫 확정은 주문 30일 뒤부터 생깁니다.</p>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <select className="h-8 rounded border bg-background px-2" value={period} onChange={(e) => { setPeriod(e.target.value); setPicked([]); }}>
+                {periods.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <span className="text-muted-foreground">지급 대상 {payableRows.length}명 · {yen(sum(payableRows))} · 지급 예정일 {rows[0]?.due_date}</span>
+              <button className="h-8 rounded border px-3" onClick={() => downloadCsv(period, rows)}>명세 CSV</button>
+              {picked.length > 0 && (
+                <button className="h-8 rounded bg-emerald-700 text-white px-3 disabled:opacity-40" disabled={busy} onClick={pay}>선택 {picked.length}명 지급 완료</button>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead className="border-b text-muted-foreground">
+                  <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
+                    <th></th><th>코드</th><th>이름</th><th>등록번호</th><th className="text-right">총액(이월 포함)</th><th className="text-right">원천징수</th><th className="text-right">지급액</th><th>상태</th><th>지급일</th><th>이의신청 기한</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    <tr key={r.id} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3">
+                      <td>{r.status === "payable" && <input type="checkbox" aria-label={`${r.partner_code} 지급 선택`} checked={picked.includes(r.id)} onChange={() => setPicked((cur) => (cur.includes(r.id) ? cur.filter((x) => x !== r.id) : [...cur, r.id]))} />}</td>
+                      <td className="font-mono">{r.partner_code}{r.partner_status !== "active" && <span className="ml-1 text-[10px] text-amber-700">{r.partner_status === "suspended" ? "정지" : "탈퇴"}</span>}</td>
+                      <td>{r.partner_name}</td>
+                      <td className="font-mono text-muted-foreground">{r.invoice_reg_no ?? "—"}</td>
+                      <td className="text-right tabular-nums">{yen(r.gross)}{r.carried_from.length > 0 && <span className="text-muted-foreground" title="이전 달 이월분 포함"> *</span>}</td>
+                      <td className="text-right tabular-nums">{yen(r.withholding)}</td>
+                      <td className="text-right tabular-nums font-medium">{yen(r.net)}</td>
+                      <td><Pill className={PAYOUT_CLASS[r.status]}>{PAYOUT_LABEL[r.status]}</Pill></td>
+                      <td className="text-muted-foreground">{r.paid_at ? day(r.paid_at) : "—"}</td>
+                      <td className="text-muted-foreground">{r.dispute_until ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-[11px] text-muted-foreground mt-2">* 이전 달 이월분 포함. 이월은 다음 달 확정분이 생길 때 합쳐진다.</p>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** 최근 전환 행의 「무효」 — 광고 표기 미비 등 약관 위반 성과 취소(第8条). 정산 전 건만 */
+function VoidButton({ secret, conversion, onDone }: { secret: string; conversion: Conversion; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  if (!["pending", "confirmed"].includes(conversion.status) || conversion.payout_id != null) return null;
+  const onClick = async () => {
+    const reason = window.prompt(`${conversion.order_name ?? ""} 커미션을 무효로 합니다(되돌릴 수 없음). 사유:`, "#PR 표기 없음");
+    if (!reason) return;
+    setBusy(true);
+    try { await postAdmin(secret, { action: "void_conversion", conversionId: conversion.id, reason }); onDone(); }
+    catch (e) { alert(e instanceof Error ? e.message : "실패"); }
+    finally { setBusy(false); }
+  };
+  return <button className="text-[11px] underline text-muted-foreground disabled:opacity-40" disabled={busy} onClick={onClick}>무효</button>;
 }
 
 export default function AffiliateTab({ secret }: { secret: string }) {
@@ -451,6 +619,9 @@ export default function AffiliateTab({ secret }: { secret: string }) {
         ))}
       </div>
 
+      {/* 정산 */}
+      <SettlementCard secret={secret} settlement={data.settlement} onDone={refresh} />
+
       {/* 캠페인 */}
       <Card>
         <CardHeader className="pb-3 flex flex-row items-start justify-between gap-3 space-y-0">
@@ -487,7 +658,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="border-b text-muted-foreground">
-                <tr className="[&>th]:py-2 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
+                <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
                   <th></th><th>코드</th><th>이름</th><th>Instagram</th><th>가입</th>
                   <th className="text-right">이달 클릭</th><th className="text-right">이달 주문</th><th className="text-right">이달 매출</th><th className="text-right">이달 커미션</th>
                   <th className="text-right">누적 주문</th><th className="text-right">누적 매출</th><th className="text-right">누적 커미션</th>
@@ -499,7 +670,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
                   <tr><td colSpan={15} className="py-6 text-center text-muted-foreground">파트너가 없습니다. 셀프 가입(/affiliate · 상품 상세)으로 들어옵니다.</td></tr>
                 )}
                 {sorted.map((p) => (
-                  <tr key={p.id} className={`border-b last:border-0 [&>td]:py-2 [&>td]:align-top ${selected.includes(p.id) ? "bg-sky-50/60" : ""}`}>
+                  <tr key={p.id} className={`border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top ${selected.includes(p.id) ? "bg-sky-50/60" : ""}`}>
                     <td><input type="checkbox" aria-label={`${p.code} 선택`} checked={selected.includes(p.id)} disabled={p.status !== "active"} onChange={() => toggle(p.id)} /></td>
                     <td className="font-mono font-medium">{p.code}</td>
                     <td>
@@ -540,16 +711,16 @@ export default function AffiliateTab({ secret }: { secret: string }) {
         <CardContent className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="border-b text-muted-foreground">
-              <tr className="[&>th]:py-2 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
-                <th>주문</th><th>주문일</th><th>파트너</th><th>귀속</th><th className="text-right">기준액</th><th className="text-right">요율</th><th className="text-right">커미션</th><th>상태</th><th>확정 예정</th>
+              <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
+                <th>주문</th><th>주문일</th><th>파트너</th><th>귀속</th><th className="text-right">기준액</th><th className="text-right">요율</th><th className="text-right">커미션</th><th>상태</th><th>확정 예정</th><th></th>
               </tr>
             </thead>
             <tbody>
               {data.recent.length === 0 && (
-                <tr><td colSpan={9} className="py-6 text-center text-muted-foreground">아직 귀속된 주문이 없습니다.</td></tr>
+                <tr><td colSpan={10} className="py-6 text-center text-muted-foreground">아직 귀속된 주문이 없습니다.</td></tr>
               )}
               {data.recent.map((c) => (
-                <tr key={c.id} className="border-b last:border-0 [&>td]:py-2">
+                <tr key={c.id} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3">
                   <td className="font-mono">{c.order_name ?? "—"}</td>
                   <td className="text-muted-foreground">{day(c.ordered_at)}</td>
                   <td className="font-mono">{c.partner_code}</td>
@@ -559,6 +730,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
                   <td className="text-right tabular-nums font-medium">{yen(c.commission)}</td>
                   <td><Pill className={STATUS_CLASS[c.status]}>{STATUS_LABEL[c.status]}</Pill></td>
                   <td className="text-muted-foreground">{day(c.confirm_at)}</td>
+                  <td><VoidButton secret={secret} conversion={c} onDone={refresh} /></td>
                 </tr>
               ))}
             </tbody>
