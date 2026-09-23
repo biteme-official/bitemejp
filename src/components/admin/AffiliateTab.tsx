@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 /**
  * 어드민 「어필리에이트」 탭 (Issue #178)
  *
- * 장부 + 파트너 현황(성과순) + 캠페인 만들기·종료 + 월 정산(Phase 3). 이상 감지는 다음 PR.
+ * 장부 + 파트너 현황(성과순) + 캠페인 만들기·종료 + 월 정산 + 이상 감지 + 규약 개정 통지 (Phase 3).
  * 데이터는 /api/affiliate-admin (Bearer ADMIN_SECRET) 하나로 온다.
  */
 
@@ -69,6 +69,7 @@ interface Campaign {
   id: number; name: string; starts_at: string; ends_at: string;
   commission_rate: number; discount_percent: number | null; scope: string; target_ids: string[]; active: boolean;
   created_by: string | null;
+  notify_status?: "none" | "pending" | "sent";
   codes: Array<{ partnerId: number; partnerCode: string; code: string; status: string }>;
   result: { orders: number; sales: number; commission: number };
 }
@@ -76,6 +77,12 @@ interface CreateResult {
   codes: Array<{ partnerCode: string; code: string }>;
   codeErrors: Array<{ partnerCode: string; error: string }>;
   notified: { sent: number; notFriend: number; failed: number };
+  notifyPending: boolean;
+}
+interface Anomaly { kind: "self" | "same_buyer" | "spike" | "new_first"; partnerId: number; partnerCode: string; count: number; detail: string; at: string }
+interface Notice {
+  id: number; title: string; body: string; terms_version: string | null; effective_at: string;
+  notify_status: "none" | "pending" | "sent"; notified_at: string | null;
 }
 interface AffiliateData {
   ok: true;
@@ -88,6 +95,9 @@ interface AffiliateData {
   recent: Conversion[];
   campaigns: Campaign[];
   settlement: Settlement;
+  anomalies: Anomaly[];
+  notices: Notice[];
+  noticeMinDays: number;
 }
 
 async function fetchAffiliate(secret: string): Promise<AffiliateData> {
@@ -133,6 +143,8 @@ function PartnerActions({ secret, partner, onDone }: { secret: string; partner: 
 const yen = (n: number) => `¥${Math.round(n).toLocaleString("ja-JP")}`;
 const pct = (r: number) => `${Math.round(r * 1000) / 10}%`;
 const day = (iso: string) => iso.slice(0, 10);
+/** UTC ISO → JST 날짜 (자정 경계가 걸린 값은 day() 로 자르면 하루 앞 날짜가 나온다) */
+const jstDay = (iso: string) => new Date(new Date(iso).getTime() + 9 * 3600_000).toISOString().slice(0, 10);
 
 const STATUS_LABEL: Record<Conversion["status"], string> = {
   pending: "확정 대기", confirmed: "확정", reversed: "환불 회수", self: "자기구매", void: "무효", nonmember: "비회원",
@@ -342,7 +354,9 @@ function CampaignForm({ secret, partners, selected, onDone }: {
           <p className="font-semibold">캠페인을 만들었습니다.</p>
           {result.codes.length > 0 && <p>전용 코드: <span className="font-mono">{result.codes.map((c) => `${c.partnerCode} → ${c.code}`).join(" · ")}</span></p>}
           {result.codeErrors.length > 0 && <p className="text-red-700">코드 실패: {result.codeErrors.map((c) => `${c.partnerCode} (${c.error})`).join(" · ")}</p>}
-          {form.notify && <p>LINE 알림: 보냄 {result.notified.sent} · 친구 아님 {result.notified.notFriend} · 실패 {result.notified.failed}</p>}
+          {form.notify && (result.notifyPending
+            ? <p>LINE 알림: 야간(21~9시)이라 내일 09:05 에 보냅니다.</p>
+            : <p>LINE 알림: 보냄 {result.notified.sent} · 친구 아님 {result.notified.notFriend} · 실패 {result.notified.failed}</p>)}
         </div>
       )}
     </form>
@@ -397,6 +411,7 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
                 <td className="text-right tabular-nums">{yen(c.result.sales)}</td>
                 <td className="text-right tabular-nums">{yen(c.result.commission)}</td>
                 <td>
+                  {c.notify_status === "pending" && <span className="mr-1"><Pill className="bg-amber-50 text-amber-700">알림 09:05</Pill></span>}
                   {st === "live" && <Pill className="bg-emerald-50 text-emerald-700">진행</Pill>}
                   {st === "scheduled" && <Pill className="bg-sky-50 text-sky-700">예정</Pill>}
                   {st === "ended" && <Pill className="bg-slate-100 text-slate-600">종료</Pill>}
@@ -562,6 +577,134 @@ function VoidButton({ secret, conversion, onDone }: { secret: string; conversion
   return <button className="text-[11px] underline text-muted-foreground disabled:opacity-40" disabled={busy} onClick={onClick}>무효</button>;
 }
 
+const ANOMALY_LABEL: Record<Anomaly["kind"], string> = { self: "자기구매", same_buyer: "같은 고객 반복", spike: "급증", new_first: "신규 첫 주문" };
+const ANOMALY_CLASS: Record<Anomaly["kind"], string> = {
+  self: "bg-red-50 text-red-700",
+  same_buyer: "bg-amber-50 text-amber-700",
+  spike: "bg-amber-50 text-amber-700",
+  new_first: "bg-sky-50 text-sky-700",
+};
+
+function AnomalyCard({ anomalies }: { anomalies: Anomaly[] }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm">이상 감지 {anomalies.length > 0 && <span className="font-normal text-muted-foreground">· {anomalies.length}건</span>}</CardTitle>
+        <p className="text-xs text-muted-foreground">자동으로 막지 않는다 — 한 번 보고, 문제면 최근 귀속 주문의 「무효」나 파트너 「정지」로. 신규 첫 주문은 게시물 #PR 표기를 확인할 것.</p>
+      </CardHeader>
+      <CardContent>
+        {anomalies.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-2">지금은 볼 것이 없습니다.</p>
+        ) : (
+          <ul className="space-y-1.5 text-xs">
+            {anomalies.map((a, i) => (
+              <li key={`${a.kind}-${a.partnerId}-${i}`} className="flex flex-wrap items-center gap-2">
+                <Pill className={ANOMALY_CLASS[a.kind]}>{ANOMALY_LABEL[a.kind]}</Pill>
+                <span className="font-mono font-medium">{a.partnerCode}</span>
+                <span>{a.detail}</span>
+                <span className="text-muted-foreground">{jstDay(a.at)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function NoticeCard({ secret, notices, minDays, onDone }: { secret: string; notices: Notice[]; minDays: number; onDone: () => void }) {
+  const minDate = toLocalInput(new Date(Date.now() + minDays * 86400_000)).slice(0, 10);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ title: "", body: "", effective: minDate, version: "" });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!window.confirm(`활동 파트너 전원에게 LINE 으로 개정 통지를 보냅니다(야간이면 다음 날 09:05). 시행일 ${form.effective}.\n보낸 통지는 지울 수 없습니다.`)) return;
+    setBusy(true); setMsg(null);
+    try {
+      const r = await postAdmin<{ notified: { sent: number; failed: number }; notifyPending: boolean }>(secret, {
+        action: "create_notice", title: form.title, body: form.body, effectiveAt: fromLocalInput(`${form.effective}T00:00`), termsVersion: form.version,
+      });
+      setMsg(r.notifyPending ? "등록했습니다. 야간이라 LINE 은 내일 09:05 에 갑니다." : `등록하고 LINE 을 보냈습니다 (${r.notified.sent}명).`);
+      setForm({ title: "", body: "", effective: minDate, version: "" });
+      onDone();
+    } catch (ex) { setMsg(ex instanceof Error ? ex.message : "실패"); }
+    finally { setBusy(false); }
+  }
+  const remove = async (n: Notice) => {
+    if (!window.confirm(`「${n.title}」 통지를 지웁니다.`)) return;
+    try { await postAdmin(secret, { action: "delete_notice", noticeId: n.id }); onDone(); }
+    catch (e) { alert(e instanceof Error ? e.message : "실패"); }
+  };
+
+  const input = "h-8 rounded border bg-background px-2 text-xs w-full";
+  const label = "text-[11px] text-muted-foreground space-y-1 block";
+  return (
+    <Card>
+      <CardHeader className="pb-3 flex flex-row items-start justify-between gap-3 space-y-0">
+        <div>
+          <CardTitle className="text-sm">규약 개정 통지 {notices.length > 0 && <span className="font-normal text-muted-foreground">· {notices.length}건</span>}</CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            약관 第11条 — 시행 {minDays}일 전까지 LINE + 파트너 페이지 배너. 재동의는 받지 않는다(시행 후 계속 이용 = 동의). 실제 약관 문구는 시행일에 맞춰 코드(affiliate-terms.ts)를 따로 바꿔야 한다.
+          </p>
+        </div>
+        <button className="h-8 shrink-0 rounded border text-xs px-3" onClick={() => setOpen((v) => !v)}>{open ? "닫기" : "통지 만들기"}</button>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {open && (
+          <form onSubmit={submit} className="rounded-lg border bg-muted/30 p-4 space-y-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <label className={`${label} col-span-2`}>
+                <span>제목 * (일본어)</span>
+                <input className={input} value={form.title} onChange={(e) => set("title", e.target.value)} placeholder="成果報酬の確定時期の変更について" required />
+              </label>
+              <label className={label}>
+                <span>시행일 * ({minDays}일 뒤 이후)</span>
+                <input type="date" className={input} min={minDate} value={form.effective} onChange={(e) => set("effective", e.target.value)} required />
+              </label>
+              <label className={label}>
+                <span>개정 후 약관 버전</span>
+                <input className={`${input} font-mono`} value={form.version} onChange={(e) => set("version", e.target.value)} placeholder="2026-12" />
+              </label>
+            </div>
+            <label className={label}>
+              <span>개정 요지 * (일본어 — LINE 본문과 배너에 그대로)</span>
+              <textarea className="w-full rounded border bg-background px-2 py-1.5 text-xs h-24" value={form.body} onChange={(e) => set("body", e.target.value)} required maxLength={1500} />
+            </label>
+            <div className="flex items-center gap-3">
+              <button type="submit" disabled={busy} className="h-8 rounded bg-foreground text-background text-xs px-4 disabled:opacity-50">{busy ? "보내는 중…" : "등록하고 LINE 보내기"}</button>
+              {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
+            </div>
+          </form>
+        )}
+        {!open && msg && <p className="text-xs text-muted-foreground">{msg}</p>}
+        {notices.length === 0 ? (
+          <p className="text-xs text-muted-foreground">아직 개정 통지가 없습니다.</p>
+        ) : (
+          <ul className="space-y-2 text-xs">
+            {notices.map((n) => (
+              <li key={n.id} className="rounded border px-3 py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{n.title}</span>
+                  <span className="text-muted-foreground">시행 {jstDay(n.effective_at)}{n.terms_version && ` · 버전 ${n.terms_version}`}</span>
+                  {n.notify_status === "sent"
+                    ? <Pill className="bg-emerald-50 text-emerald-700">{`LINE 보냄 ${n.notified_at ? jstDay(n.notified_at) : ""}`}</Pill>
+                    : <Pill className="bg-amber-50 text-amber-700">LINE 보류 — 09:05</Pill>}
+                  {n.notify_status !== "sent" && <button className="underline text-red-600" onClick={() => remove(n)}>삭제</button>}
+                </div>
+                <p className="text-muted-foreground mt-1 whitespace-pre-wrap">{n.body}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AffiliateTab({ secret }: { secret: string }) {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<number[]>([]);
@@ -600,7 +743,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
         <span>기본 커미션 {pct(data.baseRate)}</span>
         <span>귀속 창 30일 · 확정 대기 30일</span>
         <span>회원(LINE 로그인) 주문만 커미션</span>
-        <span className="text-muted-foreground">이달 집계 기준 {day(data.monthStart)} (JST)</span>
+        <span className="text-muted-foreground">이달 집계 기준 {jstDay(data.monthStart)} (JST)</span>
       </div>
 
       {/* 이달 요약 */}
@@ -618,6 +761,9 @@ export default function AffiliateTab({ secret }: { secret: string }) {
           </CardContent></Card>
         ))}
       </div>
+
+      {/* 이상 감지 */}
+      <AnomalyCard anomalies={data.anomalies ?? []} />
 
       {/* 정산 */}
       <SettlementCard secret={secret} settlement={data.settlement} onDone={refresh} />
@@ -741,6 +887,9 @@ export default function AffiliateTab({ secret }: { secret: string }) {
         </CardContent>
       </Card>
 
+
+      {/* 규약 개정 통지 */}
+      <NoticeCard secret={secret} notices={data.notices ?? []} minDays={data.noticeMinDays ?? 14} onDone={refresh} />
     </div>
   );
 }

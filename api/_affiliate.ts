@@ -279,11 +279,11 @@ function daysBetween(a: Date, b: Date): number {
 }
 
 /**
- * 세 갈래 귀속 판정 (설계 §5 흐름도). 순서가 우선순위다.
- *  1) 주문의 할인코드가 캠페인 전용 코드(aff_campaign_codes)면 → code
- *  2) 카트 속성 aff_ref(=파트너 코드) 가 30일 창 안이면 → ref
- *  3) 이 고객이 30일 안에 누군가의 링크를 눌렀으면(aff_touches) → customer
- * 셋 다 아니면 null — 자연 유입이다.
+ * 세 갈래 귀속 판정 (설계 §5 흐름도 · 경합 규칙).
+ *  1) 주문의 할인코드가 캠페인 전용 코드(aff_campaign_codes)면 → code (최우선)
+ *  2) 이 회원이 30일 안에 누군가의 링크를 눌렀으면(aff_touches) → customer   ┐ 둘 다 있으면
+ *  3) 카트 속성 aff_ref(=파트너 코드) 가 30일 창 안이면 → ref                ┘ 클릭이 더 최근인 쪽
+ * 정지·탈퇴한 파트너는 어느 갈래로도 귀속되지 않는다. 셋 다 아니면 null — 자연 유입이다.
  */
 export async function decideAttribution(
   sb: SupabaseClient,
@@ -307,25 +307,29 @@ export async function decideAttribution(
     }
   }
 
-  // 2) 링크 (카트 속성). 값 형식: "CODE" 또는 "CODE:clickId". aff_ref_at 이 있으면 30일 창을 서버에서도 확인
+  // 2) 링크(카트 속성)와 3) 회원 터치 — 둘 다 있으면 클릭이 더 최근인 쪽이 이긴다(설계 §5 경합 규칙, 약관 第3条 4항).
+  //    터치가 주 경로라 시각을 모르는 ref 와 겹치면 터치를 쓴다.
+  let refCand: { decision: ConversionDecision; at: number | null } | null = null;
   const ref = attr(order, 'aff_ref');
   if (ref) {
     const [codeRaw, clickRaw] = ref.split(':');
     const code = (codeRaw || '').toUpperCase();
     const refAt = attr(order, 'aff_ref_at');
-    const withinWindow = !refAt || daysBetween(new Date(refAt), orderedAt) <= ATTRIBUTION_WINDOW_DAYS;
+    const refTime = refAt ? new Date(refAt).getTime() : NaN;
+    const withinWindow = Number.isNaN(refTime) || daysBetween(new Date(refTime), orderedAt) <= ATTRIBUTION_WINDOW_DAYS;
     if (code && withinWindow) {
       const { data, error } = await sb.from('aff_partners').select('*').eq('code', code).maybeSingle();
       if (error) throw new Error(`aff_partners 조회 실패: ${error.message}`);
-      if (data) {
+      // 정지·탈퇴한 파트너의 링크는 즉시 무효 (第12条)
+      if (data && (data as AffPartner).status === 'active') {
         const clickId = clickRaw && /^\d+$/.test(clickRaw) ? Number(clickRaw) : null;
-        return { partner: data as AffPartner, attribution: 'ref', campaignId: null, clickId };
+        refCand = { decision: { partner: data as AffPartner, attribution: 'ref', campaignId: null, clickId }, at: Number.isNaN(refTime) ? null : refTime };
       }
     }
   }
 
-  // 3) 회원의 서버측 터치 — 회원 한정의 주 경로. 키는 LINE userId (기기·브라우저 무관).
-  //    비회원은 터치가 있을 수 없으니 건너뛴다
+  // 회원의 서버측 터치 — 회원 한정의 주 경로. 키는 LINE userId (기기·브라우저 무관). 비회원은 터치가 있을 수 없다
+  let touchCand: { decision: ConversionDecision; at: number } | null = null;
   if (opts.memberLineUserId) {
     const since = new Date(orderedAt.getTime() - ATTRIBUTION_WINDOW_DAYS * 86_400_000).toISOString();
     const { data, error } = await sb
@@ -335,10 +339,16 @@ export async function decideAttribution(
       .gte('touched_at', since)
       .maybeSingle();
     if (error) throw new Error(`aff_touches 조회 실패: ${error.message}`);
-    const row = data as { click_id: number | null; partner: AffPartner | AffPartner[] } | null;
+    const row = data as { touched_at: string; click_id: number | null; partner: AffPartner | AffPartner[] } | null;
     const partner = row ? (Array.isArray(row.partner) ? row.partner[0] : row.partner) : null;
-    if (partner) return { partner, attribution: 'customer', campaignId: null, clickId: row?.click_id ?? null };
+    if (row && partner && partner.status === 'active') {
+      touchCand = { decision: { partner, attribution: 'customer', campaignId: null, clickId: row.click_id ?? null }, at: new Date(row.touched_at).getTime() };
+    }
   }
+
+  if (touchCand && refCand) return refCand.at != null && refCand.at > touchCand.at ? refCand.decision : touchCand.decision;
+  if (touchCand) return touchCand.decision;
+  if (refCand) return refCand.decision;
 
   return null;
 }

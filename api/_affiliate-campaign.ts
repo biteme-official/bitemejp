@@ -7,6 +7,7 @@
  *  - 종료하면 전용 코드를 Shopify 에서 비활성화하고 aff_campaign_codes 도 disabled.
  *    요율은 주문 시점에 장부에 박혀 있으므로 종료 전 발생분은 캠페인 요율 그대로다(第6条).
  *  - 대상 파트너에게 LINE 푸시로 조건(+코드)을 알린다. 실패해도 캠페인은 유효하다.
+ *    야간(21~9시 JST)에 저장하면 notify_status='pending' 으로 두고 다음 날 09:05 크론이 보낸다.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
@@ -213,7 +214,7 @@ async function pushLine(lineUserId: string, text: string): Promise<'sent' | 'not
 }
 
 /** 같은 문구를 여러 명에게 — LINE multicast(요청당 500명). 친구 아님은 LINE 이 조용히 건너뛴다 */
-async function multicastLine(lineUserIds: string[], text: string): Promise<{ sent: number; failed: number }> {
+export async function multicastLine(lineUserIds: string[], text: string): Promise<{ sent: number; failed: number }> {
   const token = process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN;
   const ids = lineUserIds.filter((id) => !id.startsWith(MANUAL_LINE_ID_PREFIX));
   if (!token) return { sent: 0, failed: ids.length };
@@ -257,13 +258,77 @@ export async function disablePartnerCodes(sb: SupabaseClient, partnerId: number)
   }
 }
 
+/** LINE 을 보내지 않는 시간대 — 기존 LINE 자동 발송(api/line-campaign.ts QUIET_HOURS)과 같은 21~9시 JST */
+export const QUIET_HOURS = { from: 21, to: 9 } as const;
+export function inQuietHours(now = new Date()): boolean {
+  const h = new Date(now.getTime() + 9 * 3600_000).getUTCHours();
+  return h >= QUIET_HOURS.from || h < QUIET_HOURS.to;
+}
+
+export interface NotifyResult { sent: number; notFriend: number; failed: number }
+
+/**
+ * 캠페인 알림 발송 — 저장 직후(낮) 또는 다음 날 아침 크론(야간 보류분)이 부른다.
+ * 받는 사람은 보내는 시점에 다시 계산한다: 할인 캠페인 = 살아 있는 전용 코드를 가진 활동 파트너,
+ * 그 외 = 지정 파트너 또는 활동 파트너 전원. 끝나면 notify_status='sent'.
+ */
+export async function sendCampaignNotifications(sb: SupabaseClient, campaign: AffCampaign): Promise<NotifyResult> {
+  const notified: NotifyResult = { sent: 0, notFriend: 0, failed: 0 };
+  let q = sb.from('aff_partners').select('*').eq('status', 'active');
+  if (campaign.scope === 'partners') q = q.in('id', campaign.target_ids.map(Number));
+  const { data } = await q;
+  const partners = (data ?? []) as AffPartner[];
+
+  if (campaign.discount_percent == null) {
+    // 코드가 없으면 모두 같은 문구 — 한 번에 보낸다(전원 캠페인이 수백 명이어도 함수 시간 안에)
+    const r = await multicastLine(partners.map((p) => p.line_user_id), campaignMessage(campaign, null));
+    notified.sent = r.sent;
+    notified.failed = r.failed;
+  } else {
+    const { data: codeRows } = await sb.from('aff_campaign_codes').select('partner_id, shopify_code').eq('campaign_id', campaign.id).eq('status', 'active');
+    const codeByPartner = new Map(((codeRows ?? []) as Array<{ partner_id: number; shopify_code: string }>).map((c) => [c.partner_id, c.shopify_code]));
+    for (const p of partners) {
+      // 코드를 못 받은 사람에게는 보내지 않는다 — 코드 없는 할인 안내가 되므로
+      const code = codeByPartner.get(p.id);
+      if (!code) continue;
+      const r = await pushLine(p.line_user_id, campaignMessage(campaign, code));
+      if (r === 'sent') notified.sent += 1;
+      else if (r === 'not-friend') notified.notFriend += 1;
+      else notified.failed += 1;
+    }
+  }
+  await sb.from('aff_campaigns').update({ notify_status: 'sent', notified_at: new Date().toISOString() }).eq('id', campaign.id);
+  return notified;
+}
+
+/** 야간 보류분 발송 — 크론(09:05 JST)이 부른다. 이미 끝난 캠페인은 보내지 않고 접는다 */
+export async function flushPendingCampaignNotifications(sb: SupabaseClient): Promise<{ campaigns: number; sent: number; skipped: number }> {
+  const { data, error } = await sb.from('aff_campaigns').select('*').eq('notify_status', 'pending');
+  if (error) throw new Error(error.message);
+  let sent = 0;
+  let skipped = 0;
+  const rows = (data ?? []) as AffCampaign[];
+  for (const c of rows) {
+    if (!c.active || new Date(c.ends_at).getTime() <= Date.now()) {
+      await sb.from('aff_campaigns').update({ notify_status: 'none' }).eq('id', c.id);
+      skipped += 1;
+      continue;
+    }
+    const r = await sendCampaignNotifications(sb, c);
+    sent += r.sent;
+  }
+  return { campaigns: rows.length, sent, skipped };
+}
+
 // ── 생성 · 종료 ─────────────────────────────────────────────────────────────
 
 export interface CreateResult {
   campaign: AffCampaign;
   codes: Array<{ partnerCode: string; code: string }>;
   codeErrors: Array<{ partnerCode: string; error: string }>;
-  notified: { sent: number; notFriend: number; failed: number };
+  notified: NotifyResult;
+  /** 야간이라 보류 — 다음 날 09:05 에 간다 */
+  notifyPending: boolean;
 }
 
 export async function createCampaign(sb: SupabaseClient, input: CampaignInput, createdBy = 'admin'): Promise<CreateResult | string> {
@@ -293,6 +358,7 @@ export async function createCampaign(sb: SupabaseClient, input: CampaignInput, c
       commission_rate: input.commissionRate,
       discount_percent: input.discountPercent,
       scope: input.scope,
+      notify_status: input.notify ? 'pending' : 'none',
       // 지정 파트너는 실제로 활동 중인 사람만 남긴다
       target_ids: input.scope === 'partners' ? partners.map((p) => String(p.id)) : targetIds,
       active: true,
@@ -305,7 +371,6 @@ export async function createCampaign(sb: SupabaseClient, input: CampaignInput, c
 
   const codes: CreateResult['codes'] = [];
   const codeErrors: CreateResult['codeErrors'] = [];
-  const codeByPartner = new Map<number, string>();
 
   if (input.discountPercent !== null) {
     try { token ??= await getAdminToken(); }
@@ -338,7 +403,6 @@ export async function createCampaign(sb: SupabaseClient, input: CampaignInput, c
         continue;
       }
       codes.push({ partnerCode: p.code, code: code.toUpperCase() });
-      codeByPartner.set(p.id, code.toUpperCase());
     }
     if (codes.length === 0) {
       await sb.from('aff_campaigns').delete().eq('id', campaign.id);
@@ -346,24 +410,11 @@ export async function createCampaign(sb: SupabaseClient, input: CampaignInput, c
     }
   }
 
-  const notified = { sent: 0, notFriend: 0, failed: 0 };
-  if (input.notify && input.discountPercent === null) {
-    // 코드가 없으면 모두 같은 문구 — 한 번에 보낸다(전원 캠페인이 수백 명이어도 함수 시간 안에)
-    const r = await multicastLine(partners.map((p) => p.line_user_id), campaignMessage(campaign, null));
-    notified.sent = r.sent;
-    notified.failed = r.failed;
-  } else if (input.notify) {
-    for (const p of partners) {
-      // 할인 캠페인에서 코드를 못 받은 사람에게는 보내지 않는다
-      if (input.discountPercent !== null && !codeByPartner.has(p.id)) continue;
-      const r = await pushLine(p.line_user_id, campaignMessage(campaign, codeByPartner.get(p.id) ?? null));
-      if (r === 'sent') notified.sent += 1;
-      else if (r === 'not-friend') notified.notFriend += 1;
-      else notified.failed += 1;
-    }
-  }
+  let notified: NotifyResult = { sent: 0, notFriend: 0, failed: 0 };
+  const notifyPending = input.notify && inQuietHours();
+  if (input.notify && !notifyPending) notified = await sendCampaignNotifications(sb, campaign);
 
-  return { campaign, codes, codeErrors, notified };
+  return { campaign, codes, codeErrors, notified, notifyPending };
 }
 
 /** 종료 — active=false, 종료 시각을 지금으로 당기고, 전용 코드를 Shopify·장부 양쪽에서 끈다 */

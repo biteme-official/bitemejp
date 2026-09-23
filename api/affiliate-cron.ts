@@ -22,6 +22,8 @@ import {
   type AdminOrderNode,
   type AffConversionRow,
 } from './_affiliate.js';
+import { flushPendingCampaignNotifications } from './_affiliate-campaign.js';
+import { flushPendingNotices } from './_affiliate-notice.js';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
 /** 재대사가 훑는 범위 — 어제 0시(JST) 부터. 웹훅 유실은 길어야 몇 분이라 이틀이면 충분하다 */
@@ -147,6 +149,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const okAdmin = !!process.env.ADMIN_SECRET && auth === `Bearer ${process.env.ADMIN_SECRET}`;
   if (!okCron && !okAdmin) return res.status(401).json({ error: 'Unauthorized' });
   if (!isAffiliateEnabled()) return res.status(200).json({ ok: true, skipped: 'disabled' });
+
+  // ?task=notify — 09:05 JST 크론. 야간(21~9시)에 저장돼 보류된 캠페인 알림·규약 개정 통지를 보낸다
+  if (req.query.task === 'notify') {
+    const sb = getSupabase();
+    const out: Record<string, unknown> = { ok: true, task: 'notify' };
+    try { out.campaigns = await flushPendingCampaignNotifications(sb); }
+    catch (err) { out.campaigns = { error: err instanceof Error ? err.message : String(err) }; console.error('[Affiliate] 🔴 캠페인 알림 발송 실패:', err); }
+    try { out.notices = await flushPendingNotices(sb); }
+    catch (err) { out.notices = { error: err instanceof Error ? err.message : String(err) }; console.error('[Affiliate] 🔴 개정 통지 발송 실패:', err); }
+    console.log('[Affiliate] 아침 알림', JSON.stringify(out));
+    return res.status(200).json(out);
+  }
 
   const startedAt = Date.now();
   const result: Record<string, unknown> = { ok: true };

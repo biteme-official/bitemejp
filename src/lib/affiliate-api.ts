@@ -21,6 +21,8 @@ export interface PartnerView {
   recent: Array<{ order: string | null; attribution: string; amount: number; commission: number; status: string; orderedAt: string; confirmAt: string }>;
   campaigns: Array<{ name: string; startsAt: string; endsAt: string; commissionRate: number; discountPercent: number | null; scope: string; code: string | null; targetIds: string[] }>;
   payouts: Array<{ period: string; gross: number; withholding: number; net: number; status: string; paid_at: string | null; dispute_until: string | null }>;
+  /** 규약 개정 통지 — 시행 전 + 시행 후 30일 (第11条 2항). 서버가 오래된 버전이면 없을 수 있다 */
+  notices?: Array<{ title: string; body: string; effectiveAt: string; termsVersion: string | null }>;
 }
 
 export class AffiliateApiError extends Error {
