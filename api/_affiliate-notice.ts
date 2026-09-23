@@ -8,7 +8,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AffPartner } from './_affiliate.js';
-import { inQuietHours, multicastLine } from './_affiliate-campaign.js';
+import { canSendLineHere, inQuietHours, multicastLine, triggerRemoteNotify } from './_affiliate-campaign.js';
 
 /** 시행일은 등록 시점부터 최소 14일 뒤 (第11条 2항) */
 export const NOTICE_MIN_DAYS = 14;
@@ -80,6 +80,8 @@ export async function sendNotice(sb: SupabaseClient, notice: AffNotice): Promise
   const { data } = await sb.from('aff_partners').select('line_user_id').eq('status', 'active');
   const ids = ((data ?? []) as Array<Pick<AffPartner, 'line_user_id'>>).map((p) => p.line_user_id);
   const r = await multicastLine(ids, noticeMessage(notice));
+  // 한 명도 못 보냈으면 보류로 남긴다 — 통지 기록(sent)은 실제로 나갔을 때만
+  if (r.sent === 0 && r.failed > 0) return r;
   await sb.from('aff_notices').update({ notify_status: 'sent', notified_at: new Date().toISOString() }).eq('id', notice.id);
   return r;
 }
@@ -93,7 +95,16 @@ export async function createNotice(sb: SupabaseClient, input: NoticeInput): Prom
   if (error || !data) return error?.message ?? '저장 실패';
   const notice = data as AffNotice;
   const notifyPending = inQuietHours();
-  const notified = notifyPending ? { sent: 0, failed: 0 } : await sendNotice(sb, notice);
+  let notified = { sent: 0, failed: 0 };
+  if (!notifyPending) {
+    if (canSendLineHere()) notified = await sendNotice(sb, notice);
+    else {
+      // 어드민 프로젝트엔 LINE 키가 없다 — 본 사이트가 보류분을 보낸다
+      const r = await triggerRemoteNotify();
+      notified = r.ok ? { sent: r.noticesSent, failed: 0 } : { sent: 0, failed: 1 };
+      if (!r.ok) console.error('[affiliate-notice] 원격 발송 실패 — 내일 09:05 크론이 다시 보낸다', r.error);
+    }
+  }
   return { notice, notified, notifyPending };
 }
 
