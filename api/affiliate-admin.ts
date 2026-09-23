@@ -1,7 +1,9 @@
 /**
- * 어필리에이트 어드민 API (Phase 0 — 읽기 + 파트너 수동 등록)
+ * 어필리에이트 어드민 API
  *
- *  GET  /api/affiliate-admin              파트너 목록(이달 성과) + 최근 전환 + 캠페인
+ *  GET  /api/affiliate-admin              파트너 목록(이달·누적 성과, 이달 클릭) + 최근 전환 + 캠페인(전용 코드·성과)
+ *  POST action=create_campaign            캠페인 생성 → (할인 있으면) 파트너별 Shopify 전용 코드 → LINE 통지 (Phase 3)
+ *  POST action=end_campaign { campaignId } 캠페인 종료 + 전용 코드 비활성 (Phase 3)
  *  POST /api/affiliate-admin  action=add_partner
  *       { code, name, instagram?, email?, discountCode? }
  *       Phase 2 셀프 가입 전까지 하영이 어드민에서 파트너를 앉힌다.
@@ -23,6 +25,7 @@ import {
   toOrderForAttribution,
   type AdminOrderNode,
 } from './_affiliate.js';
+import { createCampaign, endCampaign, parseCampaignInput } from './_affiliate-campaign.js';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 const CODE_RE = /^[A-Z0-9]{4,12}$/;
@@ -57,41 +60,62 @@ interface ConversionRow {
   confirm_at: string;
 }
 
+type Stats = { orders: number; sales: number; pending: number; confirmed: number; self: number };
+const emptyStats = (): Stats => ({ orders: 0, sales: 0, pending: 0, confirmed: 0, self: 0 });
+
 async function handleGet(res: VercelResponse) {
   const sb = getSupabase();
   const since = monthStartJst();
 
-  const [partnersQ, monthQ, recentQ, campaignsQ, codesQ] = await Promise.all([
+  const [partnersQ, allQ, recentQ, campaignsQ, codesQ, clicksQ] = await Promise.all([
     sb.from('aff_partners').select('*').order('joined_at', { ascending: false }),
-    sb.from('aff_conversions').select('partner_id, status, commission, eligible_amount').gte('ordered_at', since),
+    // 누적·이달·캠페인 성과를 한 번에 — 장부 규모가 작아 전체를 읽어 서버에서 접는다
+    sb.from('aff_conversions').select('partner_id, status, commission, eligible_amount, campaign_id, ordered_at').limit(20000),
     sb.from('aff_conversions').select('*').order('ordered_at', { ascending: false }).limit(50),
     sb.from('aff_campaigns').select('*').order('starts_at', { ascending: false }),
     sb.from('aff_campaign_codes').select('partner_id, shopify_code, status, campaign_id'),
+    sb.from('aff_clicks').select('partner_id').eq('is_bot', false).gte('ts', since).limit(50000),
   ]);
-  const firstError = [partnersQ, monthQ, recentQ, campaignsQ, codesQ].find((q) => q.error)?.error;
+  const firstError = [partnersQ, allQ, recentQ, campaignsQ, codesQ, clicksQ].find((q) => q.error)?.error;
   if (firstError) return res.status(500).json({ error: firstError.message });
 
-  type MonthRow = { partner_id: number; status: string; commission: number; eligible_amount: number };
-  const stats = new Map<number, { orders: number; sales: number; pending: number; confirmed: number; self: number }>();
+  type Row = { partner_id: number; status: string; commission: number; eligible_amount: number; campaign_id: number | null; ordered_at: string };
+  const month = new Map<number, Stats>();
+  const total = new Map<number, Stats>();
+  const byCampaign = new Map<number, { orders: number; sales: number; commission: number }>();
   // 회원 한정이 거른 것 — 비회원 주문은 파트너별 성과에 넣지 않고 따로 센다
   const nonmember = { orders: 0, sales: 0 };
-  for (const r of (monthQ.data ?? []) as MonthRow[]) {
-    if (r.status === 'nonmember') {
-      nonmember.orders += 1;
-      nonmember.sales += r.eligible_amount;
-      continue;
-    }
-    const s = stats.get(r.partner_id) ?? { orders: 0, sales: 0, pending: 0, confirmed: 0, self: 0 };
+  const add = (m: Map<number, Stats>, r: Row) => {
+    const s = m.get(r.partner_id) ?? emptyStats();
     s.orders += 1;
     s.sales += r.eligible_amount;
     if (r.status === 'pending') s.pending += r.commission;
     if (r.status === 'confirmed') s.confirmed += r.commission;
     if (r.status === 'self') s.self += 1;
-    stats.set(r.partner_id, s);
+    m.set(r.partner_id, s);
+  };
+  for (const r of (allQ.data ?? []) as Row[]) {
+    const inMonth = r.ordered_at >= since;
+    if (r.status === 'nonmember') {
+      if (inMonth) { nonmember.orders += 1; nonmember.sales += r.eligible_amount; }
+      continue;
+    }
+    add(total, r);
+    if (inMonth) add(month, r);
+    if (r.campaign_id != null && (r.status === 'pending' || r.status === 'confirmed')) {
+      const c = byCampaign.get(r.campaign_id) ?? { orders: 0, sales: 0, commission: 0 };
+      c.orders += 1; c.sales += r.eligible_amount; c.commission += r.commission;
+      byCampaign.set(r.campaign_id, c);
+    }
   }
 
+  const clicks = new Map<number, number>();
+  for (const c of (clicksQ.data ?? []) as Array<{ partner_id: number }>) clicks.set(c.partner_id, (clicks.get(c.partner_id) ?? 0) + 1);
+
   const codesByPartner = new Map<number, string[]>();
-  for (const c of (codesQ.data ?? []) as Array<{ partner_id: number; shopify_code: string; status: string }>) {
+  const codesByCampaign = new Map<number, Array<{ partnerId: number; code: string; status: string }>>();
+  for (const c of (codesQ.data ?? []) as Array<{ partner_id: number; shopify_code: string; status: string; campaign_id: number }>) {
+    codesByCampaign.set(c.campaign_id, [...(codesByCampaign.get(c.campaign_id) ?? []), { partnerId: c.partner_id, code: c.shopify_code, status: c.status }]);
     if (c.status !== 'active') continue;
     codesByPartner.set(c.partner_id, [...(codesByPartner.get(c.partner_id) ?? []), c.shopify_code]);
   }
@@ -100,11 +124,18 @@ async function handleGet(res: VercelResponse) {
     ...p,
     manual: p.line_user_id.startsWith(MANUAL_LINE_ID_PREFIX),
     codes: codesByPartner.get(p.id) ?? [],
-    month: stats.get(p.id) ?? { orders: 0, sales: 0, pending: 0, confirmed: 0, self: 0 },
+    month: month.get(p.id) ?? emptyStats(),
+    total: total.get(p.id) ?? emptyStats(),
+    monthClicks: clicks.get(p.id) ?? 0,
   }));
 
   const codeById = new Map(partners.map((p) => [p.id, p.code]));
   const recent = ((recentQ.data ?? []) as ConversionRow[]).map((c) => ({ ...c, partner_code: codeById.get(c.partner_id) ?? '?' }));
+  const campaigns = ((campaignsQ.data ?? []) as Array<{ id: number } & Record<string, unknown>>).map((c) => ({
+    ...c,
+    codes: (codesByCampaign.get(c.id) ?? []).map((k) => ({ ...k, partnerCode: codeById.get(k.partnerId) ?? '?' })),
+    result: byCampaign.get(c.id) ?? { orders: 0, sales: 0, commission: 0 },
+  }));
 
   return res.status(200).json({
     ok: true,
@@ -114,8 +145,24 @@ async function handleGet(res: VercelResponse) {
     nonmember,
     partners,
     recent,
-    campaigns: campaignsQ.data ?? [],
+    campaigns,
   });
+}
+
+async function handleCreateCampaign(body: Record<string, unknown>, res: VercelResponse) {
+  const input = parseCampaignInput(body);
+  if (typeof input === 'string') return res.status(400).json({ error: input });
+  const r = await createCampaign(getSupabase(), input);
+  if (typeof r === 'string') return res.status(400).json({ error: r });
+  return res.status(201).json({ ok: true, ...r });
+}
+
+async function handleEndCampaign(body: Record<string, unknown>, res: VercelResponse) {
+  const id = Number(body.campaignId);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'campaignId 필요' });
+  const r = await endCampaign(getSupabase(), id);
+  if (typeof r === 'string') return res.status(400).json({ error: r });
+  return res.status(200).json({ ok: true, ...r });
 }
 
 async function handleAddPartner(body: Record<string, unknown>, res: VercelResponse) {
@@ -267,6 +314,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (body.action === 'set_status') return await handleSetStatus(body, res);
       if (body.action === 'delete_partner') return await handleDeletePartner(body, res);
       if (body.action === 'reevaluate_order') return await handleReevaluate(body, res);
+      if (body.action === 'create_campaign') return await handleCreateCampaign(body, res);
+      if (body.action === 'end_campaign') return await handleEndCampaign(body, res);
       return res.status(400).json({ error: `unknown action: ${String(body.action)}` });
     }
     return res.status(405).json({ error: 'Method not allowed' });
