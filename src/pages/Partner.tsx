@@ -44,6 +44,13 @@ function PageFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** 支払予定日 = 締め月の翌月末 (規約 第5条) */
+const dueOf = (period: string) => {
+  const [y, m] = period.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m + 1, 0));
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+};
+
 export default function Partner() {
   const navigate = useNavigate();
   const { user, isLoggedIn, logout } = useAuthStore();
@@ -234,7 +241,7 @@ export default function Partner() {
           <ul className="space-y-1 text-sm">
             {payouts.map((p) => (
               <li key={p.period} className="flex justify-between rounded-lg border border-border px-4 py-2">
-                <span>{p.period}</span><span className="tabular-nums">{yen(p.net)} · {p.status === "paid" ? `支払済 ${p.paid_at ? day(p.paid_at) : ""}` : p.status === "carried" ? "繰越" : "支払予定"}</span>
+                <span>{p.period}</span><span className="tabular-nums">{yen(p.net)} · {p.status === "paid" ? `支払済 ${p.paid_at ? day(p.paid_at) : ""}` : p.status === "carried" ? "繰越（¥3,000未満）" : `支払予定 ${dueOf(p.period)}`}</span>
               </li>
             ))}
           </ul>
