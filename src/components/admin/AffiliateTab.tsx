@@ -349,7 +349,7 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead className="border-b text-muted-foreground">
-          <tr className="[&>th]:py-2 [&>th]:text-left [&>th]:font-medium">
+          <tr className="[&>th]:py-2 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
             <th>이름</th><th>기간</th><th>대상</th><th className="text-right">커미션</th><th className="text-right">고객 할인</th><th>전용 코드</th>
             <th className="text-right">주문</th><th className="text-right">매출</th><th className="text-right">커미션 합</th><th>상태</th><th></th>
           </tr>
@@ -487,7 +487,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead className="border-b text-muted-foreground">
-                <tr className="[&>th]:py-2 [&>th]:text-left [&>th]:font-medium">
+                <tr className="[&>th]:py-2 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
                   <th></th><th>코드</th><th>이름</th><th>Instagram</th><th>가입</th>
                   <th className="text-right">이달 클릭</th><th className="text-right">이달 주문</th><th className="text-right">이달 매출</th><th className="text-right">이달 커미션</th>
                   <th className="text-right">누적 주문</th><th className="text-right">누적 매출</th><th className="text-right">누적 커미션</th>
@@ -540,7 +540,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
         <CardContent className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="border-b text-muted-foreground">
-              <tr className="[&>th]:py-2 [&>th]:text-left [&>th]:font-medium">
+              <tr className="[&>th]:py-2 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
                 <th>주문</th><th>주문일</th><th>파트너</th><th>귀속</th><th className="text-right">기준액</th><th className="text-right">요율</th><th className="text-right">커미션</th><th>상태</th><th>확정 예정</th>
               </tr>
             </thead>
