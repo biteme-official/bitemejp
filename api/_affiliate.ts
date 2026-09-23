@@ -83,6 +83,24 @@ export function getSupabase(): SupabaseClient {
   return client;
 }
 
+/**
+ * PostgREST(Supabase)는 요청 한 번에 최대 1,000행만 준다 — .limit(20000) 으로도 못 넘기고 조용히 잘린다.
+ * 집계용 조회는 이걸로 1,000행씩 끝까지 읽는다. page 는 반드시 고정 정렬(.order('id'))을 걸 것.
+ */
+export async function fetchAllRows<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  maxRows = 200_000
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; from < maxRows; from += 1000) {
+    const { data, error } = await page(from, from + 999);
+    if (error) throw new Error(error.message);
+    out.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
 // ── 타입 ─────────────────────────────────────────────────────────────────────
 
 export interface AffPartner {

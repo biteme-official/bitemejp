@@ -12,6 +12,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getSupabase, isAffiliateEnabled, publicPartner, verifyLineSession, type AffPartner } from './_affiliate.js';
+import { disablePartnerCodes } from './_affiliate-campaign.js';
 
 const ALLOWED_ORIGINS = ['https://biteme.co.jp', 'https://www.biteme.co.jp', 'http://localhost:5173'];
 const RECENT_LIMIT = 50;
@@ -123,6 +124,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (upErr) throw new Error(upErr.message);
       // 살아 있는 터치는 더 이상 이 파트너에게 귀속되지 않게 지운다 (第12条 4항: 종료 즉시 링크 무효)
       await sb.from('aff_touches').delete().eq('partner_id', partner.id);
+      await disablePartnerCodes(sb, partner.id);
       console.log(`[Affiliate] 탈퇴 ${partner.code}`);
       return res.status(200).json({ ok: true, partner: publicPartner({ ...partner, status: 'withdrawn' }) });
     }
