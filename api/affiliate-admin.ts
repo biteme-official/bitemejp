@@ -8,6 +8,8 @@
  *  POST action=close_month { period }     월 마감 — 확정분·이월분을 파트너별로 묶어 aff_payouts (¥3,000 미만 이월)
  *  POST action=mark_paid { payoutIds }     지급 처리 — paid_at · 이의신청 기한 30일
  *  POST action=void_conversion { conversionId, reason }  약관 위반 성과 취소(정산 전 건만)
+ *  POST action=create_notice { title, body, effectiveAt, termsVersion? }  규약 개정 통지(시행 14일 전 · LINE + 파트너 배너)
+ *  POST action=delete_notice { noticeId }  아직 안 보낸 통지 삭제
  *  POST /api/affiliate-admin  action=add_partner
  *       { code, name, instagram?, email?, discountCode? }
  *       Phase 2 셀프 가입 전까지 하영이 어드민에서 파트너를 앉힌다.
@@ -32,6 +34,8 @@ import {
 } from './_affiliate.js';
 import { createCampaign, deleteCampaign, disablePartnerCodes, endCampaign, parseCampaignInput } from './_affiliate-campaign.js';
 import { closeMonth, currentPeriodJst, dueDateOf, markPaid, MIN_PAYOUT, voidConversion } from './_affiliate-payout.js';
+import { createNotice, deleteNotice, parseNoticeInput, NOTICE_MIN_DAYS } from './_affiliate-notice.js';
+import { detectAnomalies } from './_affiliate-anomaly.js';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 const CODE_RE = /^[A-Z0-9]{4,12}$/;
@@ -73,7 +77,7 @@ async function handleGet(res: VercelResponse) {
   const sb = getSupabase();
   const since = monthStartJst();
 
-  type Row = { partner_id: number; status: string; commission: number; eligible_amount: number; campaign_id: number | null; ordered_at: string };
+  type Row = { partner_id: number; status: string; commission: number; eligible_amount: number; campaign_id: number | null; ordered_at: string; shopify_customer_id: string | null };
   const [partnersQ, recentQ, campaignsQ, codesQ, payoutsQ, allRows, clickRows, unsettledRows] = await Promise.all([
     sb.from('aff_partners').select('*').order('joined_at', { ascending: false }),
     sb.from('aff_conversions').select('*').order('ordered_at', { ascending: false }).limit(50),
@@ -81,7 +85,7 @@ async function handleGet(res: VercelResponse) {
     sb.from('aff_campaign_codes').select('partner_id, shopify_code, status, campaign_id'),
     sb.from('aff_payouts').select('*').order('period', { ascending: false }).limit(1000),
     // 누적·이달·캠페인 성과를 한 번에 — 1,000행 넘어가도 끝까지 읽어 서버에서 접는다
-    fetchAllRows<Row>((from, to) => sb.from('aff_conversions').select('partner_id, status, commission, eligible_amount, campaign_id, ordered_at').order('id').range(from, to)),
+    fetchAllRows<Row>((from, to) => sb.from('aff_conversions').select('partner_id, status, commission, eligible_amount, campaign_id, ordered_at, shopify_customer_id').order('id').range(from, to)),
     fetchAllRows<{ partner_id: number }>((from, to) => sb.from('aff_clicks').select('partner_id').eq('is_bot', false).gte('ts', since).order('id').range(from, to)),
     // 확정됐지만 아직 어느 정산에도 안 묶인 것 — 다음 마감에 들어갈 돈
     fetchAllRows<{ partner_id: number; commission: number }>((from, to) => sb.from('aff_conversions').select('partner_id, commission').eq('status', 'confirmed').is('payout_id', null).order('id').range(from, to)),
@@ -163,6 +167,9 @@ async function handleGet(res: VercelResponse) {
     recent,
     campaigns,
     settlement: { minPayout: MIN_PAYOUT, currentPeriod: currentPeriodJst(), unsettled, payouts },
+    anomalies: detectAnomalies(allRows, partners).map((a) => ({ ...a, partnerCode: codeById.get(a.partnerId) ?? '?' })),
+    notices: await listNotices(sb),
+    noticeMinDays: NOTICE_MIN_DAYS,
   });
 }
 
@@ -211,6 +218,29 @@ async function handleVoidConversion(body: Record<string, unknown>, res: VercelRe
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'conversionId 필요' });
   if (!reason) return res.status(400).json({ error: '사유 필요 (예: #PR 표기 없음)' });
   const r = await voidConversion(getSupabase(), id, reason);
+  if (typeof r === 'string') return res.status(409).json({ error: r });
+  return res.status(200).json(r);
+}
+
+/** 통지 목록 — 표가 아직 없으면(마이그레이션 전) 빈 배열로, 어드민 전체가 죽지 않게 */
+async function listNotices(sb: ReturnType<typeof getSupabase>) {
+  const { data, error } = await sb.from('aff_notices').select('*').order('effective_at', { ascending: false }).limit(20);
+  if (error) { console.error('[affiliate-admin] aff_notices', error.message); return []; }
+  return data ?? [];
+}
+
+async function handleCreateNotice(body: Record<string, unknown>, res: VercelResponse) {
+  const input = parseNoticeInput(body);
+  if (typeof input === 'string') return res.status(400).json({ error: input });
+  const r = await createNotice(getSupabase(), input);
+  if (typeof r === 'string') return res.status(500).json({ error: r });
+  return res.status(201).json({ ok: true, ...r });
+}
+
+async function handleDeleteNotice(body: Record<string, unknown>, res: VercelResponse) {
+  const id = Number(body.noticeId);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'noticeId 필요' });
+  const r = await deleteNotice(getSupabase(), id);
   if (typeof r === 'string') return res.status(409).json({ error: r });
   return res.status(200).json(r);
 }
@@ -375,6 +405,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (body.action === 'close_month') return await handleCloseMonth(body, res);
       if (body.action === 'mark_paid') return await handleMarkPaid(body, res);
       if (body.action === 'void_conversion') return await handleVoidConversion(body, res);
+      if (body.action === 'create_notice') return await handleCreateNotice(body, res);
+      if (body.action === 'delete_notice') return await handleDeleteNotice(body, res);
       return res.status(400).json({ error: `unknown action: ${String(body.action)}` });
     }
     return res.status(405).json({ error: 'Method not allowed' });

@@ -44,6 +44,12 @@ function PageFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** ISO → 2026年12月1日 (JST) */
+const jpDate = (iso: string) => {
+  const d = new Date(new Date(iso).getTime() + 9 * 3600_000);
+  return `${d.getUTCFullYear()}年${d.getUTCMonth() + 1}月${d.getUTCDate()}日`;
+};
+
 /** 支払予定日 = 締め月の翌月末 (規約 第5条) */
 const dueOf = (period: string) => {
   const [y, m] = period.split("-").map(Number);
@@ -110,6 +116,7 @@ export default function Partner() {
   }
 
   const { partner, funnel, commission, recent, campaigns, payouts } = view;
+  const notices = view.notices ?? [];
   const withdrawn = partner.status === "withdrawn";
   const suspended = partner.status === "suspended";
 
@@ -137,6 +144,14 @@ export default function Partner() {
     <PageFrame>
       {withdrawn && <div className="rounded-lg border border-border bg-muted px-4 py-3 text-sm">参加を終了しています。紹介リンクは無効です。確定済みの成果報酬は規約第5条に従ってお支払いします。</div>}
       {suspended && <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">参加を停止しています。お心当たりがない場合はお問い合わせください。</div>}
+      {notices.map((n) => (
+        <div key={`${n.effectiveAt}-${n.title}`} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 space-y-1">
+          <p className="font-medium">利用規約改定のお知らせ（効力発生日 {jpDate(n.effectiveAt)}）</p>
+          <p>{n.title}</p>
+          <p className="text-xs whitespace-pre-wrap opacity-90">{n.body}</p>
+          <p className="text-[11px] opacity-80">効力発生日以降もご利用を続けた場合、改定後の規約に同意いただいたものとみなします。同意いただけない場合は、下の「参加を終了する」から終了できます。<button className="underline ml-1" onClick={() => navigate("/affiliate/terms")}>現行の規約</button></p>
+        </div>
+      ))}
       {partner.termsVersion && partner.termsVersion !== AFFILIATE_TERMS_VERSION && (
         <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
           利用規約が改定されました（版 {AFFILIATE_TERMS_VERSION}）。<button className="underline ml-1" onClick={() => navigate("/affiliate/terms")}>内容を確認する</button>

@@ -13,6 +13,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { getSupabase, isAffiliateEnabled, publicPartner, verifyLineSession, type AffPartner } from './_affiliate.js';
 import { disablePartnerCodes } from './_affiliate-campaign.js';
+import { activeNotices } from './_affiliate-notice.js';
 
 const ALLOWED_ORIGINS = ['https://biteme.co.jp', 'https://www.biteme.co.jp', 'http://localhost:5173'];
 const RECENT_LIMIT = 50;
@@ -53,6 +54,7 @@ async function buildView(partner: AffPartner) {
   ]);
   const firstErr = [clicksQ, convQ, campQ, codesQ, payoutsQ].find((q) => q.error)?.error;
   if (firstErr) throw new Error(firstErr.message);
+  const notices = await activeNotices(sb);
 
   const conversions = (convQ.data ?? []) as ConvRow[];
   const inMonth = conversions.filter((c) => c.ordered_at >= since);
@@ -90,6 +92,7 @@ async function buildView(partner: AffPartner) {
     recent: conversions.map((c) => ({ order: c.order_name, attribution: c.attribution, amount: c.eligible_amount, commission: c.commission, status: c.status, orderedAt: c.ordered_at, confirmAt: c.confirm_at })),
     campaigns,
     payouts: payoutsQ.data ?? [],
+    notices: notices.map((n) => ({ title: n.title, body: n.body, effectiveAt: n.effective_at, termsVersion: n.terms_version })),
   };
 }
 
