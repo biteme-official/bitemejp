@@ -10,6 +10,7 @@
  *  - 원천징수는 기본 0 — 세무사 답이 「대상」이면 그때 withholding 을 채운다(第5条 3항).
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { fetchAllRows } from './_affiliate.js';
 
 /** 최소 지급액 — 미만은 이월 (약관 第5条 2항) */
 export const MIN_PAYOUT = 3000;
@@ -112,22 +113,27 @@ export async function closeMonth(sb: SupabaseClient, period: string): Promise<Cl
   }
 
   const { end } = periodRange(period);
-  const { data: convs, error: cErr } = await sb
-    .from('aff_conversions')
-    .select('id, partner_id, commission')
-    .eq('status', 'confirmed')
-    .lt('confirmed_at', end)
-    .is('payout_id', null)
-    .limit(20000);
-  if (cErr) return cErr.message;
+  let convs: Array<{ id: number; partner_id: number; commission: number }>;
+  try {
+    // 1,000행 넘어도 끝까지 — 잘리면 확정분 일부가 그 달 명세에서 빠진다
+    convs = await fetchAllRows<{ id: number; partner_id: number; commission: number }>((from, to) =>
+      sb.from('aff_conversions').select('id, partner_id, commission').eq('status', 'confirmed').lt('confirmed_at', end).is('payout_id', null).order('id').range(from, to));
+  } catch (e) {
+    return e instanceof Error ? e.message : '확정분 조회 실패';
+  }
 
   // 아직 아무 정산에도 합쳐지지 않은 이월 행 = 다른 행의 carried_from 에 없는 carried
-  const { data: allPayouts, error: pErr } = await sb.from('aff_payouts').select('id, partner_id, gross, status, carried_from').lt('period', period);
-  if (pErr) return pErr.message;
-  const absorbed = new Set(((allPayouts ?? []) as PayoutRow[]).flatMap((p) => p.carried_from ?? []));
-  const openCarried = ((allPayouts ?? []) as PayoutRow[]).filter((p) => p.status === 'carried' && !absorbed.has(p.id));
+  type CarryRow = Pick<PayoutRow, 'id' | 'partner_id' | 'gross' | 'status' | 'carried_from'>;
+  let allPayouts: CarryRow[];
+  try {
+    allPayouts = await fetchAllRows<CarryRow>((from, to) => sb.from('aff_payouts').select('id, partner_id, gross, status, carried_from').lt('period', period).order('id').range(from, to));
+  } catch (e) {
+    return e instanceof Error ? e.message : '이월분 조회 실패';
+  }
+  const absorbed = new Set(allPayouts.flatMap((p) => p.carried_from ?? []));
+  const openCarried = allPayouts.filter((p) => p.status === 'carried' && !absorbed.has(p.id));
 
-  const plans = planPayouts((convs ?? []) as Array<{ id: number; partner_id: number; commission: number }>, openCarried);
+  const plans = planPayouts(convs, openCarried);
   let conversions = 0;
   for (const p of plans) {
     const { data: ins, error } = await sb
@@ -136,8 +142,11 @@ export async function closeMonth(sb: SupabaseClient, period: string): Promise<Cl
       .select('id')
       .single();
     if (error || !ins) return `파트너 ${p.partnerId} 정산 저장 실패: ${error?.message}`;
-    const { error: uErr } = await sb.from('aff_conversions').update({ payout_id: (ins as { id: number }).id }).in('id', p.conversionIds);
-    if (uErr) return `파트너 ${p.partnerId} 전환 묶기 실패: ${uErr.message}`;
+    // id 목록은 URL 에 실리므로 200개씩
+    for (let i = 0; i < p.conversionIds.length; i += 200) {
+      const { error: uErr } = await sb.from('aff_conversions').update({ payout_id: (ins as { id: number }).id }).in('id', p.conversionIds.slice(i, i + 200));
+      if (uErr) return `파트너 ${p.partnerId} 전환 묶기 실패: ${uErr.message}`;
+    }
     conversions += p.conversionIds.length;
   }
 

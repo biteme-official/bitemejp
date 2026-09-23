@@ -25,11 +25,12 @@ import {
   isAffiliateEnabled,
   type AffPartner,
   ADMIN_ORDER_FIELDS,
+  fetchAllRows,
   reevaluateOrder,
   toOrderForAttribution,
   type AdminOrderNode,
 } from './_affiliate.js';
-import { createCampaign, deleteCampaign, endCampaign, parseCampaignInput } from './_affiliate-campaign.js';
+import { createCampaign, deleteCampaign, disablePartnerCodes, endCampaign, parseCampaignInput } from './_affiliate-campaign.js';
 import { closeMonth, currentPeriodJst, dueDateOf, markPaid, MIN_PAYOUT, voidConversion } from './_affiliate-payout.js';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
@@ -72,22 +73,22 @@ async function handleGet(res: VercelResponse) {
   const sb = getSupabase();
   const since = monthStartJst();
 
-  const [partnersQ, allQ, recentQ, campaignsQ, codesQ, clicksQ, payoutsQ, unsettledQ] = await Promise.all([
+  type Row = { partner_id: number; status: string; commission: number; eligible_amount: number; campaign_id: number | null; ordered_at: string };
+  const [partnersQ, recentQ, campaignsQ, codesQ, payoutsQ, allRows, clickRows, unsettledRows] = await Promise.all([
     sb.from('aff_partners').select('*').order('joined_at', { ascending: false }),
-    // 누적·이달·캠페인 성과를 한 번에 — 장부 규모가 작아 전체를 읽어 서버에서 접는다
-    sb.from('aff_conversions').select('partner_id, status, commission, eligible_amount, campaign_id, ordered_at').limit(20000),
     sb.from('aff_conversions').select('*').order('ordered_at', { ascending: false }).limit(50),
     sb.from('aff_campaigns').select('*').order('starts_at', { ascending: false }),
     sb.from('aff_campaign_codes').select('partner_id, shopify_code, status, campaign_id'),
-    sb.from('aff_clicks').select('partner_id').eq('is_bot', false).gte('ts', since).limit(50000),
-    sb.from('aff_payouts').select('*').order('period', { ascending: false }).limit(500),
+    sb.from('aff_payouts').select('*').order('period', { ascending: false }).limit(1000),
+    // 누적·이달·캠페인 성과를 한 번에 — 1,000행 넘어가도 끝까지 읽어 서버에서 접는다
+    fetchAllRows<Row>((from, to) => sb.from('aff_conversions').select('partner_id, status, commission, eligible_amount, campaign_id, ordered_at').order('id').range(from, to)),
+    fetchAllRows<{ partner_id: number }>((from, to) => sb.from('aff_clicks').select('partner_id').eq('is_bot', false).gte('ts', since).order('id').range(from, to)),
     // 확정됐지만 아직 어느 정산에도 안 묶인 것 — 다음 마감에 들어갈 돈
-    sb.from('aff_conversions').select('partner_id, commission, confirmed_at').eq('status', 'confirmed').is('payout_id', null).limit(20000),
+    fetchAllRows<{ partner_id: number; commission: number }>((from, to) => sb.from('aff_conversions').select('partner_id, commission').eq('status', 'confirmed').is('payout_id', null).order('id').range(from, to)),
   ]);
-  const firstError = [partnersQ, allQ, recentQ, campaignsQ, codesQ, clicksQ, payoutsQ, unsettledQ].find((q) => q.error)?.error;
+  const firstError = [partnersQ, recentQ, campaignsQ, codesQ, payoutsQ].find((q) => q.error)?.error;
   if (firstError) return res.status(500).json({ error: firstError.message });
 
-  type Row = { partner_id: number; status: string; commission: number; eligible_amount: number; campaign_id: number | null; ordered_at: string };
   const month = new Map<number, Stats>();
   const total = new Map<number, Stats>();
   const byCampaign = new Map<number, { orders: number; sales: number; commission: number }>();
@@ -102,7 +103,7 @@ async function handleGet(res: VercelResponse) {
     if (r.status === 'self') s.self += 1;
     m.set(r.partner_id, s);
   };
-  for (const r of (allQ.data ?? []) as Row[]) {
+  for (const r of allRows) {
     const inMonth = r.ordered_at >= since;
     if (r.status === 'nonmember') {
       if (inMonth) { nonmember.orders += 1; nonmember.sales += r.eligible_amount; }
@@ -118,7 +119,7 @@ async function handleGet(res: VercelResponse) {
   }
 
   const clicks = new Map<number, number>();
-  for (const c of (clicksQ.data ?? []) as Array<{ partner_id: number }>) clicks.set(c.partner_id, (clicks.get(c.partner_id) ?? 0) + 1);
+  for (const c of clickRows) clicks.set(c.partner_id, (clicks.get(c.partner_id) ?? 0) + 1);
 
   const codesByPartner = new Map<number, string[]>();
   const codesByCampaign = new Map<number, Array<{ partnerId: number; code: string; status: string }>>();
@@ -150,7 +151,6 @@ async function handleGet(res: VercelResponse) {
     const partner = partnerById.get(p.partner_id);
     return { ...p, partner_code: partner?.code ?? '?', partner_name: partner?.name ?? '?', invoice_reg_no: partner?.invoice_reg_no ?? null, partner_status: partner?.status ?? '?', due_date: dueDateOf(p.period) };
   });
-  const unsettledRows = (unsettledQ.data ?? []) as Array<{ partner_id: number; commission: number }>;
   const unsettled = { conversions: unsettledRows.length, amount: unsettledRows.reduce((a, r) => a + r.commission, 0), partners: new Set(unsettledRows.map((r) => r.partner_id)).size };
 
   return res.status(200).json({
@@ -310,7 +310,11 @@ async function handleSetStatus(body: Record<string, unknown>, res: VercelRespons
   const { data, error } = await sb.from('aff_partners').update(patch).eq('id', id).select('*').maybeSingle();
   if (error) return res.status(500).json({ error: error.message });
   if (!data) return res.status(404).json({ error: '파트너 없음' });
-  if (status !== 'active') await sb.from('aff_touches').delete().eq('partner_id', id);
+  if (status !== 'active') {
+    await sb.from('aff_touches').delete().eq('partner_id', id);
+    // 第12条 — 정지·탈퇴 즉시 링크·코드 무효. 다시 활동으로 돌려도 코드는 자동 복구하지 않는다(캠페인을 새로)
+    await disablePartnerCodes(sb, id);
+  }
   return res.status(200).json({ ok: true, partner: data });
 }
 
@@ -322,7 +326,8 @@ async function handleDeletePartner(body: Record<string, unknown>, res: VercelRes
   const { count, error: cErr } = await sb.from('aff_conversions').select('id', { count: 'exact', head: true }).eq('partner_id', id);
   if (cErr) return res.status(500).json({ error: cErr.message });
   if ((count ?? 0) > 0) return res.status(409).json({ error: `장부에 ${count}건이 있어 삭제 불가 — 정지(suspended)로 처리할 것` });
-  // 코드·클릭·터치는 FK cascade 로 함께 지워진다
+  // 코드·클릭·터치는 FK cascade 로 함께 지워진다 — Shopify 쪽 전용 코드는 cascade 가 못 끄니 먼저 끈다
+  await disablePartnerCodes(sb, id);
   const { error } = await sb.from('aff_partners').delete().eq('id', id);
   if (error) return res.status(500).json({ error: error.message });
   return res.status(200).json({ ok: true, deleted: id });

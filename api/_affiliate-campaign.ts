@@ -212,6 +212,51 @@ async function pushLine(lineUserId: string, text: string): Promise<'sent' | 'not
   return 'failed';
 }
 
+/** 같은 문구를 여러 명에게 — LINE multicast(요청당 500명). 친구 아님은 LINE 이 조용히 건너뛴다 */
+async function multicastLine(lineUserIds: string[], text: string): Promise<{ sent: number; failed: number }> {
+  const token = process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN;
+  const ids = lineUserIds.filter((id) => !id.startsWith(MANUAL_LINE_ID_PREFIX));
+  if (!token) return { sent: 0, failed: ids.length };
+  let sent = 0;
+  let failed = 0;
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    const res = await fetch('https://api.line.me/v2/bot/message/multicast', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ to: chunk, messages: [{ type: 'text', text }] }),
+    });
+    if (res.ok) sent += chunk.length;
+    else { failed += chunk.length; console.error('[affiliate-campaign] LINE multicast', res.status, (await res.text()).slice(0, 200)); }
+  }
+  return { sent, failed };
+}
+
+/**
+ * 파트너의 살아 있는 전용 코드를 Shopify·장부 양쪽에서 끈다 — 정지·탈퇴·삭제 때 (약관 第12条: 즉시 링크·코드 무효).
+ * 절대 throw 하지 않는다: 탈퇴 자체를 막으면 안 되므로 실패는 로그만.
+ */
+export async function disablePartnerCodes(sb: SupabaseClient, partnerId: number): Promise<number> {
+  try {
+    const { data } = await sb.from('aff_campaign_codes').select('id, shopify_discount_gid').eq('partner_id', partnerId).eq('status', 'active');
+    const rows = (data ?? []) as Array<{ id: number; shopify_discount_gid: string }>;
+    if (rows.length === 0) return 0;
+    const shopifyRows = rows.filter((r) => r.shopify_discount_gid.startsWith('gid://'));
+    if (shopifyRows.length > 0) {
+      const token = await getAdminToken();
+      for (const r of shopifyRows) {
+        const err = await deactivateShopifyCode(token, r.shopify_discount_gid).catch((e) => (e instanceof Error ? e.message : '실패'));
+        if (err) console.error('[affiliate-campaign] 코드 비활성 실패', partnerId, err);
+      }
+    }
+    await sb.from('aff_campaign_codes').update({ status: 'disabled' }).in('id', rows.map((r) => r.id));
+    return rows.length;
+  } catch (e) {
+    console.error('[affiliate-campaign] disablePartnerCodes', partnerId, e);
+    return 0;
+  }
+}
+
 // ── 생성 · 종료 ─────────────────────────────────────────────────────────────
 
 export interface CreateResult {
@@ -302,7 +347,12 @@ export async function createCampaign(sb: SupabaseClient, input: CampaignInput, c
   }
 
   const notified = { sent: 0, notFriend: 0, failed: 0 };
-  if (input.notify) {
+  if (input.notify && input.discountPercent === null) {
+    // 코드가 없으면 모두 같은 문구 — 한 번에 보낸다(전원 캠페인이 수백 명이어도 함수 시간 안에)
+    const r = await multicastLine(partners.map((p) => p.line_user_id), campaignMessage(campaign, null));
+    notified.sent = r.sent;
+    notified.failed = r.failed;
+  } else if (input.notify) {
     for (const p of partners) {
       // 할인 캠페인에서 코드를 못 받은 사람에게는 보내지 않는다
       if (input.discountPercent !== null && !codeByPartner.has(p.id)) continue;
