@@ -268,6 +268,30 @@ export function inQuietHours(now = new Date()): boolean {
 export interface NotifyResult { sent: number; notFriend: number; failed: number }
 
 /**
+ * 어드민 화면은 별도 Vercel 프로젝트(bitemejp-admin)의 API 를 부르는데, 거기엔 LINE 발송 키가 없다(2026-09-23 실측).
+ * 이 런타임에 키가 없으면 직접 보내지 않고, 키가 있는 본 사이트의 발송 크론(?task=notify)을 불러 보류분을 보내게 한다.
+ */
+export function canSendLineHere(): boolean {
+  return !!process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN;
+}
+
+export interface RemoteFlushResult { ok: boolean; campaignsSent: number; noticesSent: number; error?: string }
+
+export async function triggerRemoteNotify(): Promise<RemoteFlushResult> {
+  const base = process.env.AFFILIATE_NOTIFY_BASE_URL || 'https://biteme.co.jp';
+  const secret = process.env.ADMIN_SECRET;
+  if (!secret) return { ok: false, campaignsSent: 0, noticesSent: 0, error: 'ADMIN_SECRET 미설정' };
+  try {
+    const res = await fetch(`${base}/api/affiliate-cron?task=notify`, { headers: { Authorization: `Bearer ${secret}` } });
+    const j = (await res.json().catch(() => ({}))) as { ok?: boolean; campaigns?: { sent?: number }; notices?: { sent?: number } };
+    if (!res.ok || !j.ok) return { ok: false, campaignsSent: 0, noticesSent: 0, error: `발송 서버 ${res.status}` };
+    return { ok: true, campaignsSent: j.campaigns?.sent ?? 0, noticesSent: j.notices?.sent ?? 0 };
+  } catch (e) {
+    return { ok: false, campaignsSent: 0, noticesSent: 0, error: e instanceof Error ? e.message : '발송 서버 호출 실패' };
+  }
+}
+
+/**
  * 캠페인 알림 발송 — 저장 직후(낮) 또는 다음 날 아침 크론(야간 보류분)이 부른다.
  * 받는 사람은 보내는 시점에 다시 계산한다: 할인 캠페인 = 살아 있는 전용 코드를 가진 활동 파트너,
  * 그 외 = 지정 파트너 또는 활동 파트너 전원. 끝나면 notify_status='sent'.
@@ -297,6 +321,8 @@ export async function sendCampaignNotifications(sb: SupabaseClient, campaign: Af
       else notified.failed += 1;
     }
   }
+  // 한 명도 못 보냈고 실패만 있으면 'sent' 로 찍지 않는다 — 보류로 남겨 다음 아침 크론이 다시 보낸다
+  if (notified.sent === 0 && notified.notFriend === 0 && notified.failed > 0) return notified;
   await sb.from('aff_campaigns').update({ notify_status: 'sent', notified_at: new Date().toISOString() }).eq('id', campaign.id);
   return notified;
 }
@@ -412,7 +438,16 @@ export async function createCampaign(sb: SupabaseClient, input: CampaignInput, c
 
   let notified: NotifyResult = { sent: 0, notFriend: 0, failed: 0 };
   const notifyPending = input.notify && inQuietHours();
-  if (input.notify && !notifyPending) notified = await sendCampaignNotifications(sb, campaign);
+  if (input.notify && !notifyPending) {
+    if (canSendLineHere()) {
+      notified = await sendCampaignNotifications(sb, campaign);
+    } else {
+      // 어드민 프로젝트 — 본 사이트가 보류분(방금 저장한 이 캠페인)을 보낸다
+      const r = await triggerRemoteNotify();
+      notified = r.ok ? { sent: r.campaignsSent, notFriend: 0, failed: 0 } : { sent: 0, notFriend: 0, failed: 1 };
+      if (!r.ok) console.error('[affiliate-campaign] 원격 발송 실패 — 내일 09:05 크론이 다시 보낸다', r.error);
+    }
+  }
 
   return { campaign, codes, codeErrors, notified, notifyPending };
 }
