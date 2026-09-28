@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -420,8 +420,159 @@ function CampaignForm({ secret, partners, selected, onToggle, onDone }: {
   );
 }
 
-function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns: Campaign[]; onDone: () => void }) {
+interface UpdateResult {
+  codes: Array<{ partnerCode: string; code: string }>;
+  updatedCodes: number;
+  disabledCodes: number;
+  codeErrors: Array<{ partnerCode: string; error: string }>;
+}
+
+const productUrl = (gid: string) => `https://biteme.co.jp/product/${gid.split("/").pop()}`;
+
+/**
+ * 진행·예정 캠페인 수정 — 대상 종류와 할인 유무는 못 바꾼다(서버도 거절).
+ * 파트너 선택은 아래 파트너 표와 따로 — 이 캠페인의 지금 대상에서 시작한다.
+ */
+function CampaignEditForm({ secret, campaign: c, partners, onClose, onSaved }: {
+  secret: string;
+  campaign: Campaign;
+  partners: Partner[];
+  onClose: () => void;
+  onSaved: (message: string) => void;
+}) {
+  const hadDiscount = c.discount_percent != null;
+  const oldPartnerIds = c.target_ids.filter((t) => /^\d+$/.test(t)).map(Number);
+  const [form, setForm] = useState(() => ({
+    name: c.name,
+    startsAt: toLocalInput(new Date(c.starts_at)),
+    endsAt: toLocalInput(new Date(c.ends_at)),
+    commission: String(Math.round(Number(c.commission_rate) * 1000) / 10),
+    discount: hadDiscount ? String(Number(c.discount_percent)) : "",
+    usageLimit: "",
+    products: c.scope === "products" ? c.target_ids.map(productUrl).join("\n") : "",
+    discountProducts: c.target_ids.filter((t) => t.startsWith("gid://")).map(productUrl).join("\n"),
+  }));
+  const [picked, setPicked] = useState<number[]>(oldPartnerIds);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
+  const toggle = (id: number) => setPicked((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  const codeOf = (id: number) => partners.find((p) => p.id === id)?.code ?? `#${id}`;
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    if (c.scope === "partners" && picked.length === 0) { setErr("대상 파트너를 한 명 이상 체크하세요."); return; }
+    const split = (v: string) => v.split(/[\s,]+/).filter(Boolean);
+    if (hadDiscount && split(form.discountProducts).length === 0) { setErr("할인 상품 URL 을 하나 이상 넣으세요."); return; }
+    const added = picked.filter((id) => !oldPartnerIds.includes(id));
+    const removed = oldPartnerIds.filter((id) => !picked.includes(id));
+    const msg = [
+      `「${c.name}」 캠페인을 수정합니다.`,
+      Number(form.commission) / 100 !== Number(c.commission_rate) ? "커미션율 변경은 이후 주문부터 — 이미 난 주문은 그대로입니다." : "",
+      hadDiscount ? "전용 코드의 할인율·기간·상품도 Shopify 에서 바로 바뀝니다(코드 이름은 그대로)." : "",
+      added.length ? `추가: ${added.map(codeOf).join(", ")}${hadDiscount ? " — 전용 코드 발급" : ""}` : "",
+      removed.length ? `제외: ${removed.map(codeOf).join(", ")}${hadDiscount ? " — 전용 코드 비활성" : ""}` : "",
+      "LINE 알림은 보내지 않습니다.",
+    ].filter(Boolean).join("\n");
+    if (!window.confirm(msg)) return;
+    setSaving(true);
+    try {
+      const r = await postAdmin<UpdateResult>(secret, {
+        action: "update_campaign",
+        campaignId: c.id,
+        name: form.name,
+        startsAt: fromLocalInput(form.startsAt),
+        endsAt: fromLocalInput(form.endsAt),
+        targetIds: c.scope === "partners" ? picked.map(String) : c.scope === "products" ? split(form.products) : [],
+        commissionRate: Number(form.commission) / 100,
+        discountPercent: hadDiscount ? Number(form.discount) : null,
+        discountProducts: hadDiscount ? split(form.discountProducts) : [],
+        usageLimit: form.usageLimit.trim(),
+      });
+      onSaved([
+        `「${form.name}」 수정 완료`,
+        r.updatedCodes ? `코드 갱신 ${r.updatedCodes}개` : "",
+        r.codes.length ? `새 코드 ${r.codes.map((k) => `${k.partnerCode} → ${k.code}`).join(", ")}` : "",
+        r.disabledCodes ? `비활성 ${r.disabledCodes}개` : "",
+        r.codeErrors.length ? `⚠ 코드 실패: ${r.codeErrors.map((k) => `${k.partnerCode} (${k.error})`).join(", ")}` : "",
+      ].filter(Boolean).join(" · "));
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "오류 발생");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const input = "h-8 rounded border bg-background px-2 text-xs w-full";
+  const label = "text-[11px] text-muted-foreground space-y-1 block";
+  return (
+    <form onSubmit={submit} className="space-y-3 rounded-lg border bg-muted/30 p-4 text-left">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <label className={`${label} col-span-2`}>
+          <span>캠페인 이름 *</span>
+          <input className={input} value={form.name} onChange={(e) => set("name", e.target.value)} required />
+        </label>
+        <label className={label}>
+          <span>시작 (JST)</span>
+          <input type="datetime-local" className={input} value={form.startsAt} onChange={(e) => set("startsAt", e.target.value)} required />
+        </label>
+        <label className={label}>
+          <span>종료 (JST)</span>
+          <input type="datetime-local" className={input} value={form.endsAt} onChange={(e) => set("endsAt", e.target.value)} required />
+        </label>
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        대상: {c.scope === "all" ? "활동 파트너 전원" : c.scope === "partners" ? "지정 파트너" : "지정 상품"}
+        {hadDiscount ? " · 고객 할인 있음" : ""} — 대상 종류·할인 유무를 바꾸려면 종료 후 새로 만드세요.
+      </p>
+      {c.scope === "partners" && <PartnerPicker partners={partners} selected={picked} onToggle={toggle} />}
+      {c.scope === "products" && (
+        <label className={label}>
+          <span>상품 — 상품 페이지 URL 을 줄마다 하나씩</span>
+          <textarea className="w-full rounded border bg-background px-2 py-1.5 text-xs h-20 font-mono" value={form.products} onChange={(e) => set("products", e.target.value)} />
+        </label>
+      )}
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 items-end">
+        <label className={label}>
+          <span>커미션율 %</span>
+          <input type="number" min={1} max={50} step={0.5} className={input} value={form.commission} onChange={(e) => set("commission", e.target.value)} required />
+        </label>
+        {hadDiscount && (<>
+          <label className={label}>
+            <span>고객 할인율 %</span>
+            <input type="number" min={1} max={50} className={input} value={form.discount} onChange={(e) => set("discount", e.target.value)} required />
+          </label>
+          <label className={label}>
+            <span>코드 사용 상한 (코드당)</span>
+            <input type="number" min={1} max={10000} className={input} value={form.usageLimit} onChange={(e) => set("usageLimit", e.target.value)} placeholder="비우면 그대로" />
+          </label>
+        </>)}
+      </div>
+      {hadDiscount && (
+        <label className={label}>
+          <span>할인 상품 * — 상품 페이지 URL 을 줄마다 하나씩</span>
+          <textarea className="w-full rounded border bg-background px-2 py-1.5 text-xs h-20 font-mono" value={form.discountProducts} onChange={(e) => set("discountProducts", e.target.value)} />
+        </label>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button type="submit" disabled={saving} className="h-8 rounded bg-foreground text-background text-xs px-4 disabled:opacity-50">
+          {saving ? "저장 중…" : "수정 저장"}
+        </button>
+        <button type="button" onClick={onClose} className="h-8 rounded border text-xs px-3">취소</button>
+        {err && <p className="text-xs text-red-600">{err}</p>}
+      </div>
+    </form>
+  );
+}
+
+function CampaignList({ secret, campaigns, partners, onDone }: { secret: string; campaigns: Campaign[]; partners: Partner[]; onDone: () => void }) {
   const [busy, setBusy] = useState<number | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
   const end = async (c: Campaign) => {
     const codeNote = c.codes.some((k) => k.status === "active") ? " 전용 코드도 Shopify 에서 바로 비활성화됩니다." : "";
     if (!window.confirm(`「${c.name}」 를 지금 종료합니다. 이미 난 주문은 캠페인 요율 그대로입니다.${codeNote}`)) return;
@@ -443,6 +594,9 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
 
   return (
     <div className="overflow-x-auto">
+      {saved && (
+        <p className="mb-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{saved}</p>
+      )}
       <table className="w-full text-xs">
         <thead className="border-b text-muted-foreground">
           <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
@@ -457,7 +611,8 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
           {campaigns.map((c) => {
             const st = stateOf(c);
             return (
-              <tr key={c.id} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
+              <Fragment key={c.id}>
+              <tr className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
                 <td>{c.name}</td>
                 <td className="text-muted-foreground whitespace-nowrap">{day(c.starts_at)} ~ {c.ends_at.startsWith("2099") ? "종료 없음" : day(c.ends_at)}</td>
                 <td className="text-muted-foreground">{c.scope === "all" ? "전원" : c.scope === "partners" ? `파트너 ${c.target_ids.filter((t) => /^\d+$/.test(t)).length}명${c.target_ids.some((t) => t.startsWith("gid://")) ? ` · 할인 상품 ${c.target_ids.filter((t) => t.startsWith("gid://")).length}개` : ""}` : `상품 ${c.target_ids.length}개`}</td>
@@ -475,6 +630,9 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
                 </td>
                 <td className="whitespace-nowrap space-x-2">
                   {st !== "ended" && c.created_by !== "system" && (
+                    <button className="text-[11px] underline text-muted-foreground disabled:opacity-40" disabled={busy === c.id} onClick={() => { setSaved(null); setEditing(editing === c.id ? null : c.id); }}>수정</button>
+                  )}
+                  {st !== "ended" && c.created_by !== "system" && (
                     <button className="text-[11px] underline text-muted-foreground disabled:opacity-40" disabled={busy === c.id} onClick={() => end(c)}>종료</button>
                   )}
                   {c.result.orders === 0 && c.created_by !== "system" && (
@@ -482,6 +640,20 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
                   )}
                 </td>
               </tr>
+              {editing === c.id && (
+                <tr className="border-b">
+                  <td colSpan={11} className="py-3">
+                    <CampaignEditForm
+                      secret={secret}
+                      campaign={c}
+                      partners={partners}
+                      onClose={() => setEditing(null)}
+                      onSaved={(m) => { setEditing(null); setSaved(m); onDone(); }}
+                    />
+                  </td>
+                </tr>
+              )}
+              </Fragment>
             );
           })}
         </tbody>
@@ -840,7 +1012,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
               <CampaignForm secret={secret} partners={data.partners} selected={selected} onToggle={toggle} onDone={() => { setSelected([]); refresh(); }} />
             </div>
           )}
-          <CampaignList secret={secret} campaigns={data.campaigns} onDone={refresh} />
+          <CampaignList secret={secret} campaigns={data.campaigns} partners={data.partners} onDone={refresh} />
         </CardContent>
       </Card>
 
