@@ -60,6 +60,30 @@ export function getAffiliateOffer(now = Date.now()): AffiliateOffer | null {
   }
 }
 
+const REVALIDATED_KEY = 'affiliate_offer_checked';
+
+/**
+ * 방문(탭 세션)마다 한 번, 서버에 지금의 offer 를 다시 묻는다.
+ *  - 어드민에서 캠페인을 일찍 끝냈으면 → 지운다 (안 그러면 「自動適用」 안내가 거짓이 된다)
+ *  - 링크를 누른 뒤에 캠페인이 시작됐으면 → 새로 받는다
+ * 파트너 ref(30일)가 없으면 묻지 않는다. 실패하면 있던 값을 그대로 둔다.
+ */
+export async function revalidateAffiliateOffer(): Promise<AffiliateOffer | null> {
+  const ref = getAffiliateRef();
+  if (!ref) return null;
+  try { if (sessionStorage.getItem(REVALIDATED_KEY) === ref.code) return getAffiliateOffer(); } catch { /* 무시 */ }
+  try {
+    const r = await fetch('/api/aff-click', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: ref.code, check: true }) });
+    if (!r.ok) return getAffiliateOffer();
+    const d = (await r.json()) as { ok?: boolean; offer?: unknown; skipped?: string };
+    if (!d.ok || d.skipped) return getAffiliateOffer();
+    if (getAffiliateRef()?.code !== ref.code) return getAffiliateOffer(); // 그사이 다른 링크
+    if (d.offer) saveAffiliateOffer(ref.code, d.offer); else clearAffiliateOffer();
+    try { sessionStorage.setItem(REVALIDATED_KEY, ref.code); } catch { /* 무시 */ }
+  } catch { /* 네트워크 실패 — 있던 값 유지 */ }
+  return getAffiliateOffer();
+}
+
 const numericId = (gid: string | undefined | null) => (gid ?? '').split('/').pop() ?? '';
 
 /** 이 상품이 offer 대상인가 (상품 gid 또는 숫자 id) */

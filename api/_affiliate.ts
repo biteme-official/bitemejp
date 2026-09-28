@@ -289,13 +289,6 @@ function daysBetween(a: Date, b: Date): number {
   return Math.abs(a.getTime() - b.getTime()) / 86_400_000;
 }
 
-/**
- * 세 갈래 귀속 판정 (설계 §5 흐름도 · 경합 규칙).
- *  1) 주문의 할인코드가 캠페인 전용 코드(aff_campaign_codes)면 → code (최우선)
- *  2) 이 회원이 30일 안에 누군가의 링크를 눌렀으면(aff_touches) → customer   ┐ 둘 다 있으면
- *  3) 카트 속성 aff_ref(=파트너 코드) 가 30일 창 안이면 → ref                ┘ 클릭이 더 최근인 쪽
- * 정지·탈퇴한 파트너는 어느 갈래로도 귀속되지 않는다. 셋 다 아니면 null — 자연 유입이다.
- */
 /** 링크 방문자에게 자동 적용할 할인 — 파트너의 살아 있는 전용 코드 중 할인율이 가장 큰 것 */
 export interface LinkOffer {
   code: string;
@@ -337,6 +330,13 @@ export async function activeOfferForPartner(sb: SupabaseClient, partnerId: numbe
   }
 }
 
+/**
+ * 세 갈래 귀속 판정 (설계 §5 흐름도 · 경합 규칙).
+ *  1) 주문의 할인코드가 캠페인 전용 코드(aff_campaign_codes)면 → code (최우선)
+ *  2) 이 회원이 30일 안에 누군가의 링크를 눌렀으면(aff_touches) → customer   ┐ 둘 다 있으면
+ *  3) 카트 속성 aff_ref(=파트너 코드) 가 30일 창 안이면 → ref                ┘ 클릭이 더 최근인 쪽
+ * 정지·탈퇴한 파트너는 어느 갈래로도 귀속되지 않는다. 셋 다 아니면 null — 자연 유입이다.
+ */
 export async function decideAttribution(
   sb: SupabaseClient,
   order: OrderForAttribution,

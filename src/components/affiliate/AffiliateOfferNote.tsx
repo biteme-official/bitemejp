@@ -6,12 +6,12 @@
  *
  * 실제 할인은 Shopify 결제 페이지에서 붙는다(cartStore.createCheckout). 여기 금액은 정가 기준 추정이다.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useAuthStore } from "@/stores/authStore";
 import { initiateLineLogin } from "@/lib/line-auth";
 import { formatPrice } from "@/lib/shopify";
-import { getAffiliateOffer, offerAppliesTo, offerDiscountAmount, orderOfferAndWelcome } from "@/lib/affiliate-offer";
+import { getAffiliateOffer, offerAppliesTo, offerDiscountAmount, orderOfferAndWelcome, revalidateAffiliateOffer } from "@/lib/affiliate-offer";
 import { LINE_WELCOME_DISCOUNT_KEY, LINE_WELCOME_DISCOUNT_PERCENT } from "@/lib/lineWelcomeDiscount";
 
 type Props =
@@ -21,7 +21,13 @@ type Props =
 export function AffiliateOfferNote(props: Props) {
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn);
   // 렌더마다 localStorage 를 읽지 않도록 첫 렌더에 한 번
-  const [offer] = useState(() => getAffiliateOffer());
+  const [offer, setOffer] = useState(() => getAffiliateOffer());
+  // 방문마다 한 번 서버에 재확인 — 조기 종료된 캠페인은 지우고, 클릭 뒤에 시작한 캠페인은 받는다
+  useEffect(() => {
+    let alive = true;
+    revalidateAffiliateOffer().then((o) => { if (alive) setOffer(o); });
+    return () => { alive = false; };
+  }, []);
   if (!offer) return null;
 
   const login = () => {

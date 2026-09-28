@@ -7,6 +7,8 @@
  *   요청 { code, path?, lineSessionToken? }           → 클릭 1행 (+ 로그인 상태면 터치)
  *   응답 { ok, clickId?, offer? }                      → 프론트가 localStorage 에 clickId·할인(offer)을 보태 둔다
  *   offer = 파트너의 살아 있는 캠페인 할인 코드. 결제 때 LINE 회원이면 자동 적용된다 (cartStore)
+ *   요청 { code, check: true }                         → 클릭을 남기지 않고 지금의 offer 만 (방문마다 1회 재확인 —
+ *                                                         캠페인 조기 종료·클릭 뒤에 시작한 캠페인을 반영)
  *
  * 규칙
  *  - 🔴 고객 식별은 서명된 lineSessionToken 에서만 꺼낸다. 클라이언트가 보낸 userId 는 믿지 않는다.
@@ -67,7 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (typeof payload === 'string') {
     try { payload = JSON.parse(payload); } catch { return res.status(400).json({ ok: false, error: 'bad json' }); }
   }
-  const body = (payload ?? {}) as { code?: unknown; path?: unknown; lineSessionToken?: unknown };
+  const body = (payload ?? {}) as { code?: unknown; path?: unknown; lineSessionToken?: unknown; check?: unknown };
 
   const code = normalizeCode(body.code);
   if (!code) return res.status(200).json({ ok: true, skipped: 'bad-code' });
@@ -80,6 +82,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const ua = String(req.headers['user-agent'] ?? '').slice(0, 300);
     const isBot = BOT_UA.test(ua);
+
+    // 재확인 — 클릭·터치는 남기지 않는다
+    if (body.check === true) {
+      const offer = isBot ? null : await activeOfferForPartner(sb, partner.id);
+      return res.status(200).json({ ok: true, ...(offer ? { offer } : {}) });
+    }
     const referrer = typeof req.headers.referer === 'string' ? req.headers.referer.slice(0, 500) : null;
 
     const { data: click, error } = await sb
