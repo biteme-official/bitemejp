@@ -228,6 +228,7 @@ function CampaignForm({ secret, partners, selected, onDone }: {
       endsAt: toLocalInput(new Date(now.getTime() + 14 * 86400_000)),
       scope: (selected.length > 0 ? "partners" : "all") as Scope,
       products: "",
+      discountProducts: "",
       commission: "15",
       discount: "",
       usageLimit: "100",
@@ -247,10 +248,12 @@ function CampaignForm({ secret, partners, selected, onDone }: {
     e.preventDefault();
     setErr(null); setResult(null);
     if (form.scope === "partners" && targets.length === 0) { setErr("아래 파트너 표에서 대상을 체크하세요."); return; }
+    const discountProducts = form.discountProducts.split(/[\s,]+/).filter(Boolean);
+    if (hasDiscount && discountProducts.length === 0) { setErr("할인 상품 URL 을 하나 이상 넣으세요."); return; }
     const who = form.scope === "all" ? `활동 파트너 전원(${activeCount}명)` : form.scope === "partners" ? targets.map((t) => t.code).join(", ") : "지정 상품";
     const msg = [
       `「${form.name}」 캠페인을 만듭니다.`,
-      `대상: ${who} · 커미션 ${form.commission}%${hasDiscount ? ` · 고객 할인 ${form.discount}% (Shopify 전용 코드 ${targets.length}개 생성)` : ""}`,
+      `대상: ${who} · 커미션 ${form.commission}%${hasDiscount ? ` · 고객 할인 ${form.discount}% · 할인 상품 ${discountProducts.length}개 (Shopify 전용 코드 ${targets.length}개 생성)` : ""}`,
       form.notify ? "대상 파트너에게 LINE 으로 바로 알림이 갑니다." : "LINE 알림은 보내지 않습니다.",
     ].join("\n");
     if (!window.confirm(msg)) return;
@@ -265,6 +268,7 @@ function CampaignForm({ secret, partners, selected, onDone }: {
         targetIds: form.scope === "partners" ? targets.map((t) => String(t.id)) : form.scope === "products" ? form.products.split(/[\s,]+/).filter(Boolean) : [],
         commissionRate: Number(form.commission) / 100,
         discountPercent: hasDiscount ? Number(form.discount) : null,
+        discountProducts: hasDiscount ? discountProducts : [],
         usageLimit: Number(form.usageLimit),
         notify: form.notify,
       });
@@ -337,9 +341,16 @@ function CampaignForm({ secret, partners, selected, onDone }: {
         </label>
       </div>
       {hasDiscount && (
-        <p className="text-[11px] text-muted-foreground">
-          파트너마다 Shopify 전용 코드(예: <span className="font-mono">{targets[0]?.code ?? "76D436"}-{form.discount}OFF</span>)가 생깁니다 — 1인 1회, 코드당 {form.usageLimit}회까지, 다른 할인코드와 중복 불가.
-        </p>
+        <>
+          <label className={label}>
+            <span>할인 상품 * — 상품 페이지 URL 을 줄마다 하나씩. 커미션은 이 파트너의 전 주문, 할인은 이 상품만</span>
+            <textarea className="w-full rounded border bg-background px-2 py-1.5 text-xs h-20 font-mono" value={form.discountProducts} onChange={(e) => set("discountProducts", e.target.value)} placeholder="https://biteme.co.jp/product/…" />
+          </label>
+          <p className="text-[11px] text-muted-foreground">
+            파트너마다 Shopify 전용 코드(예: <span className="font-mono">{targets[0]?.code ?? "76D436"}-{form.discount}OFF</span>)가 생깁니다 — 1인 1회, 코드당 {form.usageLimit}회까지, 다른 할인코드와 중복 불가.
+            이 파트너 링크로 들어온 <b>LINE 회원</b>은 코드 입력 없이 결제 때 자동 적용됩니다(웰컴 10% 가 더 크면 웰컴 우선).
+          </p>
+        </>
       )}
 
       <div className="flex items-center gap-3">
@@ -403,7 +414,7 @@ function CampaignList({ secret, campaigns, onDone }: { secret: string; campaigns
               <tr key={c.id} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
                 <td>{c.name}</td>
                 <td className="text-muted-foreground whitespace-nowrap">{day(c.starts_at)} ~ {c.ends_at.startsWith("2099") ? "종료 없음" : day(c.ends_at)}</td>
-                <td className="text-muted-foreground">{c.scope === "all" ? "전원" : c.scope === "partners" ? `파트너 ${c.target_ids.length}명` : `상품 ${c.target_ids.length}개`}</td>
+                <td className="text-muted-foreground">{c.scope === "all" ? "전원" : c.scope === "partners" ? `파트너 ${c.target_ids.filter((t) => /^\d+$/.test(t)).length}명${c.target_ids.some((t) => t.startsWith("gid://")) ? ` · 할인 상품 ${c.target_ids.filter((t) => t.startsWith("gid://")).length}개` : ""}` : `상품 ${c.target_ids.length}개`}</td>
                 <td className="text-right tabular-nums">{pct(Number(c.commission_rate))}</td>
                 <td className="text-right tabular-nums">{c.discount_percent != null ? `${Number(c.discount_percent)}%` : "—"}</td>
                 <td className="font-mono text-muted-foreground">{c.codes.length ? c.codes.map((k) => k.code).join(", ") : "—"}</td>

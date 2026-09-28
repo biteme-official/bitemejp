@@ -5,7 +5,9 @@ import {
   GIFT_THRESHOLD, GIFT_PRODUCT_ID, GIFT_DISCOUNT_CODE,
   isGiftLine, shouldSendGiftCode,
 } from '@/config/giftConfig';
-import { LINE_WELCOME_DISCOUNT_KEY } from '@/lib/lineWelcomeDiscount';
+import { LINE_WELCOME_DISCOUNT_KEY, LINE_WELCOME_DISCOUNT_PERCENT } from '@/lib/lineWelcomeDiscount';
+import { getAffiliateOffer, orderOfferAndWelcome } from '@/lib/affiliate-offer';
+import { useAuthStore } from '@/stores/authStore';
 import { syncCartSnapshot } from '@/lib/cartSync';
 
 export interface CartItem {
@@ -208,11 +210,18 @@ export const useCartStore = create<CartStore>()(
           // 어필리에이트 코드가 있으면 그쪽을 우선한다. 둘 다 넣으면 Shopify 가
           // 하나만 적용해 파트너 성과가 유실될 수 있다.
           const welcomeCode = affiliateCode ? null : localStorage.getItem(LINE_WELCOME_DISCOUNT_KEY);
+          // 파트너 링크 자동 할인 (LINE 회원만) — 웰컴과 할인액 큰 쪽을 앞에 둔다. /discount/ 특별 코드가 있으면 그쪽이 우선
+          const linkOffer = affiliateCode ? null : orderOfferAndWelcome(
+            getAffiliateOffer(),
+            useAuthStore.getState().isLoggedIn,
+            welcomeCode ? { code: welcomeCode, percent: LINE_WELCOME_DISCOUNT_PERCENT } : null,
+            items.filter(i => !i.isGift).map(i => ({ productId: i.product.node.id, unitPrice: parseFloat(i.price.amount), quantity: i.quantity })),
+          );
           // ⚠️ isGift 플래그만 보고 판단하면 안 된다 — 플래그가 유실된 카트에서
           //    증정 코드가 통째로 누락돼 고객이 정가를 냈다 (Issue #126).
           const discountCodes = [
             affiliateCode,
-            welcomeCode,
+            ...(linkOffer ? linkOffer.codes : [welcomeCode]),
             shouldSendGiftCode(items) ? GIFT_DISCOUNT_CODE : null,
           ].filter((c): c is string => !!c);
 

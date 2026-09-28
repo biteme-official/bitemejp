@@ -126,8 +126,19 @@ export interface AffCampaign {
   commission_rate: number;
   discount_percent: number | null;
   scope: 'all' | 'partners' | 'products';
+  /** partners → 파트너 id(숫자 문자열) + 할인 대상 상품 gid(있으면) · products → 상품 gid */
   target_ids: string[];
   active: boolean;
+}
+
+const PRODUCT_GID_PREFIX = 'gid://shopify/Product/';
+/** 지정 파트너 캠페인의 파트너 id — target_ids 에 할인 상품 gid 가 섞여 있어도 숫자만 */
+export function campaignPartnerIds(c: Pick<AffCampaign, 'target_ids'>): number[] {
+  return (c.target_ids ?? []).filter((t) => /^\d+$/.test(String(t))).map(Number);
+}
+/** 캠페인의 상품 gid — products 범위의 대상 상품, 또는 지정 파트너 캠페인의 할인 대상 상품 */
+export function campaignProductGids(c: Pick<AffCampaign, 'target_ids'>): string[] {
+  return (c.target_ids ?? []).map(String).filter((t) => t.startsWith(PRODUCT_GID_PREFIX));
 }
 
 /** orders/create 웹훅(REST) 페이로드 중 귀속 판정에 쓰는 필드만 */
@@ -285,6 +296,47 @@ function daysBetween(a: Date, b: Date): number {
  *  3) 카트 속성 aff_ref(=파트너 코드) 가 30일 창 안이면 → ref                ┘ 클릭이 더 최근인 쪽
  * 정지·탈퇴한 파트너는 어느 갈래로도 귀속되지 않는다. 셋 다 아니면 null — 자연 유입이다.
  */
+/** 링크 방문자에게 자동 적용할 할인 — 파트너의 살아 있는 전용 코드 중 할인율이 가장 큰 것 */
+export interface LinkOffer {
+  code: string;
+  percent: number;
+  /** 할인 대상 상품의 숫자 id. 비어 있으면 전 상품(9/28 이전에 만든 캠페인) */
+  productIds: string[];
+  endsAt: string;
+}
+
+/**
+ * 파트너 링크 클릭 시 고객에게 줄 할인. 없으면 null. 절대 throw 하지 않는다(클릭 기록이 우선).
+ * 코드 자체의 1인 1회·사용 상한은 Shopify 가 결제 때 강제한다.
+ */
+export async function activeOfferForPartner(sb: SupabaseClient, partnerId: number, now = new Date()): Promise<LinkOffer | null> {
+  try {
+    const { data: codeRows } = await sb.from('aff_campaign_codes').select('campaign_id, shopify_code').eq('partner_id', partnerId).eq('status', 'active');
+    const codes = (codeRows ?? []) as Array<{ campaign_id: number; shopify_code: string }>;
+    if (codes.length === 0) return null;
+    const { data: campRows } = await sb.from('aff_campaigns').select('*')
+      .in('id', codes.map((c) => c.campaign_id))
+      .eq('active', true)
+      .lte('starts_at', now.toISOString())
+      .gte('ends_at', now.toISOString())
+      .not('discount_percent', 'is', null);
+    const camps = (campRows ?? []) as AffCampaign[];
+    let best: LinkOffer | null = null;
+    for (const c of camps) {
+      const code = codes.find((k) => k.campaign_id === c.id)?.shopify_code;
+      const percent = Number(c.discount_percent);
+      if (!code || !(percent > 0)) continue;
+      if (!best || percent > best.percent) {
+        best = { code, percent, productIds: campaignProductGids(c).map((g) => g.split('/').pop() as string), endsAt: c.ends_at };
+      }
+    }
+    return best;
+  } catch (e) {
+    console.error('[Affiliate] activeOfferForPartner', partnerId, e);
+    return null;
+  }
+}
+
 export async function decideAttribution(
   sb: SupabaseClient,
   order: OrderForAttribution,

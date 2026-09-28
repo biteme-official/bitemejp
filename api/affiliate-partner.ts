@@ -11,7 +11,7 @@
  *  - 조회는 GET 이 아니라 POST — 토큰이 URL·로그에 남지 않게.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { getSupabase, isAffiliateEnabled, publicPartner, verifyLineSession, type AffPartner } from './_affiliate.js';
+import { campaignProductGids, getSupabase, isAffiliateEnabled, publicPartner, verifyLineSession, type AffPartner } from './_affiliate.js';
 import { disablePartnerCodes } from './_affiliate-campaign.js';
 import { activeNotices } from './_affiliate-notice.js';
 
@@ -80,7 +80,9 @@ async function buildView(partner: AffPartner) {
     .filter((c) => c.scope === 'all' || (c.scope === 'partners' && (c.target_ids ?? []).includes(String(partner.id))) || c.scope === 'products')
     .map((c) => ({ name: c.name, startsAt: c.starts_at, endsAt: c.ends_at, commissionRate: Number(c.commission_rate), discountPercent: c.discount_percent, scope: c.scope, code: codeByCampaign.get(c.id) ?? null,
       // 상품 한정 캠페인만 대상 상품 id 를 준다 — 상품 페이지가 「이 상품은 n%」를 계산한다. 상품 id 는 공개 정보
-      targetIds: c.scope === 'products' ? (c.target_ids ?? []).map((t) => String(t).split('/').pop() ?? String(t)) : [] }));
+      targetIds: c.scope === 'products' ? (c.target_ids ?? []).map((t) => String(t).split('/').pop() ?? String(t)) : [],
+      // 지정 파트너 캠페인의 고객 할인 대상 상품 — 커미션은 전 상품, 할인은 이 상품만
+      discountProductIds: c.scope === 'partners' ? campaignProductGids(c).map((g) => g.split('/').pop() as string) : [] }));
 
   return {
     ok: true,

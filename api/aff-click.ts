@@ -5,7 +5,8 @@
  * 여기서 무엇이 실패해도 고객 화면은 그대로 진행된다 — 이 함수는 곁다리다.
  *
  *   요청 { code, path?, lineSessionToken? }           → 클릭 1행 (+ 로그인 상태면 터치)
- *   응답 { ok, clickId? }                              → 프론트가 localStorage 에 clickId 를 보태 둔다
+ *   응답 { ok, clickId?, offer? }                      → 프론트가 localStorage 에 clickId·할인(offer)을 보태 둔다
+ *   offer = 파트너의 살아 있는 캠페인 할인 코드. 결제 때 LINE 회원이면 자동 적용된다 (cartStore)
  *
  * 규칙
  *  - 🔴 고객 식별은 서명된 lineSessionToken 에서만 꺼낸다. 클라이언트가 보낸 userId 는 믿지 않는다.
@@ -16,6 +17,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHash } from 'crypto';
 import {
+  activeOfferForPartner,
   findActivePartner,
   getSupabase,
   isAffiliateEnabled,
@@ -110,7 +112,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    return res.status(200).json({ ok: true, clickId, touch });
+    // 봇·링크 미리보기에는 할인 코드를 내주지 않는다
+    const offer = isBot ? null : await activeOfferForPartner(sb, partner.id);
+
+    return res.status(200).json({ ok: true, clickId, touch, ...(offer ? { offer } : {}) });
   } catch (err) {
     // 클릭 하나 놓치는 것보다 콘솔이 빨개지는 게 낫다 — 그래도 200. 고객이 할 수 있는 게 없다.
     console.error('[Affiliate] 🔴 aff-click 실패:', err instanceof Error ? err.message : err);

@@ -10,6 +10,7 @@ import { useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import { getAffiliateRef, normalizeAffiliateCode, setAffiliateRef } from '@/lib/affiliate-ref';
+import { clearAffiliateOffer, saveAffiliateOffer } from '@/lib/affiliate-offer';
 
 function safeInternalPath(raw: string | null): string {
   if (!raw) return '/';
@@ -32,6 +33,8 @@ export default function AffiliateLink() {
       // 같은 링크를 또 눌러도 새 클릭이다 — 마지막 클릭이 이긴다(약관 第3条 5항)
       const at = Date.now();
       setAffiliateRef({ code, at });
+      // 이전 파트너의 할인은 버린다 — 남기면 그 코드가 새 파트너의 실적을 가져간다
+      clearAffiliateOffer();
 
       const lineSessionToken = useAuthStore.getState().user?.lineSessionToken;
       // 비로그인이면 도착 페이지에 LINE 로그인 띠(LoginBanner, 웰컴 쿠폰 문구)가 보이게 스누즈를 푼다 (설계 §7).
@@ -45,10 +48,13 @@ export default function AffiliateLink() {
         keepalive: true,
       })
         .then((r) => (r.ok ? r.json() : null))
-        .then((d: { clickId?: number } | null) => {
+        .then((d: { clickId?: number; offer?: unknown } | null) => {
           // 응답이 오면 clickId 를 보태 둔다 — 카트 속성·로그인 승격이 같은 클릭을 가리키게
           const cur = getAffiliateRef();
-          if (d?.clickId && cur && cur.code === code && cur.at === at) setAffiliateRef({ ...cur, clickId: d.clickId });
+          if (!cur || cur.code !== code || cur.at !== at) return; // 그사이 다른 링크를 눌렀다
+          if (d?.clickId) setAffiliateRef({ ...cur, clickId: d.clickId });
+          // 캠페인 할인이 있으면 저장 — 결제 때 LINE 회원이면 자동 적용 (affiliate-offer.ts)
+          if (d?.offer) saveAffiliateOffer(code, d.offer);
         })
         .catch(() => { /* 기록 실패는 조용히 */ });
     }
