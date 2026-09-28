@@ -10,6 +10,7 @@ import { formatPrice, fetchShippingRates, fetchCustomerData, ShippingRate, getPr
 import { track } from '@/lib/track';
 import { getGA4LinkerParam } from '@/lib/ga4-ecommerce';
 import { toast } from 'sonner';
+import { AffiliateOfferNote } from '@/components/affiliate/AffiliateOfferNote';
 
 interface ShippingForm {
   email: string;
@@ -305,6 +306,12 @@ export default function Checkout() {
                 <span translate="no">-{formatPrice(discountInfo.totalSavings.toFixed(2), discountInfo.currencyCode)}</span>
               </div>
             )}
+            {/* 파트너 링크 할인 — 금액은 Shopify 결제 화면에서 반영된다 (#202) */}
+            <AffiliateOfferNote
+              variant="cart"
+              lines={items.filter(i => !i.isGift).map(i => ({ productId: i.product.node.id, unitPrice: parseFloat(i.price.amount), quantity: i.quantity }))}
+              currencyCode={currencyCode}
+            />
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground flex items-center gap-1">
                 <Truck className="h-3.5 w-3.5" />送料

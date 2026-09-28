@@ -18,3 +18,6 @@ export const LINE_WELCOME_DISCOUNT_KEY = 'line_welcome_discount';
 
 /** 배너·버튼 문구에 함께 쓰는 할인율. 표기와 실제 설정이 어긋나지 않도록 한곳에서 관리한다. */
 export const LINE_WELCOME_DISCOUNT_LABEL = '10%OFF';
+
+/** 파트너 링크 할인과 「큰 쪽」 비교에 쓰는 웰컴 할인율 — 위 표기와 Shopify 설정에 맞출 것 */
+export const LINE_WELCOME_DISCOUNT_PERCENT = 10;

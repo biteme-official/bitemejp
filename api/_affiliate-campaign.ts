@@ -11,7 +11,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
-import { MANUAL_LINE_ID_PREFIX, type AffCampaign, type AffPartner } from './_affiliate.js';
+import { MANUAL_LINE_ID_PREFIX, campaignPartnerIds, campaignProductGids, type AffCampaign, type AffPartner } from './_affiliate.js';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
 
@@ -53,6 +53,8 @@ export interface CampaignInput {
   discountPercent: number | null; // 10 (지정 파트너 범위에서만)
   scope: AffCampaign['scope'];
   targetIds: string[];            // partners → aff_partners.id, products → 상품 URL·핸들·숫자 id (저장 전에 gid 로 바꾼다)
+  /** 고객 할인이 붙는 상품 — 지정 파트너 + 할인 캠페인에서 필수. 상품 URL·핸들·숫자 id (저장 전에 gid 로) */
+  discountProducts: string[];
   usageLimit: number;
   notify: boolean;
 }
@@ -67,6 +69,7 @@ export function parseCampaignInput(body: Record<string, unknown>): CampaignInput
   const discountPercent = discountRaw === null || discountRaw === undefined || discountRaw === '' ? null : Number(discountRaw);
   const scope = String(body.scope ?? '') as AffCampaign['scope'];
   const targetIds = Array.isArray(body.targetIds) ? body.targetIds.map((t) => String(t).trim()).filter(Boolean) : [];
+  const discountProducts = Array.isArray(body.discountProducts) ? body.discountProducts.map((t) => String(t).trim()).filter(Boolean) : [];
   const usageLimit = body.usageLimit === undefined || body.usageLimit === '' ? DEFAULT_USAGE_LIMIT : Number(body.usageLimit);
 
   if (!name) return '캠페인 이름은 필수';
@@ -79,6 +82,8 @@ export function parseCampaignInput(body: Record<string, unknown>): CampaignInput
   if (scope !== 'all' && targetIds.length === 0) return scope === 'partners' ? '파트너를 한 명 이상 고를 것' : '상품 URL 을 하나 이상 넣을 것';
   // 할인은 지정 파트너 캠페인에만 — 전원·상품 캠페인에 할인을 붙이면 전원이 코드를 받아 「할인 자판기」가 된다 (설계 §4)
   if (discountPercent !== null && scope !== 'partners') return '고객 할인은 「지정 파트너」 캠페인에만 붙일 수 있음';
+  // 할인은 지정 상품에만 (하영 결정 9/28) — 링크 방문자에게 자동 적용되므로 범위를 좁혀 둔다
+  if (discountPercent !== null && discountProducts.length === 0) return '할인 상품 URL 을 하나 이상 넣을 것';
   if (!Number.isInteger(usageLimit) || usageLimit < 1 || usageLimit > 10000) return '코드 사용 상한은 1~10,000';
 
   return {
@@ -89,6 +94,7 @@ export function parseCampaignInput(body: Record<string, unknown>): CampaignInput
     discountPercent,
     scope,
     targetIds,
+    discountProducts: discountPercent === null ? [] : discountProducts,
     usageLimit,
     notify: body.notify !== false,
   };
@@ -106,7 +112,7 @@ export function campaignCodeFor(partnerCode: string, discountPercent: number, ca
 
 async function createShopifyCode(
   token: string,
-  args: { title: string; code: string; percent: number; startsAt: string; endsAt: string; usageLimit: number }
+  args: { title: string; code: string; percent: number; startsAt: string; endsAt: string; usageLimit: number; productGids: string[] }
 ): Promise<{ gid: string } | { error: string; taken: boolean }> {
   const data = await adminGraphQL<{
     discountCodeBasicCreate: { codeDiscountNode: { id: string } | null; userErrors: UserError[] };
@@ -125,7 +131,10 @@ async function createShopifyCode(
         startsAt: args.startsAt,
         endsAt: args.endsAt,
         context: { all: 'ALL' },
-        customerGets: { value: { percentage: args.percent / 100 }, items: { all: true } },
+        customerGets: {
+          value: { percentage: args.percent / 100 },
+          items: args.productGids.length > 0 ? { products: { productsToAdd: args.productGids } } : { all: true },
+        },
         appliesOncePerCustomer: true,
         usageLimit: args.usageLimit,
         // 웰컴·증정 코드와 겹치지 않게 — 주문 할인끼리는 합산하지 않는다. 배송 할인과는 합산 허용
@@ -184,7 +193,7 @@ const jstDate = (iso: string) => {
 };
 
 /** 파트너에게 보내는 일본어 안내 — 조건·기간·코드만. 선택 이유 같은 설명은 넣지 않는다 */
-export function campaignMessage(c: { name: string; starts_at: string; ends_at: string; commission_rate: number; discount_percent: number | null; scope: string }, code: string | null): string {
+export function campaignMessage(c: { name: string; starts_at: string; ends_at: string; commission_rate: number; discount_percent: number | null; scope: string; target_ids?: string[] }, code: string | null): string {
   const lines = [
     '【BITE ME アフィリエイト】特別キャンペーンのお知らせ',
     '',
@@ -193,7 +202,10 @@ export function campaignMessage(c: { name: string; starts_at: string; ends_at: s
     `成果報酬：${pctText(Number(c.commission_rate))}${c.scope === 'products' ? '（対象商品のみ）' : ''}`,
   ];
   if (code && c.discount_percent != null) {
-    lines.push(`フォロワー専用クーポン：${code}（${c.discount_percent}%OFF・お一人様1回）`);
+    const onlyProducts = c.scope === 'partners' && campaignProductGids(c as Pick<AffCampaign, 'target_ids'>).length > 0;
+    lines.push(`フォロワー専用クーポン：${code}（${onlyProducts ? '対象商品' : ''}${c.discount_percent}%OFF・お一人様1回）`);
+    // 링크로 들어온 LINE 회원은 코드 입력 없이 결제 때 자동 적용된다
+    lines.push('※あなたのリンクから来たLINE会員は、コード入力なしで自動適用されます');
   }
   lines.push('', '詳細・リンクはパートナーページから', 'https://biteme.co.jp/partner');
   return lines.join('\n');
@@ -275,7 +287,7 @@ export interface NotifyResult { sent: number; notFriend: number; failed: number 
 export async function sendCampaignNotifications(sb: SupabaseClient, campaign: AffCampaign): Promise<NotifyResult> {
   const notified: NotifyResult = { sent: 0, notFriend: 0, failed: 0 };
   let q = sb.from('aff_partners').select('*').eq('status', 'active');
-  if (campaign.scope === 'partners') q = q.in('id', campaign.target_ids.map(Number));
+  if (campaign.scope === 'partners') q = q.in('id', campaignPartnerIds(campaign));
   const { data } = await q;
   const partners = (data ?? []) as AffPartner[];
 
@@ -348,6 +360,13 @@ export async function createCampaign(sb: SupabaseClient, input: CampaignInput, c
     if (missing.length > 0) return `상품을 찾지 못함: ${missing.join(', ')}`;
     targetIds = gids;
   }
+  let discountGids: string[] = [];
+  if (input.discountProducts.length > 0) {
+    try { token ??= await getAdminToken(); } catch (e) { return e instanceof Error ? e.message : 'Admin 토큰 실패'; }
+    const { gids, missing } = await resolveProductGids(token, input.discountProducts);
+    if (missing.length > 0) return `할인 상품을 찾지 못함: ${missing.join(', ')}`;
+    discountGids = gids;
+  }
 
   const { data: created, error: cErr } = await sb
     .from('aff_campaigns')
@@ -360,7 +379,8 @@ export async function createCampaign(sb: SupabaseClient, input: CampaignInput, c
       scope: input.scope,
       notify_status: input.notify ? 'pending' : 'none',
       // 지정 파트너는 실제로 활동 중인 사람만 남긴다
-      target_ids: input.scope === 'partners' ? partners.map((p) => String(p.id)) : targetIds,
+      // 할인 상품 gid 는 같은 배열에 — 파트너 id(숫자)와 섞여도 campaignPartnerIds/campaignProductGids 가 가른다
+      target_ids: input.scope === 'partners' ? [...partners.map((p) => String(p.id)), ...discountGids] : targetIds,
       active: true,
       created_by: createdBy,
     })
@@ -383,13 +403,13 @@ export async function createCampaign(sb: SupabaseClient, input: CampaignInput, c
       let code = campaignCodeFor(p.code, input.discountPercent, campaign.id, false);
       let r = await createShopifyCode(token as string, {
         title: `[Affiliate] ${input.name} · ${p.code}`, code, percent: input.discountPercent,
-        startsAt: input.startsAt, endsAt: input.endsAt, usageLimit: input.usageLimit,
+        startsAt: input.startsAt, endsAt: input.endsAt, usageLimit: input.usageLimit, productGids: discountGids,
       });
       if ('error' in r && r.taken) {
         code = campaignCodeFor(p.code, input.discountPercent, campaign.id, true);
         r = await createShopifyCode(token as string, {
           title: `[Affiliate] ${input.name} · ${p.code}`, code, percent: input.discountPercent,
-          startsAt: input.startsAt, endsAt: input.endsAt, usageLimit: input.usageLimit,
+          startsAt: input.startsAt, endsAt: input.endsAt, usageLimit: input.usageLimit, productGids: discountGids,
         });
       }
       if ('error' in r) { codeErrors.push({ partnerCode: p.code, error: r.error }); continue; }

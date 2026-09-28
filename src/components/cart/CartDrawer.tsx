@@ -14,6 +14,7 @@ import {
 import { ShoppingCart, Minus, Plus, Trash2, ExternalLink, Loader2, Gift } from "lucide-react";
 import { useCartStore } from "@/stores/cartStore";
 import { formatPrice, getPreorderDate, fetchCartPreview, CartDiscountInfo } from "@/lib/shopify";
+import { AffiliateOfferNote } from "@/components/affiliate/AffiliateOfferNote";
 import { ThresholdBanner } from "./ThresholdBanner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { safeNavigate } from "@/lib/browser-utils";
@@ -372,6 +373,11 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
                     <p>予約商品を含むご注文は、予約出荷日に合わせて全商品をまとめて発送いたします。通常商品を早急にお受け取り希望の場合は、お手数ですが別途ご購入ください。</p>
                   </div>
                 )}
+                <AffiliateOfferNote
+                  variant="cart"
+                  lines={regularItems.map(i => ({ productId: i.product.node.id, unitPrice: parseFloat(i.price.amount), quantity: i.quantity }))}
+                  currencyCode={currencyCode}
+                />
                 {discountInfo && discountInfo.totalSavings > 0 && (
                   <div className="flex justify-between items-center text-sm bg-red-50 px-3 py-2 rounded-lg">
                     <span className="text-red-600 font-medium">割引合計</span>

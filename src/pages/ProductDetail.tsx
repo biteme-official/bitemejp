@@ -18,6 +18,7 @@ import { useDiscountStore } from "@/stores/discountStore";
 import { ReviewWidget } from "@/components/product/ReviewWidget";
 import { useAuthStore } from "@/stores/authStore";
 import { PartnerProductLink } from "@/components/product/PartnerProductLink";
+import { AffiliateOfferNote } from "@/components/affiliate/AffiliateOfferNote";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CartDrawer } from "@/components/cart/CartDrawer";
@@ -716,6 +717,8 @@ export default function ProductDetail() {
             })()}
           </div>
         </div>
+        {/* 파트너 링크로 들어온 고객: 紹介リンク限定 n%OFF (#178) */}
+        <AffiliateOfferNote variant="product" productId={product.id} unitPrice={parseFloat(price.amount)} currencyCode={price.currencyCode} />
 
         {/* Options Selectors */}
         {product.options.map((option) => {
