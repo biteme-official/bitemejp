@@ -178,6 +178,22 @@ async function updateShopifyCode(
   return errs.length ? errs.map((e) => e.message).join(' / ') : null;
 }
 
+/** 코드에 지금 걸린 할인 상품·사용 상한 — 수정 때 코드마다 실제 값과 비교한다(뺐다 다시 넣은 코드는 캠페인과 어긋나 있을 수 있다) */
+async function readShopifyCode(token: string, gid: string): Promise<{ productGids: string[]; usageLimit: number | null }> {
+  const data = await adminGraphQL<{
+    codeDiscountNode: { codeDiscount: { usageLimit?: number | null; customerGets?: { items?: { products?: { nodes: Array<{ id: string }> } } } } } | null;
+  }>(
+    token,
+    `query($id: ID!) { codeDiscountNode(id: $id) { codeDiscount { ... on DiscountCodeBasic {
+      usageLimit
+      customerGets { items { ... on DiscountProducts { products(first: 250) { nodes { id } } } } }
+    } } } }`,
+    { id: gid }
+  );
+  const d = data.codeDiscountNode?.codeDiscount;
+  return { productGids: d?.customerGets?.items?.products?.nodes.map((n) => n.id) ?? [], usageLimit: d?.usageLimit ?? null };
+}
+
 async function activateShopifyCode(token: string, gid: string): Promise<string | null> {
   const data = await adminGraphQL<{ discountCodeActivate: { userErrors: UserError[] } }>(
     token,
@@ -656,10 +672,9 @@ export async function updateCampaign(sb: SupabaseClient, campaignId: number, bod
   const codes = ((codeRows ?? []) as unknown as CodeRow[]).filter((r) => r.shopify_discount_gid.startsWith('gid://')); // legacy(Collabs) 코드는 우리가 못 고친다
   const partnerCodeOf = (r: CodeRow) => (Array.isArray(r.partner) ? r.partner[0]?.code : r.partner?.code) ?? String(r.partner_id);
   const keepIds = new Set(partners.map((p) => p.id));
-  const oldProducts = campaignProductGids(before);
-  const productsToAdd = discountGids.filter((g) => !oldProducts.includes(g));
-  const productsToRemove = oldProducts.filter((g) => !discountGids.includes(g));
   const tok = token as string;
+  // 새로 넣는 파트너 코드의 상한 — 비워 두면 기존 코드와 같게(없으면 기본값)
+  let limitForNew = input.usageLimit;
   const fail = (r: CodeRow, e: unknown) => result.codeErrors.push({ partnerCode: partnerCodeOf(r), error: typeof e === 'string' ? e : e instanceof Error ? e.message : '실패' });
 
   // 뺀 파트너 — 살아 있는 코드를 끈다
@@ -685,16 +700,21 @@ export async function updateCampaign(sb: SupabaseClient, campaignId: number, bod
       if (err) { fail(r, err); continue; }
       await sb.from('aff_campaign_codes').update({ status: 'active' }).eq('id', r.id);
     }
-    const err = await updateShopifyCode(tok, r.shopify_discount_gid, {
-      title: `[Affiliate] ${input.name} · ${partnerCodeOf(r)}`,
-      percent: input.discountPercent,
-      startsAt: input.startsAt,
-      endsAt: input.endsAt,
-      // 비워 두면 기존 상한 유지 (되살린 코드도 예전 상한 그대로)
-      ...(keepUsageLimit ? {} : { usageLimit: input.usageLimit }),
-      productsToAdd,
-      productsToRemove,
-    }).catch((e) => e);
+    const err = await readShopifyCode(tok, r.shopify_discount_gid)
+      .then((cur) => {
+        if (keepUsageLimit && cur.usageLimit) limitForNew = cur.usageLimit;
+        return updateShopifyCode(tok, r.shopify_discount_gid, {
+          title: `[Affiliate] ${input.name} · ${partnerCodeOf(r)}`,
+          percent: input.discountPercent as number,
+          startsAt: input.startsAt,
+          endsAt: input.endsAt,
+          // 비워 두면 기존 상한 유지 (되살린 코드도 예전 상한 그대로)
+          ...(keepUsageLimit ? {} : { usageLimit: input.usageLimit }),
+          productsToAdd: discountGids.filter((g) => !cur.productGids.includes(g)),
+          productsToRemove: cur.productGids.filter((g) => !discountGids.includes(g)),
+        });
+      })
+      .catch((e) => e);
     if (err) fail(r, err);
     else if (r.status === 'active') result.updatedCodes += 1;
     else result.codes.push({ partnerCode: partnerCodeOf(r), code: r.shopify_code });
@@ -704,7 +724,7 @@ export async function updateCampaign(sb: SupabaseClient, campaignId: number, bod
   const added = partners.filter((p) => !handled.has(p.id));
   if (added.length > 0) {
     const issued = await issuePartnerCodes(sb, tok, campaignId, added, {
-      name: input.name, percent: input.discountPercent, startsAt: input.startsAt, endsAt: input.endsAt, usageLimit: input.usageLimit, productGids: discountGids,
+      name: input.name, percent: input.discountPercent, startsAt: input.startsAt, endsAt: input.endsAt, usageLimit: limitForNew, productGids: discountGids,
     });
     result.codes.push(...issued.codes);
     result.codeErrors.push(...issued.codeErrors);
