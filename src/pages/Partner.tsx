@@ -168,7 +168,7 @@ export default function Partner() {
           </Button>
         </div>
         <p className="text-[11px] leading-relaxed opacity-90">
-          成果対象は <b>LINEログイン後のご注文のみ</b>です。フォロワーには「LINEログインでウェルカムクーポン10%」をご案内ください。
+          成果対象は <b>LINEログイン後のご注文のみ</b>です。ご本人・同居のご家族によるご購入は対象外です。フォロワーには「LINEログインでウェルカムクーポン10%」をご案内ください。
           投稿には <b>#PR</b> 表示が必要です（<button className="underline" onClick={() => navigate("/affiliate/terms#guideline")}>広告表示ガイドライン</button>）。
         </p>
       </section>
