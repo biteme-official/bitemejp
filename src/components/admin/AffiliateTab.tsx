@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -214,10 +214,43 @@ const fromLocalInput = (v: string) => new Date(`${v}:00+09:00`).toISOString();
 
 type Scope = "all" | "partners" | "products";
 
-function CampaignForm({ secret, partners, selected, onDone }: {
+/** 폼 안 파트너 고르기 — 활동 중인 파트너만. 코드·이름·인스타로 찾는다. 아래 파트너 표의 체크와 같은 선택을 공유 */
+function PartnerPicker({ partners, selected, onToggle }: { partners: Partner[]; selected: number[]; onToggle: (id: number) => void }) {
+  const [q, setQ] = useState("");
+  const active = partners.filter((p) => p.status === "active");
+  const needle = q.trim().toLowerCase().replace(/^@/, "");
+  const shown = needle
+    ? active.filter((p) => [p.code, p.name, p.instagram ?? ""].some((v) => v.toLowerCase().includes(needle)))
+    : active;
+  return (
+    <div className="rounded border bg-background">
+      <div className="flex items-center gap-2 border-b px-2 py-1.5">
+        <input className="h-7 flex-1 rounded border bg-background px-2 text-xs" value={q} onChange={(e) => setQ(e.target.value)} placeholder="코드 · 이름 · 인스타로 찾기" />
+        <span className="text-[11px] text-muted-foreground shrink-0">{selected.length}명 선택</span>
+      </div>
+      <ul className="max-h-56 overflow-y-auto divide-y text-xs">
+        {shown.length === 0 && <li className="px-3 py-3 text-muted-foreground">해당하는 활동 파트너가 없습니다.</li>}
+        {shown.map((p) => (
+          <li key={p.id}>
+            <label className={`flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-muted/40 ${selected.includes(p.id) ? "bg-sky-50/60" : ""}`}>
+              <input type="checkbox" checked={selected.includes(p.id)} onChange={() => onToggle(p.id)} />
+              <span className="font-mono w-16 shrink-0">{p.code}</span>
+              <span className="truncate">{p.name || "—"}</span>
+              {p.instagram && <span className="text-muted-foreground truncate">@{p.instagram.replace(/^@/, "")}</span>}
+              <span className="ml-auto shrink-0 text-muted-foreground">이달 클릭 {p.monthClicks}</span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function CampaignForm({ secret, partners, selected, onToggle, onDone }: {
   secret: string;
   partners: Partner[];
   selected: number[];
+  onToggle: (id: number) => void;
   onDone: () => void;
 }) {
   const [form, setForm] = useState(() => {
@@ -240,6 +273,12 @@ function CampaignForm({ secret, partners, selected, onDone }: {
   const [result, setResult] = useState<CreateResult | null>(null);
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
 
+  // 아래 파트너 표에서 체크하면 대상도 「지정 파트너」로 — 예전엔 폼을 새로 만들어서(입력값 초기화) 맞췄다
+  const hasSelection = selected.length > 0;
+  useEffect(() => {
+    if (hasSelection) setForm((f) => (f.scope === "partners" ? f : { ...f, scope: "partners" }));
+  }, [hasSelection]);
+
   const targets = partners.filter((p) => selected.includes(p.id));
   const activeCount = partners.filter((p) => p.status === "active").length;
   const hasDiscount = form.scope === "partners" && form.discount.trim() !== "";
@@ -247,7 +286,7 @@ function CampaignForm({ secret, partners, selected, onDone }: {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setErr(null); setResult(null);
-    if (form.scope === "partners" && targets.length === 0) { setErr("아래 파트너 표에서 대상을 체크하세요."); return; }
+    if (form.scope === "partners" && targets.length === 0) { setErr("대상 파트너를 한 명 이상 체크하세요."); return; }
     const discountProducts = form.discountProducts.split(/[\s,]+/).filter(Boolean);
     if (hasDiscount && discountProducts.length === 0) { setErr("할인 상품 URL 을 하나 이상 넣으세요."); return; }
     const who = form.scope === "all" ? `활동 파트너 전원(${activeCount}명)` : form.scope === "partners" ? targets.map((t) => t.code).join(", ") : "지정 상품";
@@ -303,7 +342,7 @@ function CampaignForm({ secret, partners, selected, onDone }: {
       <div className="flex flex-wrap gap-4 text-xs">
         {([
           ["all", `활동 파트너 전원 (${activeCount}명)`],
-          ["partners", `지정 파트너 — 아래 표에서 체크 (${targets.length}명)`],
+          ["partners", `지정 파트너 (${targets.length}명)`],
           ["products", "지정 상품 — 전원 대상"],
         ] as Array<[Scope, string]>).map(([v, t]) => (
           <label key={v} className="inline-flex items-center gap-1.5">
@@ -312,8 +351,11 @@ function CampaignForm({ secret, partners, selected, onDone }: {
           </label>
         ))}
       </div>
-      {form.scope === "partners" && targets.length > 0 && (
-        <p className="text-[11px] text-muted-foreground">대상: <span className="font-mono">{targets.map((t) => t.code).join(", ")}</span></p>
+      {form.scope === "partners" && (
+        <div className="space-y-1">
+          <PartnerPicker partners={partners} selected={selected} onToggle={onToggle} />
+          {targets.length > 0 && <p className="text-[11px] text-muted-foreground">대상: <span className="font-mono">{targets.map((t) => t.code).join(", ")}</span></p>}
+        </div>
       )}
       {form.scope === "products" && (
         <label className={label}>
@@ -791,7 +833,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
         <CardContent className="space-y-5">
           {showForm && (
             <div className="rounded-lg border bg-muted/30 p-4">
-              <CampaignForm key={selected.join(",")} secret={secret} partners={data.partners} selected={selected} onDone={refresh} />
+              <CampaignForm secret={secret} partners={data.partners} selected={selected} onToggle={toggle} onDone={refresh} />
             </div>
           )}
           <CampaignList secret={secret} campaigns={data.campaigns} onDone={refresh} />
