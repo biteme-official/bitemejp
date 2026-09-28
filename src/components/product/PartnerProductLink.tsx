@@ -217,6 +217,7 @@ export function PartnerProductLink({ productNumericId }: { productNumericId: str
                   {submitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />登録中...</> : "登録してこの商品のリンクを受け取る"}
                 </Button>
                 <p className="text-[11px] text-muted-foreground text-center mt-2">{user?.displayName} さんとして登録します</p>
+                <p className="text-[11px] text-muted-foreground text-center mt-1">ご本人・同居のご家族によるご購入は報酬の対象外です</p>
               </>
             )}
             </>

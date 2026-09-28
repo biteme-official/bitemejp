@@ -153,7 +153,7 @@ function JoinCard() {
         {submitting ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />登録中...</> : "登録して紹介リンクを受け取る"}
       </Button>
       <p className="text-[11px] text-muted-foreground/80 leading-relaxed text-center">
-        成果対象は、お客様がLINEログイン後に行ったご注文のみです。投稿には「#PR」等の広告表示が必要です。
+        成果対象は、お客様がLINEログイン後に行ったご注文のみです。ご本人・同居のご家族によるご購入は報酬の対象外です。投稿には「#PR」等の広告表示が必要です。
       </p>
     </div>
   );
