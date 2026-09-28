@@ -388,7 +388,16 @@ async function handleReevaluate(body: Record<string, unknown>, res: VercelRespon
   return res.status(r.outcome === 'error' ? 500 : 200).json({ ok: r.outcome !== 'error', ...r });
 }
 
+// biteme.co.jp/admin 은 이 API 를 bitemejp-admin.vercel.app 으로 교차 출처 호출한다 — 다른 어드민 API 와 같은 CORS
+const ALLOWED_ORIGINS = ['https://biteme.co.jp', 'https://www.biteme.co.jp', 'http://localhost:5173'];
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const origin = req.headers.origin || '';
+  res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
   if (!authorized(req)) return res.status(401).json({ error: 'Unauthorized' });
 
   try {

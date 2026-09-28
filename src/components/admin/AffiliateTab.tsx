@@ -722,7 +722,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
         어필리에이트 데이터 오류: {error instanceof Error ? error.message : "알 수 없는 오류"}
-        <p className="text-xs mt-1 text-red-600">테이블이 아직 없으면 Supabase 에 마이그레이션 `20260917000000_affiliate_schema.sql` 이 적용됐는지 확인.</p>
+        <p className="text-xs mt-1 text-red-600">Failed to fetch 면 서버에 닿지 못한 것(네트워크·CORS) — 새로고침 후에도 같으면 개발 담당에게 알려주세요.</p>
       </div>
     );
   }
