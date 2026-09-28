@@ -167,12 +167,22 @@ export async function resolveProductGids(token: string, inputs: string[]): Promi
   const gids: string[] = [];
   const missing: string[] = [];
   for (const raw of inputs) {
-    if (/^gid:\/\/shopify\/Product\/\d+$/.test(raw)) { gids.push(raw); continue; }
-    if (/^\d+$/.test(raw)) { gids.push(`gid://shopify/Product/${raw}`); continue; }
     let handle = raw;
     const m = raw.match(/\/products?\/([^/?#]+)/);
     if (m) handle = m[1];
     try { handle = decodeURIComponent(handle); } catch { /* 그대로 */ }
+    // 사이트 상품 URL 은 숫자 id(/product/10150719291705) — 핸들로 찾으면 없다. id 는 실제 있는 상품인지만 확인
+    const idMatch = handle.match(/^(?:gid:\/\/shopify\/Product\/)?(\d+)$/);
+    if (idMatch) {
+      const gid = `gid://shopify/Product/${idMatch[1]}`;
+      const found = await adminGraphQL<{ product: { id: string } | null }>(
+        token,
+        `query($id: ID!) { product(id: $id) { id } }`,
+        { id: gid }
+      );
+      if (found.product?.id) gids.push(found.product.id); else missing.push(raw);
+      continue;
+    }
     const data = await adminGraphQL<{ products: { nodes: Array<{ id: string }> } }>(
       token,
       `query($q: String!) { products(first: 1, query: $q) { nodes { id } } }`,
