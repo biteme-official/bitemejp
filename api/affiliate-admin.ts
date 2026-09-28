@@ -3,6 +3,7 @@
  *
  *  GET  /api/affiliate-admin              파트너 목록(이달·누적 성과, 이달 클릭) + 최근 전환 + 캠페인(전용 코드·성과)
  *  POST action=create_campaign            캠페인 생성 → (할인 있으면) 파트너별 Shopify 전용 코드 → LINE 통지 (Phase 3)
+ *  POST action=update_campaign { campaignId, …create 와 같은 칸 } 진행·예정 캠페인 수정 — 전용 코드 조건 갱신·파트너 추가/제외
  *  POST action=end_campaign { campaignId } 캠페인 종료 + 전용 코드 비활성 (Phase 3)
  *  POST action=delete_campaign { campaignId } 적용 주문 0건인 캠페인 삭제(잘못 만든 것 정리)
  *  POST action=close_month { period }     월 마감 — 확정분·이월분을 파트너별로 묶어 aff_payouts (¥3,000 미만 이월)
@@ -32,7 +33,7 @@ import {
   toOrderForAttribution,
   type AdminOrderNode,
 } from './_affiliate.js';
-import { createCampaign, deleteCampaign, disablePartnerCodes, endCampaign, parseCampaignInput } from './_affiliate-campaign.js';
+import { createCampaign, deleteCampaign, disablePartnerCodes, endCampaign, parseCampaignInput, updateCampaign } from './_affiliate-campaign.js';
 import { closeMonth, currentPeriodJst, dueDateOf, markPaid, MIN_PAYOUT, voidConversion } from './_affiliate-payout.js';
 import { createNotice, deleteNotice, parseNoticeInput, NOTICE_MIN_DAYS } from './_affiliate-notice.js';
 import { detectAnomalies } from './_affiliate-anomaly.js';
@@ -179,6 +180,14 @@ async function handleCreateCampaign(body: Record<string, unknown>, res: VercelRe
   const r = await createCampaign(getSupabase(), input);
   if (typeof r === 'string') return res.status(400).json({ error: r });
   return res.status(201).json({ ok: true, ...r });
+}
+
+async function handleUpdateCampaign(body: Record<string, unknown>, res: VercelResponse) {
+  const id = Number(body.campaignId);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'campaignId 필요' });
+  const r = await updateCampaign(getSupabase(), id, body);
+  if (typeof r === 'string') return res.status(400).json({ error: r });
+  return res.status(200).json({ ok: true, ...r });
 }
 
 async function handleEndCampaign(body: Record<string, unknown>, res: VercelResponse) {
@@ -409,6 +418,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (body.action === 'delete_partner') return await handleDeletePartner(body, res);
       if (body.action === 'reevaluate_order') return await handleReevaluate(body, res);
       if (body.action === 'create_campaign') return await handleCreateCampaign(body, res);
+      if (body.action === 'update_campaign') return await handleUpdateCampaign(body, res);
       if (body.action === 'end_campaign') return await handleEndCampaign(body, res);
       if (body.action === 'delete_campaign') return await handleDeleteCampaign(body, res);
       if (body.action === 'close_month') return await handleCloseMonth(body, res);

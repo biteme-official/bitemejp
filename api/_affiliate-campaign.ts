@@ -149,6 +149,45 @@ async function createShopifyCode(
   return { error: msg, taken };
 }
 
+/** 이미 발급한 전용 코드의 조건을 캠페인 수정에 맞춘다. 코드 문자열(76D436-10OFF)은 그대로 — 파트너가 이미 퍼뜨렸다 */
+async function updateShopifyCode(
+  token: string,
+  gid: string,
+  args: { title: string; percent: number; startsAt: string; endsAt: string; usageLimit?: number; productsToAdd: string[]; productsToRemove: string[] }
+): Promise<string | null> {
+  const items = args.productsToAdd.length > 0 || args.productsToRemove.length > 0
+    ? { items: { products: { productsToAdd: args.productsToAdd, productsToRemove: args.productsToRemove } } }
+    : {};
+  const data = await adminGraphQL<{ discountCodeBasicUpdate: { userErrors: UserError[] } }>(
+    token,
+    `mutation($id: ID!, $d: DiscountCodeBasicInput!) {
+      discountCodeBasicUpdate(id: $id, basicCodeDiscount: $d) { codeDiscountNode { id } userErrors { field message } }
+    }`,
+    {
+      id: gid,
+      d: {
+        title: args.title,
+        startsAt: args.startsAt,
+        endsAt: args.endsAt,
+        ...(args.usageLimit !== undefined ? { usageLimit: args.usageLimit } : {}),
+        customerGets: { value: { percentage: args.percent / 100 }, ...items },
+      },
+    }
+  );
+  const errs = data.discountCodeBasicUpdate.userErrors;
+  return errs.length ? errs.map((e) => e.message).join(' / ') : null;
+}
+
+async function activateShopifyCode(token: string, gid: string): Promise<string | null> {
+  const data = await adminGraphQL<{ discountCodeActivate: { userErrors: UserError[] } }>(
+    token,
+    `mutation($id: ID!) { discountCodeActivate(id: $id) { codeDiscountNode { id } userErrors { field message } } }`,
+    { id: gid }
+  );
+  const errs = data.discountCodeActivate.userErrors;
+  return errs.length ? errs.map((e) => e.message).join(' / ') : null;
+}
+
 async function deactivateShopifyCode(token: string, gid: string): Promise<string | null> {
   const data = await adminGraphQL<{ discountCodeDeactivate: { userErrors: UserError[] } }>(
     token,
@@ -379,6 +418,44 @@ export interface CreateResult {
   notifyPending: boolean;
 }
 
+/** 파트너별 Shopify 전용 코드 발급 + 장부 기록 — 생성·수정(파트너 추가) 공용 */
+async function issuePartnerCodes(
+  sb: SupabaseClient,
+  token: string,
+  campaignId: number,
+  partners: AffPartner[],
+  args: { name: string; percent: number; startsAt: string; endsAt: string; usageLimit: number; productGids: string[] }
+): Promise<{ codes: CreateResult['codes']; codeErrors: CreateResult['codeErrors'] }> {
+  const codes: CreateResult['codes'] = [];
+  const codeErrors: CreateResult['codeErrors'] = [];
+  for (const p of partners) {
+    let code = campaignCodeFor(p.code, args.percent, campaignId, false);
+    let r = await createShopifyCode(token, {
+      title: `[Affiliate] ${args.name} · ${p.code}`, code, percent: args.percent,
+      startsAt: args.startsAt, endsAt: args.endsAt, usageLimit: args.usageLimit, productGids: args.productGids,
+    });
+    if ('error' in r && r.taken) {
+      code = campaignCodeFor(p.code, args.percent, campaignId, true);
+      r = await createShopifyCode(token, {
+        title: `[Affiliate] ${args.name} · ${p.code}`, code, percent: args.percent,
+        startsAt: args.startsAt, endsAt: args.endsAt, usageLimit: args.usageLimit, productGids: args.productGids,
+      });
+    }
+    if ('error' in r) { codeErrors.push({ partnerCode: p.code, error: r.error }); continue; }
+    const { error } = await sb.from('aff_campaign_codes').insert({
+      campaign_id: campaignId, partner_id: p.id, shopify_code: code.toUpperCase(), shopify_discount_gid: r.gid, status: 'active',
+    });
+    if (error) {
+      // 장부에 못 남긴 코드는 귀속이 안 된다 — Shopify 쪽도 바로 끈다
+      await deactivateShopifyCode(token, r.gid).catch(() => null);
+      codeErrors.push({ partnerCode: p.code, error: error.message });
+      continue;
+    }
+    codes.push({ partnerCode: p.code, code: code.toUpperCase() });
+  }
+  return { codes, codeErrors };
+}
+
 export async function createCampaign(sb: SupabaseClient, input: CampaignInput, createdBy = 'admin'): Promise<CreateResult | string> {
   // 대상 파트너 — 지정이면 그 사람들(활동 중만), 전원·상품이면 활동 중 전원(통지 대상)
   let partnersQ = sb.from('aff_partners').select('*').eq('status', 'active');
@@ -435,31 +512,11 @@ export async function createCampaign(sb: SupabaseClient, input: CampaignInput, c
       await sb.from('aff_campaigns').delete().eq('id', campaign.id);
       return e instanceof Error ? e.message : 'Admin 토큰 실패';
     }
-    for (const p of partners) {
-      let code = campaignCodeFor(p.code, input.discountPercent, campaign.id, false);
-      let r = await createShopifyCode(token as string, {
-        title: `[Affiliate] ${input.name} · ${p.code}`, code, percent: input.discountPercent,
-        startsAt: input.startsAt, endsAt: input.endsAt, usageLimit: input.usageLimit, productGids: discountGids,
-      });
-      if ('error' in r && r.taken) {
-        code = campaignCodeFor(p.code, input.discountPercent, campaign.id, true);
-        r = await createShopifyCode(token as string, {
-          title: `[Affiliate] ${input.name} · ${p.code}`, code, percent: input.discountPercent,
-          startsAt: input.startsAt, endsAt: input.endsAt, usageLimit: input.usageLimit, productGids: discountGids,
-        });
-      }
-      if ('error' in r) { codeErrors.push({ partnerCode: p.code, error: r.error }); continue; }
-      const { error } = await sb.from('aff_campaign_codes').insert({
-        campaign_id: campaign.id, partner_id: p.id, shopify_code: code.toUpperCase(), shopify_discount_gid: r.gid, status: 'active',
-      });
-      if (error) {
-        // 장부에 못 남긴 코드는 귀속이 안 된다 — Shopify 쪽도 바로 끈다
-        await deactivateShopifyCode(token as string, r.gid).catch(() => null);
-        codeErrors.push({ partnerCode: p.code, error: error.message });
-        continue;
-      }
-      codes.push({ partnerCode: p.code, code: code.toUpperCase() });
-    }
+    const issued = await issuePartnerCodes(sb, token as string, campaign.id, partners, {
+      name: input.name, percent: input.discountPercent, startsAt: input.startsAt, endsAt: input.endsAt, usageLimit: input.usageLimit, productGids: discountGids,
+    });
+    codes.push(...issued.codes);
+    codeErrors.push(...issued.codeErrors);
     if (codes.length === 0) {
       await sb.from('aff_campaigns').delete().eq('id', campaign.id);
       return `전용 코드를 하나도 만들지 못함 — ${codeErrors.map((e) => e.error).join(' / ')}`;
@@ -514,6 +571,145 @@ export async function endCampaign(sb: SupabaseClient, campaignId: number): Promi
     else deactivated = rows.length;
   }
   return { deactivated, errors };
+}
+
+export interface UpdateResult {
+  campaign: AffCampaign;
+  /** 새로 넣은 파트너에게 발급한 코드 */
+  codes: CreateResult['codes'];
+  /** 조건을 고친 기존 코드 수 */
+  updatedCodes: number;
+  /** 대상에서 뺀 파트너의 코드 — 비활성 */
+  disabledCodes: number;
+  codeErrors: CreateResult['codeErrors'];
+}
+
+/**
+ * 수정 — 진행 중·예정 캠페인만. 대상 종류(전원·지정 파트너·지정 상품)와 할인 유무는 못 바꾼다(새로 만들 것).
+ * 커미션율 변경은 이후 주문부터(이미 장부에 오른 주문은 그때 요율 그대로). LINE 알림은 다시 보내지 않는다.
+ * 전용 코드: 남은 파트너 = Shopify 조건 갱신(코드 문자열은 그대로) · 뺀 파트너 = 비활성 · 넣은 파트너 = 새 발급.
+ * body.usageLimit 이 비어 있으면 기존 코드의 사용 상한은 건드리지 않는다(상한은 Shopify 에만 있다).
+ */
+export async function updateCampaign(sb: SupabaseClient, campaignId: number, body: Record<string, unknown>): Promise<UpdateResult | string> {
+  const { data: camp, error } = await sb.from('aff_campaigns').select('*').eq('id', campaignId).maybeSingle();
+  if (error) return error.message;
+  if (!camp) return '캠페인 없음';
+  const before = camp as AffCampaign & { created_by: string | null };
+  if (before.created_by === 'system') return '시스템 캠페인은 수정할 수 없음';
+  if (!before.active || new Date(before.ends_at).getTime() <= Date.now()) return '끝난 캠페인은 수정할 수 없음';
+
+  const hadDiscount = before.discount_percent != null;
+  const wantsDiscount = !(body.discountPercent === null || body.discountPercent === undefined || body.discountPercent === '');
+  if (hadDiscount !== wantsDiscount) return hadDiscount ? '할인은 뺄 수 없음 — 종료 후 새로 만들 것' : '할인은 나중에 붙일 수 없음 — 새로 만들 것';
+  const keepUsageLimit = body.usageLimit === undefined || body.usageLimit === null || body.usageLimit === '';
+  const input = parseCampaignInput({ ...body, scope: before.scope });
+  if (typeof input === 'string') return input;
+
+  let partners: AffPartner[] = [];
+  if (input.scope === 'partners') {
+    const { data: rows, error: pErr } = await sb.from('aff_partners').select('*').eq('status', 'active').in('id', input.targetIds.map(Number));
+    if (pErr) return pErr.message;
+    partners = (rows ?? []) as AffPartner[];
+    if (partners.length === 0) return '고른 파트너가 모두 정지·탈퇴 상태';
+  }
+
+  let token: string | null = null;
+  let productTargets: string[] = [];
+  if (input.scope === 'products') {
+    try { token = await getAdminToken(); } catch (e) { return e instanceof Error ? e.message : 'Admin 토큰 실패'; }
+    const { gids, missing } = await resolveProductGids(token, input.targetIds);
+    if (missing.length > 0) return `상품을 찾지 못함: ${missing.join(', ')}`;
+    productTargets = gids;
+  }
+  let discountGids: string[] = [];
+  if (input.discountPercent !== null) {
+    try { token ??= await getAdminToken(); } catch (e) { return e instanceof Error ? e.message : 'Admin 토큰 실패'; }
+    const { gids, missing } = await resolveProductGids(token, input.discountProducts);
+    if (missing.length > 0) return `할인 상품을 찾지 못함: ${missing.join(', ')}`;
+    discountGids = gids;
+  }
+
+  const { data: saved, error: uErr } = await sb
+    .from('aff_campaigns')
+    .update({
+      name: input.name,
+      starts_at: input.startsAt,
+      ends_at: input.endsAt,
+      commission_rate: input.commissionRate,
+      discount_percent: input.discountPercent,
+      target_ids: input.scope === 'partners' ? [...partners.map((p) => String(p.id)), ...discountGids] : input.scope === 'products' ? productTargets : [],
+    })
+    .eq('id', campaignId)
+    .select('*')
+    .single();
+  if (uErr || !saved) return uErr?.message ?? '캠페인 저장 실패';
+  const campaign = saved as AffCampaign;
+
+  const result: UpdateResult = { campaign, codes: [], updatedCodes: 0, disabledCodes: 0, codeErrors: [] };
+  if (input.discountPercent === null) return result;
+
+  // 이 캠페인의 코드 전부(비활성 포함) — 뺐다가 다시 넣은 파트너는 새로 만들지 않고 옛 코드를 되살린다(같은 문자열이라 새로 못 만든다)
+  const { data: codeRows } = await sb.from('aff_campaign_codes')
+    .select('id, partner_id, shopify_code, shopify_discount_gid, status, partner:aff_partners(code)')
+    .eq('campaign_id', campaignId);
+  type CodeRow = { id: number; partner_id: number; shopify_code: string; shopify_discount_gid: string; status: string; partner: { code: string } | Array<{ code: string }> | null };
+  const codes = ((codeRows ?? []) as unknown as CodeRow[]).filter((r) => r.shopify_discount_gid.startsWith('gid://')); // legacy(Collabs) 코드는 우리가 못 고친다
+  const partnerCodeOf = (r: CodeRow) => (Array.isArray(r.partner) ? r.partner[0]?.code : r.partner?.code) ?? String(r.partner_id);
+  const keepIds = new Set(partners.map((p) => p.id));
+  const oldProducts = campaignProductGids(before);
+  const productsToAdd = discountGids.filter((g) => !oldProducts.includes(g));
+  const productsToRemove = oldProducts.filter((g) => !discountGids.includes(g));
+  const tok = token as string;
+  const fail = (r: CodeRow, e: unknown) => result.codeErrors.push({ partnerCode: partnerCodeOf(r), error: typeof e === 'string' ? e : e instanceof Error ? e.message : '실패' });
+
+  // 뺀 파트너 — 살아 있는 코드를 끈다
+  for (const r of codes.filter((c) => c.status === 'active' && !keepIds.has(c.partner_id))) {
+    const err = await deactivateShopifyCode(tok, r.shopify_discount_gid).catch((e) => e);
+    if (err) { fail(r, err); continue; }
+    await sb.from('aff_campaign_codes').update({ status: 'disabled' }).eq('id', r.id);
+    result.disabledCodes += 1;
+  }
+
+  // 남은·되돌아온 파트너 — 조건 갱신(되돌아온 사람은 먼저 되살림)
+  const handled = new Set<number>();
+  const byPartner = new Map<number, CodeRow>();
+  for (const r of codes) {
+    if (!keepIds.has(r.partner_id)) continue;
+    const cur = byPartner.get(r.partner_id);
+    if (!cur || (cur.status !== 'active' && r.status === 'active') || (cur.status === r.status && r.id > cur.id)) byPartner.set(r.partner_id, r);
+  }
+  for (const r of byPartner.values()) {
+    handled.add(r.partner_id);
+    if (r.status !== 'active') {
+      const err = await activateShopifyCode(tok, r.shopify_discount_gid).catch((e) => e);
+      if (err) { fail(r, err); continue; }
+      await sb.from('aff_campaign_codes').update({ status: 'active' }).eq('id', r.id);
+    }
+    const err = await updateShopifyCode(tok, r.shopify_discount_gid, {
+      title: `[Affiliate] ${input.name} · ${partnerCodeOf(r)}`,
+      percent: input.discountPercent,
+      startsAt: input.startsAt,
+      endsAt: input.endsAt,
+      // 비워 두면 기존 상한 유지 (되살린 코드도 예전 상한 그대로)
+      ...(keepUsageLimit ? {} : { usageLimit: input.usageLimit }),
+      productsToAdd,
+      productsToRemove,
+    }).catch((e) => e);
+    if (err) fail(r, err);
+    else if (r.status === 'active') result.updatedCodes += 1;
+    else result.codes.push({ partnerCode: partnerCodeOf(r), code: r.shopify_code });
+  }
+
+  // 처음 넣은 파트너 — 새 발급
+  const added = partners.filter((p) => !handled.has(p.id));
+  if (added.length > 0) {
+    const issued = await issuePartnerCodes(sb, tok, campaignId, added, {
+      name: input.name, percent: input.discountPercent, startsAt: input.startsAt, endsAt: input.endsAt, usageLimit: input.usageLimit, productGids: discountGids,
+    });
+    result.codes.push(...issued.codes);
+    result.codeErrors.push(...issued.codeErrors);
+  }
+  return result;
 }
 
 /**
