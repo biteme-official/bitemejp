@@ -2303,6 +2303,10 @@ function PasswordGate({ onAuth }: { onAuth: (s: string) => void }) {
 
 // ─── 메인 대시보드 ────────────────────────────────────────────────────────────
 
+// 이 관리자 화면은 어필리에이트 운영 전용(2026-09-28 하영 결정). 분석 탭 6개는 코드만 두고 숨긴다 —
+// 탭뿐 아니라 GA4·Shopify·인스타 조회도 안 부른다. 다시 켜려면 true 로.
+const SHOW_ANALYTICS = false;
+
 const RANGE_LABELS: Record<Range, string> = { today: "오늘", "7d": "7일", "28d": "28일", "90d": "90일", custom: "기간 지정" };
 
 // 인증된 상태의 대시보드 (secret이 항상 존재하는 상태에서만 렌더됨)
@@ -2310,11 +2314,11 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
   const [range, setRange] = useState<Range>("7d");
   const [customDates, setCustomDates] = useState<DateRange | undefined>();
   const [calOpen, setCalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState(SHOW_ANALYTICS ? "dashboard" : "affiliate");
 
   const customFrom = customDates?.from ? format(customDates.from, "yyyy-MM-dd") : undefined;
   const customTo = customDates?.to ? format(customDates.to, "yyyy-MM-dd") : undefined;
-  const canQuery = range !== "custom" || (!!customFrom && !!customTo);
+  const canQuery = SHOW_ANALYTICS && (range !== "custom" || (!!customFrom && !!customTo));
 
   const retry = (count: number, err: unknown) => {
     if (err instanceof Error && err.message === "UNAUTHORIZED") return false;
@@ -2399,7 +2403,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
   const totalRevenue = shopify?.summary.totalRevenue ?? 0;
   const aov = shopify?.summary.averageOrderValue ?? 0;
   const convRate = sessions > 0 ? ((totalOrders / sessions) * 100).toFixed(2) : "—";
-  const isLoading = ga4Loading || shopifyLoading || (!data && !shopify && !isError && !shopifyIsError);
+  const isLoading = SHOW_ANALYTICS && (ga4Loading || shopifyLoading || (!data && !shopify && !isError && !shopifyIsError));
 
   const timeline = useMemo(() => {
     if (!data || !shopify) return [];
@@ -2413,9 +2417,10 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="font-bold text-sm" style={{ color: BRAND }}>BITEME</span>
-            <span className="text-xs text-muted-foreground">Analytics</span>
+            <span className="text-xs text-muted-foreground">{SHOW_ANALYTICS ? "Analytics" : "Affiliate"}</span>
           </div>
           <div className="flex items-center gap-2">
+            {SHOW_ANALYTICS && (<>
             {/* 프리셋 범위 버튼 */}
             <div className="flex rounded-lg border bg-background overflow-hidden text-xs">
               {(["today", "7d", "28d", "90d"] as Range[]).map((r) => (
@@ -2462,6 +2467,7 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
             </Popover>
 
             <button onClick={() => refetch()} className="text-xs px-3 py-1.5 rounded-lg border hover:bg-muted transition-colors">새로고침</button>
+            </>)}
             <button onClick={onLogout} className="text-xs text-muted-foreground hover:text-foreground transition-colors">로그아웃</button>
           </div>
         </div>
@@ -2489,17 +2495,19 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
         {!isLoading && (
           <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
             <TabsList className="h-9">
+              {SHOW_ANALYTICS && (<>
               <TabsTrigger value="dashboard" className="text-xs px-4">대시보드</TabsTrigger>
               <TabsTrigger value="funnel" className="text-xs px-4">퍼널 분석</TabsTrigger>
               <TabsTrigger value="behavior" className="text-xs px-4">행동 분석</TabsTrigger>
               <TabsTrigger value="utm" className="text-xs px-4">UTM 분석</TabsTrigger>
               <TabsTrigger value="members" className="text-xs px-4">회원 분석</TabsTrigger>
               <TabsTrigger value="weekly" className="text-xs px-4">주간회고</TabsTrigger>
+              </>)}
               <TabsTrigger value="affiliate" className="text-xs px-4">어필리에이트</TabsTrigger>
               <TabsTrigger value="banners" className="text-xs px-4">메인 배너</TabsTrigger>
             </TabsList>
 
-            {!data && !shopify && !["affiliate", "banners"].includes(activeTab) && (
+            {SHOW_ANALYTICS && !data && !shopify && !["affiliate", "banners"].includes(activeTab) && (
               <p className="text-xs text-muted-foreground py-8 text-center">
                 분석 데이터를 못 불러왔습니다. 어필리에이트·메인 배너 탭은 이 상태에서도 쓸 수 있습니다.
               </p>

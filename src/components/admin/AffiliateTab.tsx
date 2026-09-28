@@ -246,6 +246,22 @@ function PartnerPicker({ partners, selected, onToggle }: { partners: Partner[]; 
   );
 }
 
+const emptyCampaignForm = (hasSelection: boolean) => {
+  const now = new Date();
+  return {
+    name: "",
+    startsAt: toLocalInput(now),
+    endsAt: toLocalInput(new Date(now.getTime() + 14 * 86400_000)),
+    scope: (hasSelection ? "partners" : "all") as Scope,
+    products: "",
+    discountProducts: "",
+    commission: "15",
+    discount: "",
+    usageLimit: "100",
+    notify: true,
+  };
+};
+
 function CampaignForm({ secret, partners, selected, onToggle, onDone }: {
   secret: string;
   partners: Partner[];
@@ -253,24 +269,10 @@ function CampaignForm({ secret, partners, selected, onToggle, onDone }: {
   onToggle: (id: number) => void;
   onDone: () => void;
 }) {
-  const [form, setForm] = useState(() => {
-    const now = new Date();
-    return {
-      name: "",
-      startsAt: toLocalInput(now),
-      endsAt: toLocalInput(new Date(now.getTime() + 14 * 86400_000)),
-      scope: (selected.length > 0 ? "partners" : "all") as Scope,
-      products: "",
-      discountProducts: "",
-      commission: "15",
-      discount: "",
-      usageLimit: "100",
-      notify: true,
-    };
-  });
+  const [form, setForm] = useState(() => emptyCampaignForm(selected.length > 0));
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [result, setResult] = useState<CreateResult | null>(null);
+  const [result, setResult] = useState<(CreateResult & { notifyRequested: boolean }) | null>(null);
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   // 아래 파트너 표에서 체크하면 대상도 「지정 파트너」로 — 예전엔 폼을 새로 만들어서(입력값 초기화) 맞췄다
@@ -311,7 +313,9 @@ function CampaignForm({ secret, partners, selected, onToggle, onDone }: {
         usageLimit: Number(form.usageLimit),
         notify: form.notify,
       });
-      setResult(r);
+      // 결과 안내는 남기고 입력칸·파트너 선택은 비운다 — 같은 캠페인을 두 번 만들지 않게
+      setResult({ ...r, notifyRequested: form.notify });
+      setForm(emptyCampaignForm(false));
       onDone();
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "오류 발생");
@@ -407,7 +411,7 @@ function CampaignForm({ secret, partners, selected, onToggle, onDone }: {
           <p className="font-semibold">캠페인을 만들었습니다.</p>
           {result.codes.length > 0 && <p>전용 코드: <span className="font-mono">{result.codes.map((c) => `${c.partnerCode} → ${c.code}`).join(" · ")}</span></p>}
           {result.codeErrors.length > 0 && <p className="text-red-700">코드 실패: {result.codeErrors.map((c) => `${c.partnerCode} (${c.error})`).join(" · ")}</p>}
-          {form.notify && (result.notifyPending
+          {result.notifyRequested && (result.notifyPending
             ? <p>LINE 알림: 야간(21~9시)이라 내일 09:05 에 보냅니다.</p>
             : <p>LINE 알림: 보냄 {result.notified.sent} · 친구 아님 {result.notified.notFriend} · 실패 {result.notified.failed}</p>)}
         </div>
@@ -833,7 +837,7 @@ export default function AffiliateTab({ secret }: { secret: string }) {
         <CardContent className="space-y-5">
           {showForm && (
             <div className="rounded-lg border bg-muted/30 p-4">
-              <CampaignForm secret={secret} partners={data.partners} selected={selected} onToggle={toggle} onDone={refresh} />
+              <CampaignForm secret={secret} partners={data.partners} selected={selected} onToggle={toggle} onDone={() => { setSelected([]); refresh(); }} />
             </div>
           )}
           <CampaignList secret={secret} campaigns={data.campaigns} onDone={refresh} />
