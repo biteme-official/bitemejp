@@ -65,6 +65,7 @@ const App = () => (
         <Sonner closeButton />
         <NoticeBanner />
         <LoginBanner />
+        {/* 🔴 라우트를 추가·변경하면 middleware.ts 의 KNOWN_ROUTES 도 함께 — 없으면 검색로봇에게 404 가 나간다 */}
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/product/:id" element={<ProductDetail />} />
