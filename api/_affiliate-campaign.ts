@@ -11,6 +11,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
+import { alertExhausted, isMonthlyLimitError } from './_line-quota.js';
 import { MANUAL_LINE_ID_PREFIX, campaignPartnerIds, campaignProductGids, type AffCampaign, type AffPartner } from './_affiliate.js';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
@@ -286,7 +287,9 @@ async function pushLine(lineUserId: string, text: string): Promise<'sent' | 'not
   });
   if (res.ok) return 'sent';
   if (res.status === 403) return 'not-friend';
-  console.error('[affiliate-campaign] LINE push', res.status, (await res.text()).slice(0, 200));
+  const body = await res.text();
+  if (isMonthlyLimitError(res.status, body)) await alertExhausted();
+  console.error('[affiliate-campaign] LINE push', res.status, body.slice(0, 200));
   return 'failed';
 }
 
@@ -305,7 +308,12 @@ export async function multicastLine(lineUserIds: string[], text: string): Promis
       body: JSON.stringify({ to: chunk, messages: [{ type: 'text', text }] }),
     });
     if (res.ok) sent += chunk.length;
-    else { failed += chunk.length; console.error('[affiliate-campaign] LINE multicast', res.status, (await res.text()).slice(0, 200)); }
+    else {
+      failed += chunk.length;
+      const body = await res.text();
+      if (isMonthlyLimitError(res.status, body)) await alertExhausted();
+      console.error('[affiliate-campaign] LINE multicast', res.status, body.slice(0, 200));
+    }
   }
   return { sent, failed };
 }

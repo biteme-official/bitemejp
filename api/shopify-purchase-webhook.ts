@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 import { applyCancelWebhook, applyRefundWebhook, recordConversionFromOrder, type OrderForAttribution } from './_affiliate.js';
+import { alertExhausted, isMonthlyLimitError } from './_line-quota.js';
 
 // Vercel 자동 JSON 파싱 비활성화 — HMAC 검증에 raw body 필요
 export const config = { api: { bodyParser: false } };
@@ -298,6 +299,8 @@ async function pushLineMessage(lineUserId: string, text: string): Promise<'sent'
     console.log('[LINE Notify] 친구가 아니어서 발송 생략');
     return 'not-friend';
   }
+  // 월 한도 소진이면 주문 확인·배송 알림이 다음 달까지 전부 막힌다 — 슬랙으로 알린다 (한 달 한 번)
+  if (isMonthlyLimitError(res.status, body)) await alertExhausted();
   console.error(`[LINE Notify] 🔴 push 실패 ${res.status}: ${body.slice(0, 200)}`);
   return 'failed';
 }

@@ -20,6 +20,7 @@ import { createHash } from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 import { CLICK_EVENT } from './line-click.js';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
+import { quotaReserve, quotaStage } from './_line-quota.js';
 const PLACEHOLDER_EMAIL_DOMAIN = '@line-user.biteme.co.jp';
 const SOURCE_TAG_PREFIX = 'line_src:';
 const LINE_ID_TAG_PREFIX = 'line_id:';
@@ -1004,9 +1005,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         console.error('[LINE Campaign] 발송 성과 계산 실패:', err);
         return [];
       });
+      const reserve = quotaReserve();
+      const reach = typeof followers?.targetedReaches === 'number' ? followers.targetedReaches : null;
       return res.status(200).json({
         ok: true,
-        quota,
+        // reserve·stage: 저니·주문 알림 몫과 지금 단계 (`_line-quota.ts`)
+        quota: { ...quota, reserve, stage: quotaStage(quota.remaining, reserve, reach) },
         followers: followers
           ? {
               followers: followers.followers,
@@ -1086,9 +1090,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const quota = await fetchQuota();
-    if (quota.remaining !== null && quota.remaining < recipients.length) {
+    // 테스트가 아닌 대량 발송은 저니·주문 알림 몫(`LINE_QUOTA_RESERVE`)을 건드리지 못한다.
+    // 9월에 한도를 다 써서 주문 확인 알림까지 6일간 멈췄다 (`_line-quota.ts`).
+    const reserve = isTest ? 0 : quotaReserve();
+    if (quota.remaining !== null && quota.remaining - reserve < recipients.length) {
       return res.status(400).json({
-        error: `남은 쿼터가 부족합니다 — 잔여 ${quota.remaining}통 / 대상 ${recipients.length}명`,
+        error: reserve
+          ? `남은 한도가 부족합니다 — 잔여 ${quota.remaining}통 중 주문 알림·저니 몫 ${reserve}통을 빼면 ${Math.max(0, quota.remaining - reserve)}통 / 대상 ${recipients.length}명`
+          : `남은 쿼터가 부족합니다 — 잔여 ${quota.remaining}통 / 대상 ${recipients.length}명`,
       });
     }
 

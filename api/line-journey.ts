@@ -37,6 +37,7 @@ import {
 } from './line-campaign.js';
 import { allowedTarget, signClick } from './line-click.js';
 import { CART_EVENT, type CartLine } from './line-cart.js';
+import { alertExhausted, alertQuota, fetchQuotaStatus, isMonthlyLimitError } from './_line-quota.js';
 
 const CART_RECOVERY = 'cart_recovery';
 const CART_ADD = 'cart_add';
@@ -348,7 +349,7 @@ function buildMessage(c: Candidate, url: string): string {
   ].join('\n');
 }
 
-async function pushLine(userId: string, text: string): Promise<'sent' | 'not-friend' | 'failed'> {
+async function pushLine(userId: string, text: string): Promise<'sent' | 'not-friend' | 'quota' | 'failed'> {
   const res = await fetch('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${lineToken()}` },
@@ -357,7 +358,10 @@ async function pushLine(userId: string, text: string): Promise<'sent' | 'not-fri
   if (res.ok) return 'sent';
   // 403 = 친구가 아니거나 차단. 우리가 고칠 수 있는 게 아니다.
   if (res.status === 403) return 'not-friend';
-  console.error(`[LINE Journey] 🔴 push 실패 ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const body = await res.text();
+  // 월 한도 소진. 이번 달 안에는 몇 번을 다시 보내도 같은 결과다 (2026-09-25~30 실제로 겪음)
+  if (isMonthlyLimitError(res.status, body)) return 'quota';
+  console.error(`[LINE Journey] 🔴 push 실패 ${res.status}: ${body.slice(0, 200)}`);
   return 'failed';
 }
 
@@ -389,6 +393,8 @@ interface RunResult {
   notFriend: number;
   failed: number;
   capped: number;
+  /** LINE 월 한도 소진으로 발송을 멈췄으면 true */
+  quotaExhausted?: boolean;
   excluded: Record<string, number>;
   samples: { text: string; note?: string }[];
 }
@@ -970,6 +976,12 @@ async function deliver(plan: JourneyPlan, now: number, dryRun: boolean): Promise
     if (result === 'sent') {
       base.sent++;
       delivered.push({ userId: c.userId, ref: c.ref });
+    } else if (result === 'quota') {
+      // 나머지도 전부 같은 이유로 거절된다. 기록을 남기지 않으므로 한도가 다시 차면 창 안의 사람은 다시 잡힌다
+      base.quotaExhausted = true;
+      base.failed += targets.length - base.sent - base.notFriend;
+      await alertExhausted(now);
+      break;
     } else if (result === 'not-friend') {
       base.notFriend++;
       // 친구가 아니면 다시 시도해도 같은 결과다. 재시도하지 않도록 기록은 남긴다.
@@ -1038,6 +1050,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: true, skipped: 'LINE_JOURNEY_ENABLED 미설정' });
     }
 
+    // 한도 확인은 조용한 시간에도 매시간 한다 — 밤사이 매니저 발송으로 단계가 바뀌어도 아침 전에 알림이 간다.
+    // 알림은 같은 달·같은 단계에 한 번뿐이다. 조회가 실패하면(null) 막지 않고 그냥 보낸다.
+    const quota = await fetchQuotaStatus(now).catch(() => null);
+    if (!dryRun && quota) await alertQuota(quota, now);
+    if (!dryRun && quota?.stage === 'exhausted') {
+      return res.status(200).json({ ok: true, skipped: 'LINE 월 발송 한도 소진', quota });
+    }
+
     if (!dryRun && inQuietHours(new Date(now))) {
       // 버리지 않는다. 창이 열리는 다음 실행에서 같은 사람이 다시 잡힌다.
       return res.status(200).json({ ok: true, skipped: '조용한 시간 (JST 21~09시)' });
@@ -1100,7 +1120,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     sortByPriority(plans);
 
     for (const plan of plans) {
-      results.push(await deliver(plan, now, dryRun));
+      const r = await deliver(plan, now, dryRun);
+      results.push(r);
+      if (r.quotaExhausted) break; // 남은 저니도 같은 이유로 거절된다
     }
 
     if (!dryRun) {
@@ -1116,6 +1138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       dryRun,
       enabled,
       quietHours: inQuietHours(new Date(now)),
+      quota,
       // 이번 실행의 순서와 그 근거(모수). 순서가 결과를 가르므로 응답에 남긴다.
       order: plans.map((p) => `${p.journey}:${p.candidates.length}`),
       journeys: results,
