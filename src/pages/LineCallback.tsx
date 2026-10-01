@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { handleLineCallback, submitCustomerEmail } from '@/lib/line-auth';
-import { LINE_WELCOME_DISCOUNT_CODE, LINE_WELCOME_DISCOUNT_KEY } from '@/lib/lineWelcomeDiscount';
+import { LINE_WELCOME_DISCOUNT_KEY, LINE_WELCOME_DISCOUNT_LABEL, takeLoginRewardCode } from '@/lib/lineWelcomeDiscount';
 import { useAuthStore } from '@/stores/authStore';
 import { Loader2, CheckCircle2, Mail } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -13,7 +13,9 @@ export default function LineCallback() {
   const login = useAuthStore((state) => state.login);
   const updateEmail = useAuthStore((state) => state.updateEmail);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<{ displayName: string } | null>(null);
+  const [success, setSuccess] = useState<{ displayName: string; insertCoupon?: boolean } | null>(null);
+  // 택배 안내지 QR 로 들어온 로그인인지 — 성공 화면에 쿠폰 안내를 띄운다
+  const [insertCoupon, setInsertCoupon] = useState(false);
 
   // LINE이 이메일을 주지 않은 경우에만 입력 단계를 노출한다.
   // 자리표시자 이메일(@line-user.biteme.co.jp)은 MX 레코드가 없어
@@ -38,8 +40,8 @@ export default function LineCallback() {
   }
 
   function finishWithGreeting(displayName: string) {
-    setSuccess({ displayName });
-    setTimeout(goBack, 2000);
+    setSuccess({ displayName, insertCoupon });
+    setTimeout(goBack, insertCoupon ? 4000 : 2000);
   }
 
   useEffect(() => {
@@ -76,9 +78,11 @@ export default function LineCallback() {
 
         // 로그인 보상 쿠폰을 예약해둔다. 체크아웃 생성 시 자동으로 붙는다
         // (cartStore). 1인 1회 제한은 Shopify 가 강제하므로 여기서 소진 여부를
-        // 따로 추적하지 않는다.
+        // 따로 추적하지 않는다. 택배 안내지 QR 로 왔으면 안내지 전용 코드.
+        const reward = takeLoginRewardCode();
+        setInsertCoupon(reward.fromInsert);
         try {
-          localStorage.setItem(LINE_WELCOME_DISCOUNT_KEY, LINE_WELCOME_DISCOUNT_CODE);
+          localStorage.setItem(LINE_WELCOME_DISCOUNT_KEY, reward.code);
         } catch { /* 저장 실패해도 로그인은 계속된다 */ }
 
         // 인증 수단이 하나라도 있으면 이메일을 등록할 수 있다.
@@ -92,16 +96,17 @@ export default function LineCallback() {
           return;
         }
 
-        setSuccess({ displayName: profile.displayName });
+        setSuccess({ displayName: profile.displayName, insertCoupon: reward.fromInsert });
 
         // Redirect to the page user was on before login
         const returnTo =
           localStorage.getItem('line_login_return_to') || profile.returnTo || '/';
         localStorage.removeItem('line_login_return_to');
 
+        // 안내지 경유면 쿠폰 문구를 읽을 시간을 조금 더 준다
         setTimeout(() => {
           navigate(returnTo, { replace: true });
-        }, 2000);
+        }, reward.fromInsert ? 4000 : 2000);
       })
       .catch((err) => {
         console.error('LINE login error:', err);
@@ -205,6 +210,13 @@ export default function LineCallback() {
           <p className="text-muted-foreground text-sm">
             {success.displayName}さん、ようこそ！
           </p>
+          {success.insertCoupon && (
+            <p className="text-sm font-semibold text-green-700">
+              次回のお買い物{LINE_WELCOME_DISCOUNT_LABEL}クーポンをセットしました。
+              <br />
+              <span className="font-normal text-xs">ご購入手続き時に自動で適用されます。</span>
+            </p>
+          )}
           <p className="text-muted-foreground text-xs">
             元のページに戻ります...
           </p>

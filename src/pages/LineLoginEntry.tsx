@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { initiateLineLogin, type LoginSource } from '@/lib/line-auth';
 import { useAuthStore } from '@/stores/authStore';
-import { LINE_WELCOME_DISCOUNT_LABEL } from '@/lib/lineWelcomeDiscount';
+import { LINE_WELCOME_DISCOUNT_LABEL, markInsertLogin, reserveInsertDiscount } from '@/lib/lineWelcomeDiscount';
 
 /**
  * /line-login — LINE 안에서 곧바로 로그인을 시작하는 진입 경로.
@@ -15,6 +15,9 @@ import { LINE_WELCOME_DISCOUNT_LABEL } from '@/lib/lineWelcomeDiscount';
  * LINE 인앱 브라우저에서는 비밀번호 입력 없이 인증되므로 사실상 한 번 탭으로 끝난다.
  *
  * 예) https://biteme.co.jp/line-login?src=welcome
+ *
+ * 택배 동봉 안내지 QR 은 `?src=insert` — 로그인 보상이 웰컴 코드 대신 안내지 전용 코드가 된다.
+ * 이미 로그인된 사람도 QR 을 찍으면 쿠폰이 예약되고 안내 화면을 본다.
  */
 
 /** api/line-login-state.ts 의 LOGIN_SOURCES 와 같이 움직여야 한다 */
@@ -25,6 +28,7 @@ const ALLOWED_SOURCES: readonly LoginSource[] = [
   'banner',
   'floating',
   'button',
+  'insert',
   'other',
 ];
 
@@ -44,6 +48,8 @@ export default function LineLoginEntry() {
   const navigate = useNavigate();
   const isLoggedIn = useAuthStore((state) => state.isLoggedIn);
   const [failed, setFailed] = useState(false);
+  // 이미 로그인된 상태로 안내지 QR 을 찍은 경우 — 바로 넘기지 않고 쿠폰 안내를 보여준다
+  const [insertReady, setInsertReady] = useState(false);
   // StrictMode 의 이중 마운트로 로그인이 두 번 시작되지 않도록 한 번만 태운다.
   const startedRef = useRef(false);
 
@@ -56,12 +62,34 @@ export default function LineLoginEntry() {
 
     // 이미 로그인된 상태라면 다시 태울 이유가 없다. 바로 목적지로 보낸다.
     if (isLoggedIn) {
+      if (src === 'insert') {
+        reserveInsertDiscount();
+        setInsertReady(true);
+        return;
+      }
       navigate(next, { replace: true });
       return;
     }
 
+    if (src === 'insert') markInsertLogin();
     initiateLineLogin({ returnTo: next, src }).catch(() => setFailed(true));
   }, [isLoggedIn, navigate, next, src]);
+
+  if (insertReady) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <p className="text-lg font-semibold">次回のお買い物{LINE_WELCOME_DISCOUNT_LABEL}クーポンをセットしました</p>
+        <p className="text-sm text-gray-600">ご購入手続き時に自動で適用されます。</p>
+        <button
+          onClick={() => navigate(next, { replace: true })}
+          className="px-6 py-2.5 rounded-md text-white font-medium text-sm transition-colors hover:opacity-90"
+          style={{ backgroundColor: '#06C755' }}
+        >
+          お買い物を続ける
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center">
