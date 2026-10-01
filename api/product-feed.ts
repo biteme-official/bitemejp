@@ -99,7 +99,34 @@ function escapeXml(str: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function buildFeed(products: ProductNode[]): string {
+/**
+ * 자동 할인율 맵 — 상품 화면과 같은 /api/automatic-discounts 를 읽는다.
+ *
+ * 화면은 자동 할인이 걸리면 할인가를 크게 보여주는데 피드에는 정가만 있어서, 세일 때마다
+ * 판매자 센터가 「랜딩 페이지와 가격 불일치」로 볼 수 있었다 → 할인 중이면 g:sale_price 를 함께 싣는다.
+ * 실패하면 빈 맵(정가만) — 피드 자체를 실패시키지 않는다.
+ */
+async function fetchDiscounts(host: string | undefined): Promise<{ productMap: Record<string, number>; allItemsPercentage: number }> {
+  const empty = { productMap: {}, allItemsPercentage: 0 };
+  try {
+    const res = await fetch(`https://${host || 'biteme.co.jp'}/api/automatic-discounts`, { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return empty;
+    const d = await res.json();
+    return { productMap: d?.productMap || {}, allItemsPercentage: d?.allItemsPercentage || 0 };
+  } catch {
+    return empty;
+  }
+}
+
+/** ProductDetail·middleware.ts 와 같은 계산 — 할인액을 먼저 반올림 */
+function discountedPrice(price: number, pct: number): number {
+  return Math.round(price - Math.round((price * pct) / 100));
+}
+
+function buildFeed(
+  products: ProductNode[],
+  discounts: { productMap: Record<string, number>; allItemsPercentage: number },
+): string {
   const items = products
     .map((product) => {
       const variant = product.variants.nodes[0];
@@ -108,7 +135,10 @@ function buildFeed(products: ProductNode[]): string {
       const numericId = product.id.split('/').pop()!;
       const link = `${STORE_URL}/product/${numericId}`;
       const image = product.images.nodes[0]?.url || '';
-      const price = `${Math.round(parseFloat(variant.price.amount))} JPY`;
+      const amount = parseFloat(variant.price.amount);
+      const price = `${Math.round(amount)} JPY`;
+      const pct = Math.max(discounts.productMap[product.id] || 0, discounts.allItemsPercentage);
+      const salePrice = pct > 0 ? `${discountedPrice(amount, pct)} JPY` : null;
       const availability = variant.availableForSale ? 'in stock' : 'out of stock';
       const title = escapeXml(product.title);
       const description = escapeXml((product.description || product.title).slice(0, 5000));
@@ -122,7 +152,8 @@ function buildFeed(products: ProductNode[]): string {
       ${image ? `<g:image_link>${escapeXml(image)}</g:image_link>` : ''}
       <g:condition>new</g:condition>
       <g:availability>${availability}</g:availability>
-      <g:price>${price}</g:price>
+      <g:price>${price}</g:price>${salePrice ? `
+      <g:sale_price>${salePrice}</g:sale_price>` : ''}
       <g:brand>BITE ME</g:brand>
     </item>`;
     })
@@ -144,8 +175,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'GET') return res.status(405).end();
 
   try {
-    const products = await fetchAllProducts();
-    const xml = buildFeed(products);
+    const [products, discounts] = await Promise.all([fetchAllProducts(), fetchDiscounts(req.headers.host)]);
+    const xml = buildFeed(products, discounts);
 
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
     res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=86400');
