@@ -37,13 +37,13 @@ export default function About() {
             </div>
             <div className="flex gap-3 px-4 py-3">
               <span className="text-sm text-muted-foreground w-28 shrink-0">代表者</span>
-              <span className="text-sm">植森 あさみ</span>
+              <span className="text-sm">代表取締役 郭 才銀</span>
             </div>
             <div className="flex gap-3 px-4 py-3 items-start">
               <span className="text-sm text-muted-foreground w-28 shrink-0 flex items-center gap-1">
                 <MapPin className="h-3.5 w-3.5" />所在地
               </span>
-              <span className="text-sm">〒170-0005<br />東京都豊島区南大塚2-38-1</span>
+              <span className="text-sm">〒112-0012<br />東京都文京区大塚六丁目10番6-208号</span>
             </div>
             <div className="flex gap-3 px-4 py-3 items-center">
               <span className="text-sm text-muted-foreground w-28 shrink-0 flex items-center gap-1">
