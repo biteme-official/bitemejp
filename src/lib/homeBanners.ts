@@ -148,6 +148,41 @@ export async function fetchProductForBanner(input: string): Promise<ProductForBa
   };
 }
 
+/** 배지는 이 셋 중 하나(또는 없음). 화면에 그대로 찍히는 글자 */
+export const BADGE_OPTIONS = ["NEW", "SALE", "HOT"] as const;
+
+/** AI 문구 제안 한 안. ko 는 관리자 확인용 한국어 뜻(저장 안 함) */
+export interface BannerCopyOption {
+  badge: string;
+  subtext: string;
+  headline: string;
+  cta: string;
+  ko: string;
+}
+
+/**
+ * 배너 링크가 상품이면(숫자 ID 또는 handle) 상품명·설명 — AI 문구 제안에 넘길 재료. 상품이 아니거나 못 찾으면 null
+ */
+export async function fetchProductContext(link: string | null): Promise<{ title: string; description: string } | null> {
+  if (!link) return null;
+  const m = link.match(/\/product\/([^/?#]+)/);
+  if (!m) return null;
+  const key = decodeURIComponent(m[1]);
+  const byId = /^\d{6,}$/.test(key);
+  try {
+    const data = await storefrontApiRequest(
+      byId
+        ? `query ($id: ID!) { product(id: $id) { title description } }`
+        : `query ($handle: String!) { product(handle: $handle) { title description } }`,
+      byId ? { id: `gid://shopify/Product/${key}` } : { handle: key },
+    );
+    const p = data?.data?.product;
+    return p ? { title: p.title ?? "", description: (p.description ?? "").slice(0, 800) } : null;
+  } catch {
+    return null;
+  }
+}
+
 export function hasText(t: HomeBannerText): boolean {
   return Boolean(t.headline || t.subtext || t.cta || t.badge);
 }
