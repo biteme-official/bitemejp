@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Copy, ImagePlus, Plus, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Copy, ImagePlus, Plus, Search, Sparkles, Trash2, Upload, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,8 @@ import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BannerSlide } from "@/components/home/BannerSlide";
 import {
+  BADGE_OPTIONS,
+  BannerCopyOption,
   DEFAULT_SETTINGS,
   HomeBanner,
   HomeBannersDoc,
@@ -17,6 +19,7 @@ import {
   ProductForBanner,
   emptyBanner,
   fetchHomeBanners,
+  fetchProductContext,
   fetchProductForBanner,
   importFromShopify,
   isHomeBannerLive,
@@ -39,6 +42,9 @@ import { cn } from "@/lib/utils";
  *
  * 「상품 링크로」: 디자이너 배너 없이 상품 링크만 주면 그 상품 이미지들을 보여주고, 고른 한 장을 오른쪽에 놓는다.
  * 상품 썸네일은 위 25~30% 에 제목이 박혀 있어 「위 자르기」(기본 28%)로 잘라낸다 — 미리보기 보며 조절.
+ *
+ * 「AI 문구 제안」(#215): 메모 한 줄 + 링크 상품 정보 + 배너 사진을 보고 일본어 문구 3안(한국어 뜻 포함)을 받는다.
+ * 고르면 배지·부제·헤드라인·CTA 칸이 채워질 뿐 — 저장 전엔 메인에 안 나간다. 배지는 NEW / SALE / HOT 드롭다운.
  */
 const API = "/api/home-banners";
 
@@ -131,6 +137,9 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
   const [product, setProduct] = useState<ProductForBanner | null>(null);
   const [productLoading, setProductLoading] = useState(false);
   const [cleaning, setCleaning] = useState(false);
+  const [aiBrief, setAiBrief] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiOptions, setAiOptions] = useState<BannerCopyOption[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -168,6 +177,8 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
   useEffect(() => {
     setProduct(null);
     setProductInput("");
+    setAiBrief("");
+    setAiOptions([]);
   }, [selectedId]);
 
   const dirty = doc !== null && JSON.stringify(doc) !== savedJson;
@@ -288,6 +299,42 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
     } finally {
       setCleaning(false);
     }
+  };
+
+  /** AI 문구 3안 받기 — 메모·링크 상품·배너 사진을 재료로. 고르기 전엔 칸을 안 건드린다 */
+  const suggestCopy = async () => {
+    if (!selected) return;
+    setAiLoading(true);
+    try {
+      const productCtx = (product && { title: product.title, description: "" }) || (await fetchProductContext(selected.link));
+      const res = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+        body: JSON.stringify({
+          action: "copy",
+          brief: aiBrief || selected.name,
+          product: productCtx,
+          link: selected.link,
+          imageUrl: selected.photo?.url ?? selected.pcImage,
+          current: selected.text,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `실패 (${res.status})`);
+      const options = (json.options ?? []) as BannerCopyOption[];
+      if (options.length === 0) throw new Error("AI 가 문구를 못 만들었습니다 — 메모를 조금 더 적어 주세요");
+      setAiOptions(options);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "AI 문구 제안 실패");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const applyCopy = (o: BannerCopyOption) => {
+    if (!selected) return;
+    updateText(selected.id, { badge: o.badge, subtext: o.subtext, headline: o.headline, cta: o.cta });
+    toast.success("문구를 채웠습니다 — 미리보기 확인 후 저장");
   };
 
   const save = async () => {
@@ -522,10 +569,65 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
 
               {/* 문구 */}
               <div className="space-y-3">
+                {/* AI 문구 제안 */}
+                <div className="rounded-lg border p-3 space-y-2 bg-violet-50/40">
+                  <Label className="text-xs font-semibold flex items-center gap-1"><Wand2 className="h-3.5 w-3.5 text-violet-600" />AI 문구 제안</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      className="h-8 text-xs"
+                      value={aiBrief}
+                      onChange={(e) => setAiBrief(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !aiLoading) suggestCopy(); }}
+                      placeholder="어떤 배너인지 한 줄 (한국어 OK) — 예: 10월 신작 장난감 4종, 첫 구매 10% 할인"
+                    />
+                    <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" disabled={aiLoading} onClick={suggestCopy}>
+                      <Sparkles className="h-3.5 w-3.5 mr-1" />{aiLoading ? "쓰는 중… (15초쯤)" : aiOptions.length ? "다시 받기" : "제안 받기"}
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">메모가 비면 관리용 이름을 씁니다. 링크가 상품이면 상품 설명과 배너 사진도 함께 보고 일본어로 3안을 씁니다.</p>
+                  {aiOptions.length > 0 && (
+                    <div className="space-y-1.5">
+                      {aiOptions.map((o, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => applyCopy(o)}
+                          className="w-full text-left rounded-md border bg-white p-2 hover:border-violet-400 hover:bg-violet-50/60 group"
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className="min-w-0 flex-1 space-y-0.5">
+                              <p className="text-[11px] text-muted-foreground">
+                                {o.badge && <span className="inline-block mr-1 px-1 rounded bg-neutral-900 text-white text-[9px] font-bold">{o.badge}</span>}
+                                {o.subtext}
+                              </p>
+                              <p className="font-semibold whitespace-pre-line leading-snug">{o.headline}</p>
+                              <p className="text-[11px]">{o.cta} →</p>
+                              {o.ko && <p className="text-[11px] text-muted-foreground pt-0.5">🇰🇷 {o.ko}</p>}
+                            </div>
+                            <span className="text-[11px] text-violet-700 shrink-0 flex items-center gap-0.5 opacity-60 group-hover:opacity-100"><Check className="h-3 w-3" />이 문구 쓰기</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <Label className="text-xs">배지 (맨 위 칩)</Label>
-                    <Input className="h-8 text-xs" value={selected.text.badge} onChange={(e) => updateText(selected.id, { badge: e.target.value })} placeholder="NEW" />
+                    <Select value={selected.text.badge || "none"} onValueChange={(v) => updateText(selected.id, { badge: v === "none" ? "" : v })}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none" className="text-xs">없음</SelectItem>
+                        {BADGE_OPTIONS.map((b) => (
+                          <SelectItem key={b} value={b} className="text-xs">{b}</SelectItem>
+                        ))}
+                        {/* 예전에 자유 입력으로 넣은 값(BEST SELLER 등)은 다른 걸 고를 때까지 그대로 보여 둔다 */}
+                        {selected.text.badge && !(BADGE_OPTIONS as readonly string[]).includes(selected.text.badge) && (
+                          <SelectItem value={selected.text.badge} className="text-xs">{selected.text.badge} (예전 값)</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div>
                     <Label className="text-xs">부제 (작은 글씨)</Label>
