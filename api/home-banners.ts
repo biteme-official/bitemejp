@@ -36,7 +36,7 @@ const CLEAN_PROMPT =
   'Fill the removed areas naturally so they match the surrounding background. ' +
   'Keep everything else — the product, the pet, colors, lighting and framing — exactly the same. Output only the edited image.';
 
-const COPY_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-2.5-flash';
+const COPY_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.8-flash';
 /** 배지는 이 셋 중 하나(또는 없음) — 어드민 드롭다운과 같은 목록 */
 const BADGES = ['NEW', 'SALE', 'HOT'] as const;
 
