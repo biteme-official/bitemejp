@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Check, Copy, ImagePlus, Plus, Search, Sparkles, Trash2, Upload, Wand2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Copy, GripVertical, ImagePlus, Plus, Search, Sparkles, Trash2, Upload, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -140,6 +140,9 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
   const [aiBrief, setAiBrief] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiOptions, setAiOptions] = useState<BannerCopyOption[]>([]);
+  /** 목록 드래그(#217) — 끄는 배너와, 놓을 자리(어느 카드의 위/아래) */
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -227,6 +230,24 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
       [next[i], next[j]] = [next[j], next[i]];
       return { ...d, banners: next };
     });
+  };
+  /** 끌어다 놓기 — id 배너를 targetId 카드의 위(after=false)·아래(after=true)로 */
+  const moveTo = (id: string, targetId: string, after: boolean) => {
+    if (id === targetId) return;
+    setDoc((d) => {
+      if (!d) return d;
+      const moving = d.banners.find((b) => b.id === id);
+      if (!moving) return d;
+      const rest = d.banners.filter((b) => b.id !== id);
+      const t = rest.findIndex((b) => b.id === targetId);
+      if (t < 0) return d;
+      rest.splice(after ? t + 1 : t, 0, moving);
+      return { ...d, banners: rest };
+    });
+  };
+  const endDrag = () => {
+    setDragId(null);
+    setDropAt(null);
   };
 
   const onPickImage = async (kind: "pc" | "mobile", file: File | undefined) => {
@@ -402,13 +423,39 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
                 tabIndex={0}
                 onClick={() => setSelectedId(b.id)}
                 onKeyDown={(e) => { if (e.key === "Enter") setSelectedId(b.id); }}
+                draggable
+                onDragStart={(e) => {
+                  setDragId(b.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", b.id); // 파이어폭스는 데이터가 없으면 드래그를 시작 안 함
+                }}
+                onDragOver={(e) => {
+                  if (!dragId) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const after = e.clientY > r.top + r.height / 2;
+                  if (dropAt?.id !== b.id || dropAt.after !== after) setDropAt({ id: b.id, after });
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragId && dropAt) moveTo(dragId, dropAt.id, dropAt.after);
+                  endDrag();
+                }}
+                onDragEnd={endDrag}
                 className={cn(
-                  "rounded-lg border p-2 flex gap-2 items-center cursor-pointer text-xs",
+                  "relative rounded-lg border p-2 flex gap-2 items-center cursor-pointer text-xs",
                   b.id === selectedId ? "border-primary bg-primary/5" : "hover:bg-muted/40",
+                  dragId === b.id && "opacity-40",
                 )}
               >
+                {/* 놓을 자리 표시선 */}
+                {dragId && dragId !== b.id && dropAt?.id === b.id && (
+                  <span className={cn("absolute left-0 right-0 h-0.5 rounded bg-primary pointer-events-none", dropAt.after ? "-bottom-[5px]" : "-top-[5px]")} />
+                )}
+                <GripVertical className="h-3.5 w-3.5 -mx-1 text-muted-foreground/60 cursor-grab flex-shrink-0" aria-hidden />
                 <div className="w-16 h-7 rounded bg-muted overflow-hidden flex-shrink-0" style={{ background: b.bg }}>
-                  {b.photo ? <img src={photoUrl(b.photo, 200)} alt="" className="w-full h-full object-contain" /> : b.pcImage && <img src={b.pcImage} alt="" className="w-full h-full object-cover" />}
+                  {b.photo ? <img src={photoUrl(b.photo, 200)} alt="" draggable={false} className="w-full h-full object-contain" /> : b.pcImage && <img src={b.pcImage} alt="" draggable={false} className="w-full h-full object-cover" />}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{b.name || b.text.headline || "(이름 없음)"}</p>
