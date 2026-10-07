@@ -581,7 +581,7 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
                       placeholder="어떤 배너인지 한 줄 (한국어 OK) — 예: 10월 신작 장난감 4종, 첫 구매 10% 할인"
                     />
                     <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" disabled={aiLoading} onClick={suggestCopy}>
-                      <Sparkles className="h-3.5 w-3.5 mr-1" />{aiLoading ? "쓰는 중…" : aiOptions.length ? "다시 받기" : "제안 받기"}
+                      <Sparkles className="h-3.5 w-3.5 mr-1" />{aiLoading ? "쓰는 중… (15초쯤)" : aiOptions.length ? "다시 받기" : "제안 받기"}
                     </Button>
                   </div>
                   <p className="text-[11px] text-muted-foreground">메모가 비면 관리용 이름을 씁니다. 링크가 상품이면 상품 설명과 배너 사진도 함께 보고 일본어로 3안을 씁니다.</p>
