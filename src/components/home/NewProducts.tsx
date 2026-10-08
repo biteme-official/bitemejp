@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { ShopifyProduct, fetchNewProducts, fetchProductDiscounts } from "@/lib/shopify";
 import { useDiscountStore } from "@/stores/discountStore";
 import { ProductCarousel, ProductCarouselSkeleton } from "./ProductCarousel";
-import { soldOutLast } from "@/lib/productStock";
 
 export function NewProducts() {
   const [products, setProducts] = useState<ShopifyProduct[]>([]);
@@ -12,8 +11,8 @@ export function NewProducts() {
   useEffect(() => {
     fetchNewProducts(12)
       .then((result) => {
-        // 품절은 빼지 않고 뒤로 (#219)
-        const available = soldOutLast(result);
+        // 품절도 빼지 않고 원래 자리에 둔다 (#219)
+        const available = result;
         setProducts(available);
         const reps: { productId: string; variantId: string }[] = [];
         available.forEach(p => {

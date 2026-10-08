@@ -12,7 +12,6 @@ import { ProductOptionDialog } from './ProductOptionDialog';
 import { useTranslation } from '@/hooks/useTranslation';
 import { trackViewItemList, shopifyToGA4Item } from '@/lib/ga4-ecommerce';
 import { track } from '@/lib/track';
-import { soldOutLast } from '@/lib/productStock';
 
 // Product skeleton component
 const ProductSkeleton = () => (
@@ -155,8 +154,8 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
         break;
     }
 
-    // 품절 상품은 숨기지 않고 맨 뒤로 — 상세에서 재입고 알림을 신청할 수 있게 (#219)
-    return soldOutLast(result);
+    // 품절 상품도 숨기지 않고 원래 자리에 둔다 — 상세에서 재입고 알림을 신청할 수 있게 (#219)
+    return result;
   }, [allProducts, sortOption, filters]);
 
   // GA4: view_item_list — fire once per search/collection change
