@@ -18,6 +18,7 @@ import { useDiscountStore } from "@/stores/discountStore";
 import { ReviewWidget } from "@/components/product/ReviewWidget";
 import { useAuthStore } from "@/stores/authStore";
 import { PartnerProductLink } from "@/components/product/PartnerProductLink";
+import { RestockNotifyButton, RESTOCK_PARAM } from "@/components/product/RestockNotifyButton";
 import { AffiliateOfferNote } from "@/components/affiliate/AffiliateOfferNote";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -291,9 +292,12 @@ export default function ProductDetail() {
           });
         }
         if (data?.options) {
-          // 재고 있는 첫 번째 variant의 옵션을 기본값으로, 없으면 첫 번째 옵션값
-          const firstAvailable = data.variants.edges.find(v => isVariantAvailable(v.node))?.node
-            ?? data.variants.edges[0]?.node;
+          // 재고 있는 첫 번째 variant의 옵션을 기본값으로, 없으면 첫 번째 옵션값.
+          // 재입고 알림 신청하러 LINE 로그인 갔다 온 경우(?restock=<옵션id>)엔 그 품절 옵션을 다시 골라 둔다 (#219)
+          const restockId = new URLSearchParams(window.location.search).get(RESTOCK_PARAM);
+          const firstAvailable = (restockId && data.variants.edges.find(v => v.node.id.endsWith(`/${restockId}`))?.node)
+            || data.variants.edges.find(v => isVariantAvailable(v.node))?.node
+            || data.variants.edges[0]?.node;
           const defaults: Record<string, string> = {};
           if (firstAvailable) {
             firstAvailable.selectedOptions.forEach(opt => {
@@ -797,10 +801,10 @@ export default function ProductDetail() {
                       <button
                         key={value}
                         onClick={() => handleOptionChange(option.name, value)}
-                        disabled={!isAvailable}
+                        // 품절 옵션도 고를 수 있다 — 고르면 하단이 「再入荷をLINEで受け取る」가 된다 (#219)
                         className={cn(
                           "flex flex-col items-center gap-1 transition-all",
-                          !isAvailable && "opacity-40 cursor-not-allowed"
+                          !isAvailable && "opacity-40"
                         )}
                         title={value}
                       >
@@ -854,13 +858,13 @@ export default function ProductDetail() {
                         <button
                           key={value}
                           onClick={() => handleOptionChange(option.name, value)}
-                          disabled={!isAvailable}
+                          // 품절 옵션도 고를 수 있다 — 고르면 하단이 「再入荷をLINEで受け取る」가 된다 (#219)
                           className={cn(
                             "min-w-[48px] py-2 px-4 text-sm font-medium transition-all relative",
                             isSelected
                               ? "text-foreground"
                               : "text-muted-foreground hover:text-foreground",
-                            !isAvailable && "line-through opacity-50 cursor-not-allowed"
+                            !isAvailable && "line-through opacity-50"
                           )}
                         >
                           {value}
@@ -1065,22 +1069,33 @@ export default function ProductDetail() {
               )}
             />
           </button>
-          <Button
-            onClick={handleAddToCart}
-            disabled={!isVariantAvailable(selectedVariant)}
-            variant="outline"
-            className="flex-1 h-12 font-semibold border-primary text-primary hover:bg-primary/10"
-          >
-            <ShoppingCart className="h-5 w-5 mr-2" />
-            {isVariantAvailable(selectedVariant) ? t('product.addToCart') : t('product.outOfStock')}
-          </Button>
-          <Button
-            onClick={handleBuyNow}
-            disabled={!isVariantAvailable(selectedVariant) || isBuyingNow}
-            className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 h-12 font-semibold"
-          >
-            {isBuyingNow ? '処理中...' : 'すぐ購入'}
-          </Button>
+          {selectedVariant && !isVariantAvailable(selectedVariant) ? (
+            // 품절 옵션 → 담기·바로구매 대신 재입고 LINE 알림 신청 (#219)
+            <RestockNotifyButton
+              productId={product.id}
+              variantId={selectedVariant.id}
+              variantIds={product.variants.edges.map(v => v.node.id)}
+            />
+          ) : (
+            <>
+            <Button
+              onClick={handleAddToCart}
+              disabled={!isVariantAvailable(selectedVariant)}
+              variant="outline"
+              className="flex-1 h-12 font-semibold border-primary text-primary hover:bg-primary/10"
+            >
+              <ShoppingCart className="h-5 w-5 mr-2" />
+              {isVariantAvailable(selectedVariant) ? t('product.addToCart') : t('product.outOfStock')}
+            </Button>
+            <Button
+              onClick={handleBuyNow}
+              disabled={!isVariantAvailable(selectedVariant) || isBuyingNow}
+              className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 h-12 font-semibold"
+            >
+              {isBuyingNow ? '処理中...' : 'すぐ購入'}
+            </Button>
+            </>
+          )}
         </div>
       </div>
       </div>
