@@ -26,8 +26,20 @@ interface Row {
   sentAt: string | null;
 }
 
+interface SoldOutProduct {
+  productId: string;
+  title: string;
+  titleKo: string | null;
+  titleKoSource: "shopify" | "ai" | null;
+  variantCount: number;
+  soldOut: { id: string; title: string; discontinued: boolean }[];
+}
+
 interface RestockAdminData {
   rows: Row[];
+  /** 지금 품절 옵션이 있는 판매 중 상품 (#225) */
+  soldOut?: SoldOutProduct[];
+  soldOutError?: string | null;
   enabled: boolean;
   ttlDays: number;
 }
@@ -83,6 +95,8 @@ export default function RestockTab({ secret }: { secret: string }) {
     staleTime: 60_000,
   });
   const [filter, setFilter] = useState<Status | "all">("all");
+  const [soldKind, setSoldKind] = useState<"temp" | "ended">("temp");
+  const [soldQuery, setSoldQuery] = useState("");
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const counts = useMemo(() => {
@@ -108,6 +122,30 @@ export default function RestockTab({ secret }: { secret: string }) {
     [rows],
   );
   const shown = filter === "all" ? rows : rows.filter((r) => r.status === filter);
+
+  // 지금 품절 목록 — 일시품절(알림 받음)과 판매 종료(숨김)로 나눠 본다. 대기 인원 많은 상품부터
+  const soldOut = useMemo(() => {
+    const waitingBy = new Map<string, number>();
+    for (const r of rows) if (r.status === "waiting") waitingBy.set(r.variantId, (waitingBy.get(r.variantId) ?? 0) + 1);
+    const pick = (ended: boolean) =>
+      (data?.soldOut ?? [])
+        .map((p) => {
+          const variants = p.soldOut.filter((v) => v.discontinued === ended);
+          const waiting = variants.reduce((n, v) => n + (waitingBy.get(v.id) ?? 0), 0);
+          return { ...p, variants, waiting, all: p.soldOut.length === p.variantCount };
+        })
+        .filter((p) => p.variants.length > 0)
+        .sort((a, b) => b.waiting - a.waiting || Number(b.all) - Number(a.all) || a.title.localeCompare(b.title));
+    return { temp: pick(false), ended: pick(true) };
+  }, [data, rows]);
+  const soldShown = useMemo(() => {
+    const q = soldQuery.trim().toLowerCase();
+    const list = soldOut[soldKind];
+    if (!q) return list;
+    return list.filter((p) =>
+      [p.title, p.titleKo ?? "", ...p.variants.map((v) => v.title)].some((t) => t.toLowerCase().includes(q)),
+    );
+  }, [soldOut, soldKind, soldQuery]);
 
   if (isLoading) return <p className="text-xs text-muted-foreground py-8 text-center">불러오는 중…</p>;
   if (error || !data) {
@@ -150,6 +188,76 @@ export default function RestockTab({ secret }: { secret: string }) {
           </button>
         ))}
       </div>
+
+      <Card>
+        <CardHeader className="pb-2 flex flex-row flex-wrap items-center gap-2 space-y-0">
+          <CardTitle className="text-sm mr-auto">지금 품절 목록</CardTitle>
+          {(["temp", "ended"] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => setSoldKind(k)}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs",
+                soldKind === k ? "bg-foreground text-background border-foreground" : "text-muted-foreground",
+              )}
+            >
+              {k === "temp" ? "일시품절" : "판매 종료"} {soldOut[k].length}
+            </button>
+          ))}
+          <input
+            value={soldQuery}
+            onChange={(e) => setSoldQuery(e.target.value)}
+            placeholder="상품명(일본어·한글)·옵션 검색"
+            className="h-7 w-48 rounded border px-2 text-xs"
+          />
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <p className="mb-2 text-[11px] text-muted-foreground">
+            {soldKind === "temp"
+              ? "목록에 SOLD OUT 으로 보이고 재입고 알림을 받는 옵션 · 재고를 넣으면 다음 정각 30분에 대기 인원에게 알림"
+              : "Shopify 태그 「販売終了」가 붙은 품절 옵션 · 목록에서 숨고 알림을 받지 않음"}
+          </p>
+          {data.soldOutError && <p className="mb-2 text-xs text-red-600">품절 목록을 불러오지 못했습니다: {data.soldOutError}</p>}
+          <table className="w-full text-xs">
+            <thead className="border-b text-muted-foreground">
+              <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
+                <th>상품명 (일본어 · 한글)</th><th>품절 옵션</th><th className="text-right">알림 대기</th>
+              </tr>
+            </thead>
+            <tbody>
+              {soldShown.length === 0 && (
+                <tr><td colSpan={3} className="py-6 text-center text-muted-foreground">해당하는 품절 상품이 없습니다.</td></tr>
+              )}
+              {soldShown.map((p) => (
+                <tr key={p.productId} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
+                  <td className="min-w-[220px]">
+                    <a href={productLink(p.productId)} target="_blank" rel="noopener noreferrer" className="hover:underline">{p.title}</a>
+                    <p className="text-muted-foreground">
+                      {p.titleKo ?? "—"}
+                      {p.titleKoSource === "ai" && <span className="ml-1 rounded bg-muted px-1 text-[10px]">자동 번역</span>}
+                    </p>
+                  </td>
+                  <td className="min-w-[160px]">
+                    {p.all && p.variants.length === p.variantCount ? (
+                      <span className="font-semibold">전체 품절</span>
+                    ) : null}
+                    <div className="flex flex-wrap gap-1 mt-0.5">
+                      {p.variants.filter((v) => v.title).map((v) => (
+                        <span key={v.id} className="rounded bg-muted px-1.5 py-0.5 text-[11px]">{v.title}</span>
+                      ))}
+                    </div>
+                    {p.variantCount > 1 && <p className="text-[10px] text-muted-foreground mt-0.5">옵션 {p.variantCount}개 중 {p.variants.length}개</p>}
+                  </td>
+                  <td className="text-right tabular-nums">{p.waiting > 0 ? <span className="font-semibold">{p.waiting}명</span> : <span className="text-muted-foreground">0</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            한글 상품명은 Shopify 상품 메타필드 <code>custom.name_ko</code> 에 적어 두면 그 값을 쓰고, 없으면 AI 가 번역합니다(「자동 번역」).
+          </p>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2">

@@ -273,6 +273,178 @@ async function pendingSubscriptions(db: Db, now: number): Promise<Subscription[]
   return [...latest.values()].filter((s) => !done.has(s.ref));
 }
 
+// ─── 지금 품절 목록 (#225) ─────────────────────────────────────────────────────
+
+/** 한글 상품명을 직접 적어 두는 Shopify 상품 메타필드. 있으면 AI 번역보다 우선 */
+const NAME_KO_NAMESPACE = 'custom';
+const NAME_KO_KEY = 'name_ko';
+/** AI 로 번역한 한글명 저장(events). 같은 일본어 상품명이면 다시 번역하지 않는다 */
+const NAME_KO_EVENT = 'product_name_ko';
+const TRANSLATE_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.8-flash';
+
+export interface SoldOutProduct {
+  productId: string;
+  title: string;
+  /** 한글 상품명. 메타필드도 번역도 없으면 null */
+  titleKo: string | null;
+  titleKoSource: 'shopify' | 'ai' | null;
+  /** 옵션 전체 개수 — 「3개 중 2개 품절」 */
+  variantCount: number;
+  /** 품절 옵션. discontinued = 판매 종료 태그(목록에서 숨고 알림 안 받음) */
+  soldOut: { id: string; title: string; discontinued: boolean }[];
+}
+
+interface ProductVariantsPage {
+  data?: {
+    productVariants: {
+      pageInfo: { hasNextPage: boolean; endCursor: string | null };
+      nodes: {
+        id: string;
+        title: string;
+        availableForSale: boolean;
+        product: {
+          id: string;
+          title: string;
+          status: string;
+          tags: string[];
+          nameKo: { value: string } | null;
+        };
+      }[];
+    };
+  };
+  errors?: unknown;
+}
+
+/** 판매 중(ACTIVE) 상품 중 품절 옵션이 있는 것. 옵션 단위로 훑어 상품별로 묶는다 */
+async function fetchSoldOutProducts(token: string): Promise<SoldOutProduct[]> {
+  const byProduct = new Map<string, SoldOutProduct & { nameKo: string | null }>();
+  let after: string | null = null;
+  for (let page = 0; page < 40; page++) {
+    const res: ProductVariantsPage | null = await adminGraphQL<ProductVariantsPage>(
+      token,
+      `query($after: String) {
+        productVariants(first: 250, after: $after) {
+          pageInfo { hasNextPage endCursor }
+          nodes {
+            id
+            title
+            availableForSale
+            product {
+              id title status tags
+              nameKo: metafield(namespace: "${NAME_KO_NAMESPACE}", key: "${NAME_KO_KEY}") { value }
+            }
+          }
+        }
+      }`,
+      { after },
+    );
+    const conn: NonNullable<ProductVariantsPage['data']>['productVariants'] | undefined = res?.data?.productVariants;
+    if (!conn) throw new Error(`품절 목록 조회 실패: ${JSON.stringify(res?.errors ?? res).slice(0, 200)}`);
+    for (const v of conn.nodes) {
+      if (v.product.status !== 'ACTIVE') continue;
+      const cur: SoldOutProduct & { nameKo: string | null } = byProduct.get(v.product.id) ?? {
+        productId: v.product.id,
+        title: v.product.title,
+        titleKo: null,
+        titleKoSource: null,
+        nameKo: v.product.nameKo?.value?.trim() || null,
+        variantCount: 0,
+        soldOut: [],
+      };
+      cur.variantCount++;
+      if (!v.availableForSale) {
+        cur.soldOut.push({
+          id: v.id,
+          title: v.title === 'Default Title' ? '' : v.title,
+          discontinued: isVariantDiscontinued(v.product.tags ?? [], v.title),
+        });
+      }
+      byProduct.set(v.product.id, cur);
+    }
+    if (!conn.pageInfo.hasNextPage) break;
+    after = conn.pageInfo.endCursor;
+  }
+  return [...byProduct.values()]
+    .filter((p) => p.soldOut.length > 0)
+    .map(({ nameKo, ...p }) => (nameKo ? { ...p, titleKo: nameKo, titleKoSource: 'shopify' as const } : p));
+}
+
+/** 일본어 상품명 → 한글. 실패하면 빈 Map(목록은 일본어만으로 보여 준다) */
+async function translateTitles(titles: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const key = process.env.GEMINI_API_KEY;
+  if (!key || titles.length === 0) return out;
+  const prompt = `次の日本語の商品名(韓国のペット用品ブランド BITE ME の商品)を、韓国のオンラインストアで使う自然な韓国語の商品名に訳してください。
+- ブランド名・シリーズ名は韓国語の表記(例: BITE ME → 바잇미)
+- 説明を足さず、商品名だけ
+- 入力と同じ順番・同じ件数の配列で返す
+
+${JSON.stringify(titles)}`;
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${TRANSLATE_MODEL}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: { type: 'ARRAY', items: { type: 'STRING' } },
+          temperature: 0.2,
+        },
+      }),
+    });
+    const json = (await res.json()) as { error?: { message?: string }; candidates?: { content?: { parts?: { text?: string }[] } }[] };
+    if (!res.ok) throw new Error(`Gemini ${res.status}: ${json.error?.message ?? 'unknown'}`);
+    const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+    const arr = JSON.parse(text) as unknown;
+    // 순서가 어긋나면 엉뚱한 이름이 붙는다 — 개수가 다르면 통째로 버린다
+    if (!Array.isArray(arr) || arr.length !== titles.length) throw new Error('번역 개수가 맞지 않음');
+    titles.forEach((t, i) => {
+      const ko = typeof arr[i] === 'string' ? oneLine(arr[i] as string).slice(0, 200) : '';
+      if (ko) out.set(t, ko);
+    });
+  } catch (e) {
+    console.error('[LINE Restock] 한글 상품명 번역 실패:', e instanceof Error ? e.message : e);
+  }
+  return out;
+}
+
+/** 메타필드가 없는 상품에 AI 한글명을 붙인다. 번역은 저장해 두고 다음부터 재사용 */
+async function attachKoreanTitles(db: Db, products: SoldOutProduct[]): Promise<void> {
+  const need = products.filter((p) => !p.titleKo);
+  if (need.length === 0) return;
+  const cached = await readAll<{ properties: { title?: string; ko?: string } | null }>(
+    db, NAME_KO_EVENT, 'properties', '2026-01-01T00:00:00Z',
+  ).catch(() => []);
+  const known = new Map<string, string>();
+  for (const r of cached) if (r.properties?.title && r.properties.ko) known.set(r.properties.title, r.properties.ko);
+
+  const missing = [...new Set(need.map((p) => p.title).filter((t) => !known.has(t)))];
+  // 한 번에 너무 많이 보내면 순서가 흐트러지기 쉽다 — 50개씩
+  for (let i = 0; i < missing.length; i += 50) {
+    const got = await translateTitles(missing.slice(i, i + 50));
+    if (got.size === 0) continue;
+    for (const [t, ko] of got) known.set(t, ko);
+    const { error } = await db.from('events').insert(
+      [...got].map(([title, ko]) => ({
+        event_type: NAME_KO_EVENT,
+        session_id: 'system',
+        properties: { title, ko, model: TRANSLATE_MODEL },
+        page_path: '/admin',
+        referrer: null,
+      })),
+    );
+    if (error) console.error('[LINE Restock] 한글 상품명 저장 실패:', error.message);
+  }
+  for (const p of need) {
+    const ko = known.get(p.title);
+    if (ko) {
+      p.titleKo = ko;
+      p.titleKoSource = 'ai';
+    }
+  }
+}
+
 // ─── GET ?view=admin: 어드민 「재입고 알림」 탭 ─────────────────────────────────
 
 export type RestockStatus = 'waiting' | 'ready' | 'sent' | 'not_friend' | 'gone' | 'discontinued';
@@ -386,8 +558,20 @@ async function adminList(req: VercelRequest, res: VercelResponse) {
     })
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
+  // 지금 품절 목록 — 실패해도 신청·발송 목록은 보여 준다
+  let soldOut: SoldOutProduct[] = [];
+  let soldOutError: string | null = null;
+  try {
+    soldOut = await fetchSoldOutProducts(await getAdminToken());
+    await attachKoreanTitles(db, soldOut);
+  } catch (e) {
+    soldOutError = e instanceof Error ? e.message : '품절 목록 조회 실패';
+  }
+
   return res.status(200).json({
     rows: out,
+    soldOut,
+    soldOutError,
     enabled: process.env.LINE_RESTOCK_ENABLED === '1',
     ttlDays: SUB_TTL_DAYS,
   });
