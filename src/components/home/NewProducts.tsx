@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ShopifyProduct, fetchNewProducts, fetchProductDiscounts } from "@/lib/shopify";
 import { useDiscountStore } from "@/stores/discountStore";
 import { ProductCarousel, ProductCarouselSkeleton } from "./ProductCarousel";
+import { soldOutLast } from "@/lib/productStock";
 
 export function NewProducts() {
   const [products, setProducts] = useState<ShopifyProduct[]>([]);
@@ -11,12 +12,8 @@ export function NewProducts() {
   useEffect(() => {
     fetchNewProducts(12)
       .then((result) => {
-        const available = result.filter(p =>
-          p.node.variants.edges.some(e =>
-            e.node.availableForSale &&
-            (e.node.quantityAvailable === null || e.node.quantityAvailable > 0)
-          )
-        );
+        // 품절은 빼지 않고 뒤로 (#219)
+        const available = soldOutLast(result);
         setProducts(available);
         const reps: { productId: string; variantId: string }[] = [];
         available.forEach(p => {

@@ -12,6 +12,7 @@ import { ProductOptionDialog } from './ProductOptionDialog';
 import { useTranslation } from '@/hooks/useTranslation';
 import { trackViewItemList, shopifyToGA4Item } from '@/lib/ga4-ecommerce';
 import { track } from '@/lib/track';
+import { soldOutLast } from '@/lib/productStock';
 
 // Product skeleton component
 const ProductSkeleton = () => (
@@ -124,11 +125,6 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
   const filteredAndSortedProducts = useMemo(() => {
     let result = [...allProducts];
 
-    // 품절 상품 제거
-    result = result.filter(product =>
-      product.node.variants.edges.some(v => v.node.availableForSale)
-    );
-
     // Apply price filter
     result = result.filter(product => {
       const price = parseFloat(product.node.priceRange.minVariantPrice.amount);
@@ -159,7 +155,8 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
         break;
     }
 
-    return result;
+    // 품절 상품은 숨기지 않고 맨 뒤로 — 상세에서 재입고 알림을 신청할 수 있게 (#219)
+    return soldOutLast(result);
   }, [allProducts, sortOption, filters]);
 
   // GA4: view_item_list — fire once per search/collection change
