@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { useAuthStore } from "@/stores/authStore";
 import { initiateLineLogin } from "@/lib/line-auth";
 import { track } from "@/lib/track";
+import { isVariantDiscontinued } from "@/lib/productStock";
 
 /** 로그인 후 돌아왔을 때 자동 신청할 옵션 id (숫자) */
 export const RESTOCK_PARAM = "restock";
@@ -97,6 +98,10 @@ export const useRestockStore = create<RestockStore>()(
             toast.error("ログインの有効期限が切れました。もう一度LINEでログインしてください。");
             return;
           }
+          if (body.error === "discontinued") {
+            toast.error("この商品は販売を終了しました。");
+            return;
+          }
           if (body.error === "in_stock") {
             toast.success("この商品は現在ご購入いただけます。ページを再読み込みしてください。");
             return;
@@ -125,17 +130,18 @@ export const useRestockStore = create<RestockStore>()(
   ),
 );
 
-/** 목록 카드용 — 상품의 품절 옵션을 뽑는다 */
+/** 목록 카드용 — 재입고 알림을 받을 수 있는 품절 옵션을 뽑는다. 판매 종료 옵션은 뺀다 (#223) */
 export function toRestockProduct(node: {
   id: string;
   title: string;
+  tags?: string[];
   variants: { edges: { node: { id: string; title: string; availableForSale: boolean } }[] };
 }): RestockProduct {
   return {
     id: node.id,
     title: node.title,
     soldOutVariants: node.variants.edges
-      .filter((e) => !e.node.availableForSale)
+      .filter((e) => !e.node.availableForSale && !isVariantDiscontinued(node.tags, e.node.title))
       .map((e) => ({ id: e.node.id, title: e.node.title === "Default Title" ? "" : e.node.title })),
   };
 }

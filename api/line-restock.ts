@@ -98,6 +98,26 @@ interface VariantState {
   variantTitle: string;
   /** 지금 팔 수 있는가 — 상품이 판매 중(ACTIVE)이고 옵션이 구매 가능 */
   available: boolean;
+  /** 판매 종료 태그가 붙은 옵션 — 다시 들어오지 않으니 신청을 받지 않는다 (#223) */
+  discontinued: boolean;
+}
+
+/**
+ * 판매 종료 태그 (#223). src/lib/productStock.ts 의 isVariantDiscontinued 와 같은 규칙 — 같이 고칠 것.
+ *   `販売終了` 상품 전체 · `販売終了:<옵션명>` 그 옵션만 · `discontinued`·`단종` 도 같은 뜻
+ */
+const DISCONTINUED_TAGS = ['販売終了', 'discontinued', '단종'];
+const normTitle = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
+
+function isVariantDiscontinued(tags: string[], variantTitle: string): boolean {
+  for (const raw of tags) {
+    const t = raw.trim().toLowerCase();
+    for (const key of DISCONTINUED_TAGS.map((k) => k.toLowerCase())) {
+      if (t === key) return true;
+      if (t.startsWith(`${key}:`) && normTitle(t.slice(key.length + 1)) === normTitle(variantTitle)) return true;
+    }
+  }
+  return false;
 }
 
 interface VariantNodesResponse {
@@ -106,7 +126,7 @@ interface VariantNodesResponse {
       id: string;
       title: string;
       availableForSale: boolean;
-      product: { id: string; title: string; status: string };
+      product: { id: string; title: string; status: string; tags: string[] };
     } | null)[];
   };
   errors?: unknown;
@@ -126,7 +146,7 @@ async function fetchVariantStates(token: string, variantIds: string[]): Promise<
             id
             title
             availableForSale
-            product { id title status }
+            product { id title status tags }
           }
         }
       }`,
@@ -143,6 +163,7 @@ async function fetchVariantStates(token: string, variantIds: string[]): Promise<
         // 옵션이 하나뿐인 상품은 Shopify 가 「Default Title」을 준다 — 문안에 쓰지 않는다
         variantTitle: n.title === 'Default Title' ? '' : n.title,
         available: n.product.status === 'ACTIVE' && n.availableForSale,
+        discontinued: isVariantDiscontinued(n.product.tags ?? [], n.title),
       });
     }
   }
@@ -254,7 +275,7 @@ async function pendingSubscriptions(db: Db, now: number): Promise<Subscription[]
 
 // ─── GET ?view=admin: 어드민 「재입고 알림」 탭 ─────────────────────────────────
 
-export type RestockStatus = 'waiting' | 'ready' | 'sent' | 'not_friend' | 'gone';
+export type RestockStatus = 'waiting' | 'ready' | 'sent' | 'not_friend' | 'gone' | 'discontinued';
 
 export interface RestockAdminRow {
   createdAt: string;
@@ -272,6 +293,7 @@ export interface RestockAdminRow {
    * sent       알림 보냄
    * not_friend 보냈지만 친구가 아니라 닿지 않음
    * gone       옵션이 삭제됨
+   * discontinued 품절인 채로 판매 종료 태그가 붙음 — 알림이 나갈 일 없음 (#223)
    */
   status: RestockStatus;
   sentAt: string | null;
@@ -349,7 +371,7 @@ async function adminList(req: VercelRequest, res: VercelResponse) {
       const state = states.get(p.variantId!);
       const status: RestockStatus = sent
         ? sent.delivery === 'not-friend' ? 'not_friend' : 'sent'
-        : !state ? 'gone' : state.available ? 'ready' : 'waiting';
+        : !state ? 'gone' : state.available ? 'ready' : state.discontinued ? 'discontinued' : 'waiting';
       return {
         createdAt: r.created_at,
         displayName: names.get(userId) ?? null,
@@ -432,6 +454,7 @@ async function subscribe(req: VercelRequest, res: VercelResponse) {
   const state = states.get(variantId);
   if (!state || state.productId !== productId) return res.status(404).json({ error: 'not_found' });
   if (state.available) return res.status(409).json({ error: 'in_stock' });
+  if (state.discontinued) return res.status(409).json({ error: 'discontinued' });
 
   // 이미 신청해 두고 아직 알림을 못 받은 상태면 행을 또 쌓지 않는다
   const pending = await pendingSubscriptions(db, Date.now());

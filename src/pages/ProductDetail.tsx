@@ -20,6 +20,7 @@ import { useAuthStore } from "@/stores/authStore";
 import { PartnerProductLink } from "@/components/product/PartnerProductLink";
 import { RestockNotifyButton } from "@/components/product/RestockNotifyButton";
 import { RESTOCK_PARAM, toRestockProduct } from "@/stores/restockStore";
+import { isVariantDiscontinued } from "@/lib/productStock";
 import { AffiliateOfferNote } from "@/components/affiliate/AffiliateOfferNote";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -1070,8 +1071,13 @@ export default function ProductDetail() {
               )}
             />
           </button>
-          {selectedVariant && !isVariantAvailable(selectedVariant) ? (
-            // 품절 옵션 → 담기·바로구매 대신 재입고 LINE 알림 신청 (#219)
+          {selectedVariant && !isVariantAvailable(selectedVariant) && isVariantDiscontinued(product.tags, selectedVariant.title) ? (
+            // 판매 종료 옵션 → 다시 들어오지 않으니 알림도 받지 않는다 (#223)
+            <Button disabled variant="outline" className="flex-1 h-12 font-semibold">
+              販売終了
+            </Button>
+          ) : selectedVariant && !isVariantAvailable(selectedVariant) ? (
+            // 일시품절 옵션 → 담기·바로구매 대신 재입고 LINE 알림 신청 (#219)
             <RestockNotifyButton product={toRestockProduct(product)} variantId={selectedVariant.id} />
           ) : (
             <>

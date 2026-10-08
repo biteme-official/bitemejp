@@ -14,6 +14,7 @@ import { trackViewItemList, shopifyToGA4Item } from '@/lib/ga4-ecommerce';
 import { track } from '@/lib/track';
 import { RestockCardButton } from '@/components/product/RestockNotifyButton';
 import { toRestockProduct } from '@/stores/restockStore';
+import { isHiddenSoldOut } from '@/lib/productStock';
 
 // Product skeleton component
 const ProductSkeleton = () => (
@@ -156,7 +157,8 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
         break;
     }
 
-    // 품절 상품도 숨기지 않고 원래 자리에 둔다 — 상세에서 재입고 알림을 신청할 수 있게 (#219)
+    // 일시품절은 원래 자리에 두고(재입고 알림, #219), 다 팔린 판매 종료 상품만 뺀다 (#223)
+    result = result.filter(product => !isHiddenSoldOut(product));
     return result;
   }, [allProducts, sortOption, filters]);
 
