@@ -11,12 +11,8 @@ export function NewProducts() {
   useEffect(() => {
     fetchNewProducts(12)
       .then((result) => {
-        const available = result.filter(p =>
-          p.node.variants.edges.some(e =>
-            e.node.availableForSale &&
-            (e.node.quantityAvailable === null || e.node.quantityAvailable > 0)
-          )
-        );
+        // 품절도 빼지 않고 원래 자리에 둔다 (#219)
+        const available = result;
         setProducts(available);
         const reps: { productId: string; variantId: string }[] = [];
         available.forEach(p => {

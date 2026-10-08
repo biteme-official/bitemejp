@@ -7,6 +7,7 @@ import {
 } from "@/lib/shopify";
 import { ProductBadge } from "./ProductCard";
 import { ProductCarousel, ProductCarouselSkeleton } from "./ProductCarousel";
+import { isProductAvailable } from "@/lib/productStock";
 
 /** 메인에 노출할 컬렉션. 배지는 섹션 성격을 한 단어로 — 시안의 BEST/PICK 계열 */
 const CATEGORY_WHITELIST: { handle: string; title: string; badge: ProductBadge }[] = [
@@ -49,11 +50,10 @@ export function CategorySections() {
           .map(({ collection, products, badge }) => ({
             collection,
             badge,
-            products: products.filter(p =>
-              p.node.variants.edges.some(e => e.node.availableForSale)
-            ),
+            // 품절도 빼지 않고 원래 자리에 둔다 (#219). 섹션을 띄울지는 판매 중인 상품 수로 정한다
+            products,
           }))
-          .filter((r) => r.products.length >= 4);
+          .filter((r) => r.products.filter(isProductAvailable).length >= 4);
         setSections(validSections);
         const reps: { productId: string; variantId: string }[] = [];
         const seen = new Set<string>();

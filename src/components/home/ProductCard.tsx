@@ -3,6 +3,8 @@ import { Heart, ShoppingCart } from "lucide-react";
 import { ShopifyProduct, formatPrice, getPreorderDate } from "@/lib/shopify";
 import { useWishlistStore } from "@/stores/wishlistStore";
 import { cn } from "@/lib/utils";
+import { RestockCardButton } from "@/components/product/RestockNotifyButton";
+import { toRestockProduct } from "@/stores/restockStore";
 
 /**
  * 메인 섹션(新商品·人気商品·특집)이 공통으로 쓰는 상품 카드 (#185).
@@ -151,10 +153,12 @@ export function ProductCard({
         </button>
 
         {!isAvailable && (
-          <div className="absolute inset-0 flex items-center justify-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
             <span className="bg-foreground/80 text-background text-[10px] font-bold px-2 py-0.5 rounded">
               Sold Out
             </span>
+            {/* 목록에서 바로 재입고 알림 신청 (#219) */}
+            <RestockCardButton product={toRestockProduct(node)} size="sm" />
           </div>
         )}
       </div>
