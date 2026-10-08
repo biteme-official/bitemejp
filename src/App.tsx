@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
+import { RestockCenter } from "@/components/product/RestockNotifyButton";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -98,6 +99,8 @@ const App = () => (
           <Route path="*" element={<NotFound />} />
         </Routes>
         <LineFloatingButton />
+        {/* 재입고 LINE 알림 — 로그인 후 자동 신청·옵션 선택·친구추가 시트 (#219) */}
+        <RestockCenter />
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

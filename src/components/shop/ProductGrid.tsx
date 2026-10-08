@@ -12,6 +12,8 @@ import { ProductOptionDialog } from './ProductOptionDialog';
 import { useTranslation } from '@/hooks/useTranslation';
 import { trackViewItemList, shopifyToGA4Item } from '@/lib/ga4-ecommerce';
 import { track } from '@/lib/track';
+import { RestockCardButton } from '@/components/product/RestockNotifyButton';
+import { toRestockProduct } from '@/stores/restockStore';
 
 // Product skeleton component
 const ProductSkeleton = () => (
@@ -457,10 +459,12 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                     </button>
                     {/* Sold Out Overlay */}
                     {isCompletelyOutOfStock && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-background/60">
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/60">
                         <span className="bg-foreground text-background px-4 py-2 text-sm font-bold uppercase tracking-wider">
                           Sold Out
                         </span>
+                        {/* 목록에서 바로 재입고 알림 신청 (#219) */}
+                        <RestockCardButton product={toRestockProduct(product.node)} />
                       </div>
                     )}
                     {/* 割引率バッジ */}
