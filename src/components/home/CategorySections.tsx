@@ -7,7 +7,7 @@ import {
 } from "@/lib/shopify";
 import { ProductBadge } from "./ProductCard";
 import { ProductCarousel, ProductCarouselSkeleton } from "./ProductCarousel";
-import { isProductAvailable } from "@/lib/productStock";
+import { isHiddenSoldOut, isProductAvailable } from "@/lib/productStock";
 
 /** 메인에 노출할 컬렉션. 배지는 섹션 성격을 한 단어로 — 시안의 BEST/PICK 계열 */
 const CATEGORY_WHITELIST: { handle: string; title: string; badge: ProductBadge }[] = [
@@ -50,8 +50,8 @@ export function CategorySections() {
           .map(({ collection, products, badge }) => ({
             collection,
             badge,
-            // 품절도 빼지 않고 원래 자리에 둔다 (#219). 섹션을 띄울지는 판매 중인 상품 수로 정한다
-            products,
+            // 일시품절은 원래 자리에 두고(#219) 다 팔린 판매 종료만 뺀다(#223). 섹션을 띄울지는 판매 중인 상품 수로 정한다
+            products: products.filter((p) => !isHiddenSoldOut(p)),
           }))
           .filter((r) => r.products.filter(isProductAvailable).length >= 4);
         setSections(validSections);

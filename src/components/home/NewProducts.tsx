@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ShopifyProduct, fetchNewProducts, fetchProductDiscounts } from "@/lib/shopify";
 import { useDiscountStore } from "@/stores/discountStore";
+import { isHiddenSoldOut } from "@/lib/productStock";
 import { ProductCarousel, ProductCarouselSkeleton } from "./ProductCarousel";
 
 export function NewProducts() {
@@ -11,8 +12,8 @@ export function NewProducts() {
   useEffect(() => {
     fetchNewProducts(12)
       .then((result) => {
-        // 품절도 빼지 않고 원래 자리에 둔다 (#219)
-        const available = result;
+        // 일시품절은 원래 자리에 두고(#219) 다 팔린 판매 종료만 뺀다(#223)
+        const available = result.filter((p) => !isHiddenSoldOut(p));
         setProducts(available);
         const reps: { productId: string; variantId: string }[] = [];
         available.forEach(p => {

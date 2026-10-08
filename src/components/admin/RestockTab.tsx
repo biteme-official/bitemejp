@@ -12,7 +12,7 @@ import { RefreshCw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-type Status = "waiting" | "ready" | "sent" | "not_friend" | "gone";
+type Status = "waiting" | "ready" | "sent" | "not_friend" | "gone" | "discontinued";
 
 interface Row {
   createdAt: string;
@@ -38,6 +38,7 @@ const STATUS: Record<Status, { label: string; className: string }> = {
   sent: { label: "발송 완료", className: "bg-emerald-100 text-emerald-800" },
   not_friend: { label: "친구 아님 · 미도달", className: "bg-red-100 text-red-700" },
   gone: { label: "옵션 삭제됨", className: "bg-muted text-muted-foreground line-through" },
+  discontinued: { label: "판매 종료", className: "bg-muted text-muted-foreground line-through" },
 };
 
 async function fetchRestock(secret: string): Promise<RestockAdminData> {
@@ -85,7 +86,7 @@ export default function RestockTab({ secret }: { secret: string }) {
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const counts = useMemo(() => {
-    const c: Record<Status, number> = { waiting: 0, ready: 0, sent: 0, not_friend: 0, gone: 0 };
+    const c: Record<Status, number> = { waiting: 0, ready: 0, sent: 0, not_friend: 0, gone: 0, discontinued: 0 };
     for (const r of rows) c[r.status]++;
     return c;
   }, [rows]);
@@ -237,6 +238,7 @@ export default function RestockTab({ secret }: { secret: string }) {
       </Card>
 
       <p className="text-[11px] text-muted-foreground">
+        Shopify 상품 태그 「販売終了」(상품 전체) · 「販売終了:옵션명」(그 옵션만)을 달면 판매 종료 — 다 팔리면 목록에서 빠지고 알림 신청을 받지 않습니다 ·{" "}
         최근 {data.ttlDays}일 신청 기준 · 같은 사람이 같은 옵션을 여러 번 누르면 한 건 · 고객 이름은 LINE 공식계정 친구일 때만 보입니다
       </p>
     </div>
