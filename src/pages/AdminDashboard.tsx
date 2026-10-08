@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import AffiliateTab from "@/components/admin/AffiliateTab";
 import HomeBannersTab from "@/components/admin/HomeBannersTab";
+import RestockTab from "@/components/admin/RestockTab";
 
 // Admin API base URL — 별도 Vercel 프로젝트로 분리된 경우 해당 URL, 동일 origin이면 빈 문자열
 const ADMIN_API_BASE = (import.meta.env.VITE_ADMIN_API_BASE_URL as string) ?? '';
@@ -2505,9 +2506,10 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               </>)}
               <TabsTrigger value="affiliate" className="text-xs px-4">어필리에이트</TabsTrigger>
               <TabsTrigger value="banners" className="text-xs px-4">메인 배너</TabsTrigger>
+              <TabsTrigger value="restock" className="text-xs px-4">재입고 알림</TabsTrigger>
             </TabsList>
 
-            {SHOW_ANALYTICS && !data && !shopify && !["affiliate", "banners"].includes(activeTab) && (
+            {SHOW_ANALYTICS && !data && !shopify && !["affiliate", "banners", "restock"].includes(activeTab) && (
               <p className="text-xs text-muted-foreground py-8 text-center">
                 분석 데이터를 못 불러왔습니다. 어필리에이트·메인 배너 탭은 이 상태에서도 쓸 수 있습니다.
               </p>
@@ -2771,6 +2773,11 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
             {/* ══ 메인 배너 탭 ══ */}
             <TabsContent value="banners" className="space-y-5 mt-0">
               {activeTab === "banners" && <HomeBannersTab secret={secret} />}
+            </TabsContent>
+
+            {/* ══ 재입고 알림 탭 (#221) ══ */}
+            <TabsContent value="restock" className="space-y-5 mt-0">
+              {activeTab === "restock" && <RestockTab secret={secret} />}
             </TabsContent>
           </Tabs>
         )}

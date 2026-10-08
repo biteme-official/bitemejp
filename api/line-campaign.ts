@@ -403,6 +403,11 @@ export async function recordSends(
      * 링크가 우리 프론트를 거치지 않는 저니(장바구니 복구)가 여기 해당한다.
      */
     clickTracked?: boolean;
+    /**
+     * 실제로 닿았는지. 친구가 아니어도(403) 재시도를 막으려고 기록은 남기는데, 그 둘을 화면에서
+     * 가르려면 따로 적어야 한다. 없으면 「보냄」으로 읽는다(이 필드가 생기기 전 기록).
+     */
+    delivery?: 'sent' | 'not-friend';
   },
 ): Promise<void> {
   if (userIds.length === 0) return;

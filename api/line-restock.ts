@@ -252,6 +252,125 @@ async function pendingSubscriptions(db: Db, now: number): Promise<Subscription[]
   return [...latest.values()].filter((s) => !done.has(s.ref));
 }
 
+// ─── GET ?view=admin: 어드민 「재입고 알림」 탭 ─────────────────────────────────
+
+export type RestockStatus = 'waiting' | 'ready' | 'sent' | 'not_friend' | 'gone';
+
+export interface RestockAdminRow {
+  createdAt: string;
+  /** LINE 표시 이름. 친구가 아니면 알 수 없어 null */
+  displayName: string | null;
+  /** 끝 6자리만 — 화면에 userId 전체를 띄우지 않는다 */
+  userTail: string;
+  productId: string;
+  variantId: string;
+  productTitle: string;
+  variantTitle: string;
+  /**
+   * waiting    아직 품절
+   * ready      다시 팔리는 중 — 다음 정각 30분 실행에서 나간다
+   * sent       알림 보냄
+   * not_friend 보냈지만 친구가 아니라 닿지 않음
+   * gone       옵션이 삭제됨
+   */
+  status: RestockStatus;
+  sentAt: string | null;
+}
+
+async function lineDisplayName(userId: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://api.line.me/v2/bot/profile/${encodeURIComponent(userId)}`, {
+      headers: { Authorization: `Bearer ${lineToken()}` },
+    });
+    if (!res.ok) return null;
+    return ((await res.json()) as { displayName?: string }).displayName ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function adminList(req: VercelRequest, res: VercelResponse) {
+  // 어드민 전용 — 크론 시크릿으로는 열지 않는다
+  if (!process.env.ADMIN_SECRET || req.headers.authorization !== `Bearer ${process.env.ADMIN_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  const db = supabase();
+  if (!db) return res.status(500).json({ error: 'SUPABASE 미설정' });
+
+  const now = Date.now();
+  const since = new Date(now - SUB_TTL_DAYS * 86_400_000).toISOString();
+  const [subs, sends] = await Promise.all([
+    readAll<{
+      session_id: string;
+      created_at: string;
+      properties: { productId?: string; variantId?: string; productTitle?: string; variantTitle?: string } | null;
+    }>(db, RESTOCK_SUB_EVENT, 'session_id, created_at, properties', since),
+    readAll<{ created_at: string; properties: { journey?: string; ref?: string; delivery?: string } | null }>(
+      db, SEND_EVENT, 'created_at, properties', since,
+    ),
+  ]);
+
+  const sentByRef = new Map<string, { at: string; delivery: string }>();
+  for (const s of sends) {
+    if (s.properties?.journey === JOURNEY && s.properties.ref) {
+      sentByRef.set(s.properties.ref, { at: s.created_at, delivery: s.properties.delivery ?? 'sent' });
+    }
+  }
+
+  // 같은 사람·옵션을 여러 번 누른 건 한 줄 — 발송 쪽과 같은 규칙(가장 최근 신청)
+  const latest = new Map<string, (typeof subs)[number]>();
+  for (const row of subs) {
+    const p = row.properties ?? {};
+    if (!row.session_id.startsWith('line:') || !p.productId || !p.variantId) continue;
+    latest.set(`${row.session_id}|${p.variantId}`, row);
+  }
+  const rows = [...latest.values()];
+
+  // 아직 안 보낸 신청만 지금 재고를 본다
+  const unsent = rows.filter((r) => !sentByRef.has(subRef(r.properties!.variantId!, r.created_at)));
+  const states = unsent.length
+    ? await fetchVariantStates(await getAdminToken(), [...new Set(unsent.map((r) => r.properties!.variantId!))])
+    : new Map<string, VariantState>();
+
+  // 이름은 사람마다 한 번만 묻는다(친구가 아니면 null)
+  const userIds = [...new Set(rows.map((r) => r.session_id.slice(5)))].slice(0, 300);
+  const names = new Map<string, string | null>();
+  for (let i = 0; i < userIds.length; i += 10) {
+    const chunk = userIds.slice(i, i + 10);
+    const got = await Promise.all(chunk.map(lineDisplayName));
+    chunk.forEach((u, k) => names.set(u, got[k]));
+  }
+
+  const out: RestockAdminRow[] = rows
+    .map((r) => {
+      const p = r.properties!;
+      const userId = r.session_id.slice(5);
+      const sent = sentByRef.get(subRef(p.variantId!, r.created_at));
+      const state = states.get(p.variantId!);
+      const status: RestockStatus = sent
+        ? sent.delivery === 'not-friend' ? 'not_friend' : 'sent'
+        : !state ? 'gone' : state.available ? 'ready' : 'waiting';
+      return {
+        createdAt: r.created_at,
+        displayName: names.get(userId) ?? null,
+        userTail: userId.slice(-6),
+        productId: p.productId!,
+        variantId: p.variantId!,
+        productTitle: state?.productTitle ?? p.productTitle ?? '',
+        variantTitle: state?.variantTitle ?? p.variantTitle ?? '',
+        status,
+        sentAt: sent?.at ?? null,
+      };
+    })
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  return res.status(200).json({
+    rows: out,
+    enabled: process.env.LINE_RESTOCK_ENABLED === '1',
+    ttlDays: SUB_TTL_DAYS,
+  });
+}
+
 // ─── 문안 ────────────────────────────────────────────────────────────────────
 
 function productUrl(productId: string): string {
@@ -419,6 +538,7 @@ async function dispatch(req: VercelRequest, res: VercelResponse) {
           ref: s.ref,
           name: '재입고 알림',
           utm: UTM,
+          delivery: r,
         });
       }
     }
@@ -443,6 +563,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (error) {
       console.error('[LINE Restock] 신청 오류:', error);
       return res.status(500).json({ error: 'failed' });
+    }
+  }
+  if (req.method === 'GET' && req.query.view === 'admin') {
+    try {
+      return await adminList(req, res);
+    } catch (error) {
+      console.error('[LINE Restock] 어드민 목록 오류:', error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : 'failed' });
     }
   }
   if (req.method === 'GET') return dispatch(req, res);
