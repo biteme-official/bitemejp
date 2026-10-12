@@ -4,17 +4,22 @@
  * 데이터는 /api/line-restock?view=admin 한 번. 신청(`line_restock_sub`)과 발송(`line_send`)을
  * 서버가 맞춰서, 아직 안 보낸 신청은 지금 재고까지 확인해 상태를 붙여 준다.
  *
- * 발송은 이 화면이 아니라 크론(매시 30분)이 한다. Shopify 에서 재고를 넣으면 다음 30분에 나간다.
+ * 발송은 자동이 아니다 (#227). 재고가 풀린 신청(「재입고됨」)을 이 화면에서 골라 「선택 발송」을 눌러야 나간다.
+ * 누르면 먼저 미리보기(몇 명·어떤 문안)를 받고, 확인을 한 번 더 눌러야 실제로 보낸다.
  */
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Send } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 
 type Status = "waiting" | "ready" | "sent" | "not_friend" | "gone" | "discontinued";
 
 interface Row {
+  /** 신청 키 — 골라 보낼 때 서버에 돌려준다 */
+  ref: string;
   createdAt: string;
   displayName: string | null;
   userTail: string;
@@ -41,12 +46,33 @@ interface RestockAdminData {
   soldOut?: SoldOutProduct[];
   soldOutError?: string | null;
   enabled: boolean;
+  /** 지금 JST 21~09시인가 — 막지는 않고 경고만 */
+  quietHours?: boolean;
+  maxPerSend?: number;
   ttlDays: number;
+}
+
+/** POST ?action=send 응답 — dryRun 이면 미리보기, 아니면 결과 */
+interface SendResult {
+  ok: boolean;
+  error?: string;
+  dryRun: boolean;
+  quietHours: boolean;
+  selected: number;
+  notPending: number;
+  missing: number;
+  notAvailable: number;
+  ready: number;
+  willSend: number;
+  sent: number;
+  notFriend: number;
+  failed: number;
+  samples: string[];
 }
 
 const STATUS: Record<Status, { label: string; className: string }> = {
   waiting: { label: "품절 중", className: "bg-muted text-muted-foreground" },
-  ready: { label: "재입고됨 · 발송 대기", className: "bg-amber-100 text-amber-800" },
+  ready: { label: "재입고됨 · 보내기 전", className: "bg-amber-100 text-amber-800" },
   sent: { label: "발송 완료", className: "bg-emerald-100 text-emerald-800" },
   not_friend: { label: "친구 아님 · 미도달", className: "bg-red-100 text-red-700" },
   gone: { label: "옵션 삭제됨", className: "bg-muted text-muted-foreground line-through" },
@@ -57,6 +83,27 @@ async function fetchRestock(secret: string): Promise<RestockAdminData> {
   const res = await fetch("/api/line-restock?view=admin", { headers: { Authorization: `Bearer ${secret}` } });
   if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 120)}`);
   return res.json();
+}
+
+async function postSend(secret: string, refs: string[], dryRun: boolean): Promise<SendResult> {
+  const res = await fetch("/api/line-restock?action=send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+    body: JSON.stringify({ refs, dryRun }),
+  });
+  const json = (await res.json().catch(() => ({}))) as Partial<SendResult>;
+  if (!res.ok || json.ok === false) throw new Error(json.error ?? `${res.status}`);
+  return json as SendResult;
+}
+
+/** 고른 것 중 보내지 않는 것들 — 「3건은 그새 다시 품절」 */
+function skippedNote(r: SendResult): string {
+  const parts = [
+    r.notAvailable > 0 && `다시 품절 ${r.notAvailable}건`,
+    r.notPending > 0 && `이미 발송·목록에 없음 ${r.notPending}건`,
+    r.missing > 0 && `옵션 삭제 ${r.missing}건`,
+  ].filter(Boolean);
+  return parts.length ? `제외: ${parts.join(" · ")}` : "";
 }
 
 /** JST 기준 「10/08 14:30」 */
@@ -97,6 +144,11 @@ export default function RestockTab({ secret }: { secret: string }) {
   const [filter, setFilter] = useState<Status | "all">("all");
   const [soldKind, setSoldKind] = useState<"temp" | "ended">("temp");
   const [soldQuery, setSoldQuery] = useState("");
+  // 수동 발송 (#227) — 고른 신청 → 미리보기(preview) → 확정
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [preview, setPreview] = useState<SendResult | null>(null);
+  const [busy, setBusy] = useState<"preview" | "send" | null>(null);
+  const [sendMsg, setSendMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const counts = useMemo(() => {
@@ -122,6 +174,67 @@ export default function RestockTab({ secret }: { secret: string }) {
     [rows],
   );
   const shown = filter === "all" ? rows : rows.filter((r) => r.status === filter);
+
+  // 고를 수 있는 건 「재입고됨」뿐. 목록이 새로 오면 더는 보낼 수 없게 된 선택은 지운다
+  const readyRefs = useMemo(() => rows.filter((r) => r.status === "ready").map((r) => r.ref), [rows]);
+  const picked = useMemo(() => readyRefs.filter((ref) => selected.has(ref)), [readyRefs, selected]);
+  const shownReady = shown.filter((r) => r.status === "ready");
+  const allShownPicked = shownReady.length > 0 && shownReady.every((r) => selected.has(r.ref));
+
+  const toggle = (ref: string, on: boolean) => {
+    setPreview(null);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(ref);
+      else next.delete(ref);
+      return next;
+    });
+  };
+  const toggleShown = (on: boolean) => {
+    setPreview(null);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const r of shownReady) {
+        if (on) next.add(r.ref);
+        else next.delete(r.ref);
+      }
+      return next;
+    });
+  };
+
+  const askPreview = async () => {
+    setBusy("preview");
+    setSendMsg(null);
+    try {
+      setPreview(await postSend(secret, picked, true));
+    } catch (e) {
+      setSendMsg({ ok: false, text: `미리보기 실패: ${e instanceof Error ? e.message : ""}` });
+    } finally {
+      setBusy(null);
+    }
+  };
+  const confirmSend = async () => {
+    setBusy("send");
+    try {
+      const r = await postSend(secret, picked, false);
+      const note = skippedNote(r);
+      setSendMsg({
+        ok: r.failed === 0,
+        text:
+          `${r.sent}명에게 보냈습니다` +
+          (r.notFriend ? ` · 친구 아님 ${r.notFriend}명(미도달)` : "") +
+          (r.failed ? ` · 실패 ${r.failed}명 — 다시 골라 보내 주세요` : "") +
+          (note ? ` · ${note}` : ""),
+      });
+      setSelected(new Set());
+      setPreview(null);
+      refetch();
+    } catch (e) {
+      setSendMsg({ ok: false, text: `발송 실패: ${e instanceof Error ? e.message : ""}` });
+    } finally {
+      setBusy(null);
+    }
+  };
 
   // 지금 품절 목록 — 일시품절(알림 받음)과 판매 종료(숨김)로 나눠 본다. 대기 인원 많은 상품부터
   const soldOut = useMemo(() => {
@@ -165,8 +278,8 @@ export default function RestockTab({ secret }: { secret: string }) {
           data.enabled ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-800",
         )}
       >
-        <span className="font-semibold">{data.enabled ? "● 자동 발송 켜짐" : "○ 자동 발송 꺼짐 — LINE_RESTOCK_ENABLED 미설정"}</span>
-        <span>Shopify 에서 재고를 넣으면 매시 30분에 신청자에게 LINE 이 나갑니다 (21~09시는 다음 날 아침)</span>
+        <span className="font-semibold">{data.enabled ? "● 수동 발송" : "○ 발송 꺼짐 — LINE_RESTOCK_ENABLED 미설정 (미리보기만)"}</span>
+        <span>자동으로 나가지 않습니다 — 재고를 넣으면 「재입고됨」으로 바뀌고, 아래 신청 목록에서 골라 보내야 LINE 이 나갑니다</span>
         <button
           onClick={() => refetch()}
           className="ml-auto inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
@@ -214,7 +327,7 @@ export default function RestockTab({ secret }: { secret: string }) {
         <CardContent className="overflow-x-auto">
           <p className="mb-2 text-[11px] text-muted-foreground">
             {soldKind === "temp"
-              ? "목록에 SOLD OUT 으로 보이고 재입고 알림을 받는 옵션 · 재고를 넣으면 다음 정각 30분에 대기 인원에게 알림"
+              ? "목록에 SOLD OUT 으로 보이고 재입고 알림을 받는 옵션 · 재고를 넣은 뒤 신청 목록에서 골라 보내면 대기 인원에게 알림"
               : "Shopify 태그 「販売終了」가 붙은 품절 옵션 · 목록에서 숨고 알림을 받지 않음"}
           </p>
           {data.soldOutError && <p className="mb-2 text-xs text-red-600">품절 목록을 불러오지 못했습니다: {data.soldOutError}</p>}
@@ -287,24 +400,85 @@ export default function RestockTab({ secret }: { secret: string }) {
       </Card>
 
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">
+        <CardHeader className="pb-2 flex flex-row flex-wrap items-center gap-2 space-y-0">
+          <CardTitle className="text-sm mr-auto">
             신청 목록 <span className="font-normal text-muted-foreground">({shown.length}건{filter !== "all" && ` · ${STATUS[filter].label}`})</span>
           </CardTitle>
+          {readyRefs.length > 0 && filter !== "ready" && (
+            <button onClick={() => setFilter("ready")} className="text-xs text-muted-foreground hover:text-foreground underline">
+              재입고됨만 보기 ({readyRefs.length})
+            </button>
+          )}
+          <Button size="sm" disabled={picked.length === 0 || busy !== null} onClick={askPreview}>
+            <Send className="h-3.5 w-3.5 mr-1" />
+            {busy === "preview" ? "확인 중…" : `선택 ${picked.length}건 보내기`}
+          </Button>
         </CardHeader>
         <CardContent className="overflow-x-auto">
+          {preview && (
+            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 space-y-2">
+              {preview.willSend === 0 ? (
+                <p className="font-semibold">보낼 사람이 없습니다. {skippedNote(preview)}</p>
+              ) : (
+                <>
+                  <p className="font-semibold">
+                    {preview.willSend}명에게 LINE 을 보냅니다 (신청 {preview.ready}건{preview.ready > preview.willSend && " — 한 사람의 여러 옵션은 한 통으로 묶음"})
+                  </p>
+                  {skippedNote(preview) && <p>{skippedNote(preview)}</p>}
+                  {preview.quietHours && <p className="text-red-700 font-semibold">지금은 일본 시간 21~09시입니다 — 고객에게 밤·새벽에 도착합니다.</p>}
+                  {!data.enabled && <p className="text-red-700 font-semibold">LINE_RESTOCK_ENABLED 가 꺼져 있어 보낼 수 없습니다.</p>}
+                  {preview.samples[0] && (
+                    <pre className="whitespace-pre-wrap rounded border bg-white p-2 text-[11px] text-foreground font-sans">{preview.samples[0]}</pre>
+                  )}
+                </>
+              )}
+              <div className="flex gap-2">
+                {preview.willSend > 0 && (
+                  <Button size="sm" disabled={busy !== null || !data.enabled} onClick={confirmSend}>
+                    {busy === "send" ? "보내는 중…" : `${preview.willSend}명에게 보내기`}
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" disabled={busy === "send"} onClick={() => setPreview(null)}>
+                  취소
+                </Button>
+              </div>
+            </div>
+          )}
+          {sendMsg && (
+            <p className={cn("mb-3 rounded px-3 py-2 text-xs", sendMsg.ok ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700")}>
+              {sendMsg.text}
+            </p>
+          )}
           <table className="w-full text-xs">
             <thead className="border-b text-muted-foreground">
               <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th]:text-left">
+                <th className="w-6">
+                  <Checkbox
+                    aria-label="보이는 재입고됨 신청 전체 선택"
+                    disabled={shownReady.length === 0 || busy === "send"}
+                    checked={allShownPicked}
+                    onCheckedChange={(v) => toggleShown(v === true)}
+                  />
+                </th>
                 <th>신청 (JST)</th><th>고객</th><th>상품 · 옵션</th><th>상태</th>
               </tr>
             </thead>
             <tbody>
               {shown.length === 0 && (
-                <tr><td colSpan={4} className="py-6 text-center text-muted-foreground">신청이 없습니다.</td></tr>
+                <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">신청이 없습니다.</td></tr>
               )}
               {shown.map((r) => (
                 <tr key={`${r.userTail}|${r.variantId}|${r.createdAt}`} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
+                  <td>
+                    {r.status === "ready" && (
+                      <Checkbox
+                        aria-label="이 신청 선택"
+                        disabled={busy === "send"}
+                        checked={selected.has(r.ref)}
+                        onCheckedChange={(v) => toggle(r.ref, v === true)}
+                      />
+                    )}
+                  </td>
                   <td className="whitespace-nowrap tabular-nums">{jst(r.createdAt)}</td>
                   <td><Customer r={r} /></td>
                   <td><Product r={r} /></td>
@@ -347,7 +521,8 @@ export default function RestockTab({ secret }: { secret: string }) {
 
       <p className="text-[11px] text-muted-foreground">
         Shopify 상품 태그 「販売終了」(상품 전체) · 「販売終了:옵션명」(그 옵션만)을 달면 판매 종료 — 다 팔리면 목록에서 빠지고 알림 신청을 받지 않습니다 ·{" "}
-        최근 {data.ttlDays}일 신청 기준 · 같은 사람이 같은 옵션을 여러 번 누르면 한 건 · 고객 이름은 LINE 공식계정 친구일 때만 보입니다
+        최근 {data.ttlDays}일 신청 기준 · 같은 사람이 같은 옵션을 여러 번 누르면 한 건 · 고객 이름은 LINE 공식계정 친구일 때만 보입니다 ·{" "}
+        보낼 때 재고를 다시 확인해 그새 다시 품절된 신청은 빼고 보냅니다 · 한 번에 최대 {data.maxPerSend ?? 200}명
       </p>
     </div>
   );

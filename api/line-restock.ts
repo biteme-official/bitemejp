@@ -3,7 +3,11 @@
  *
  * 한 파일에 두 갈래가 있다.
  *   - POST  신청. 상품 상세에서 품절 옵션을 보던 LINE 로그인 고객이 「再入荷をLINEで受け取る」를 누르면 온다.
- *   - GET   발송. 크론이 매시간 돌며 신청된 옵션이 다시 팔리는지 보고, 팔리면 신청자에게 LINE 을 보낸다.
+ *   - POST  ?action=send  발송. 어드민 「재입고 알림」 탭에서 운영자가 고른 신청에게만 LINE 을 보낸다 (#227).
+ *   - GET   ?view=admin   어드민 목록 · 그 밖의 GET 은 미리보기(dryRun)만 — 아무에게도 보내지 않는다.
+ *
+ * 🔴 자동 발송은 하지 않는다 (#227). 예전엔 크론이 매시 30분에 재고가 풀린 신청을 전부 보냈는데,
+ *    재고 수정 실수·소량 입고에도 바로 나가 버려서 운영자가 골라 보내는 방식으로 바꿨다.
  *
  * 저장소는 따로 만들지 않고 Supabase `events` 를 그대로 쓴다(장바구니 스냅샷과 같은 방식).
  *   - 신청   event_type = `line_restock_sub` · session_id = `line:<userId>`
@@ -15,10 +19,9 @@
  *
  * 마케팅 빈도 제한(하루 1통)은 걸지 않는다(`kind: transactional`). 고객이 직접 달라고 한 알림이라,
  * 그날 다른 저니가 먼저 나갔다고 재입고 소식이 사라지면 신청한 의미가 없다.
- * 대신 조용한 시간(JST 21~09시)은 지킨다 — 버리지 않고 다음 실행으로 미룬다.
+ * 조용한 시간(JST 21~09시)은 막지 않고 화면에서 경고만 한다 — 운영자가 직접 누르는 발송이라서.
  *
- * ⚠️ 사람에게 메시지가 나가는 크론이라 `LINE_RESTOCK_ENABLED=1` 일 때만 실제로 보낸다.
- *    `?dryRun=1` 은 지금 켜면 누구에게 무엇이 나가는지만 돌려준다.
+ * ⚠️ `LINE_RESTOCK_ENABLED=1` 일 때만 실제로 보낸다(꺼 두면 미리보기만 된다).
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
@@ -39,7 +42,7 @@ const UTM = 'line_restock';
 
 /** 이보다 오래된 신청은 보지 않는다. 신청 행을 끝없이 다시 읽지 않기 위한 상한. */
 const SUB_TTL_DAYS = 180;
-/** 한 번 실행에 보낼 수 있는 최대 인원 — 폭주 방지. 남은 사람은 다음 실행에서 나간다. */
+/** 한 번 누를 때 보낼 수 있는 최대 인원 — 함수 시간 안에 끝나도록. 넘으면 나눠서 보낸다. */
 const MAX_PER_RUN = 200;
 
 const ALLOWED_ORIGINS = [
@@ -87,6 +90,11 @@ function authorized(req: VercelRequest): boolean {
   if (process.env.ADMIN_SECRET && auth === `Bearer ${process.env.ADMIN_SECRET}`) return true;
   if (process.env.CRON_SECRET && auth === `Bearer ${process.env.CRON_SECRET}`) return true;
   return false;
+}
+
+/** 발송·어드민 목록은 어드민만 — 크론 시크릿으로는 열지 않는다 */
+function adminOnly(req: VercelRequest): boolean {
+  return !!process.env.ADMIN_SECRET && req.headers.authorization === `Bearer ${process.env.ADMIN_SECRET}`;
 }
 
 // ─── Shopify ─────────────────────────────────────────────────────────────────
@@ -450,6 +458,8 @@ async function attachKoreanTitles(db: Db, products: SoldOutProduct[]): Promise<v
 export type RestockStatus = 'waiting' | 'ready' | 'sent' | 'not_friend' | 'gone' | 'discontinued';
 
 export interface RestockAdminRow {
+  /** 이 신청의 키 — 화면에서 골라 보낼 때 이 값을 돌려준다 */
+  ref: string;
   createdAt: string;
   /** LINE 표시 이름. 친구가 아니면 알 수 없어 null */
   displayName: string | null;
@@ -461,7 +471,7 @@ export interface RestockAdminRow {
   variantTitle: string;
   /**
    * waiting    아직 품절
-   * ready      다시 팔리는 중 — 다음 정각 30분 실행에서 나간다
+   * ready      다시 팔리는 중 — 화면에서 골라 보내면 나간다
    * sent       알림 보냄
    * not_friend 보냈지만 친구가 아니라 닿지 않음
    * gone       옵션이 삭제됨
@@ -484,10 +494,7 @@ async function lineDisplayName(userId: string): Promise<string | null> {
 }
 
 async function adminList(req: VercelRequest, res: VercelResponse) {
-  // 어드민 전용 — 크론 시크릿으로는 열지 않는다
-  if (!process.env.ADMIN_SECRET || req.headers.authorization !== `Bearer ${process.env.ADMIN_SECRET}`) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+  if (!adminOnly(req)) return res.status(401).json({ error: 'Unauthorized' });
   const db = supabase();
   if (!db) return res.status(500).json({ error: 'SUPABASE 미설정' });
 
@@ -545,6 +552,7 @@ async function adminList(req: VercelRequest, res: VercelResponse) {
         ? sent.delivery === 'not-friend' ? 'not_friend' : 'sent'
         : !state ? 'gone' : state.available ? 'ready' : state.discontinued ? 'discontinued' : 'waiting';
       return {
+        ref: subRef(p.variantId!, r.created_at),
         createdAt: r.created_at,
         displayName: names.get(userId) ?? null,
         userTail: userId.slice(-6),
@@ -573,6 +581,8 @@ async function adminList(req: VercelRequest, res: VercelResponse) {
     soldOut,
     soldOutError,
     enabled: process.env.LINE_RESTOCK_ENABLED === '1',
+    quietHours: inQuietHours(new Date(now)),
+    maxPerSend: MAX_PER_RUN,
     ttlDays: SUB_TTL_DAYS,
   });
 }
@@ -667,67 +677,137 @@ async function subscribe(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true, already, friend });
 }
 
-// ─── GET: 발송 (크론) ─────────────────────────────────────────────────────────
+// ─── 발송 (어드민 수동, #227) ──────────────────────────────────────────────────
 
-async function dispatch(req: VercelRequest, res: VercelResponse) {
+interface SendPlan {
+  pending: number;
+  /** 고른 신청 중 이미 보냈거나 목록에 없는 것 */
+  notPending: number;
+  /** 고른 신청 중 옵션이 삭제된 것 */
+  missing: number;
+  /** 고른 신청 중 지금 다시 품절인 것 — 보내지 않는다 */
+  notAvailable: number;
+  ready: number;
+  targets: { userId: string; subs: Subscription[]; text: string }[];
+}
+
+/**
+ * 보낼 대상. refs 가 있으면 그 신청만, 없으면 재고가 풀린 신청 전부(미리보기용).
+ * 🔴 화면이 「재입고됨」이라고 보여 준 뒤 그새 다시 품절될 수 있다 — 고른 신청이라도 지금 재고를 다시 본다.
+ */
+async function planSend(db: Db, now: number, refs: Set<string> | null): Promise<SendPlan> {
+  const all = await pendingSubscriptions(db, now);
+  const pending = refs ? all.filter((s) => refs.has(s.ref)) : all;
+  const states = pending.length
+    ? await fetchVariantStates(await getAdminToken(), [...new Set(pending.map((s) => s.variantId))])
+    : new Map<string, VariantState>();
+
+  const ready = pending.filter((s) => states.get(s.variantId)?.available);
+
+  // 한 사람에게 한 통 — 고른 옵션이 여러 개면 한 메시지에 묶는다
+  const byUser = new Map<string, Subscription[]>();
+  for (const s of ready) byUser.set(s.lineUserId, [...(byUser.get(s.lineUserId) ?? []), s]);
+  const targets = [...byUser.entries()].map(([userId, subs]) => ({
+    userId,
+    subs,
+    text: buildRestockMessage(subs.map((s) => states.get(s.variantId)!)),
+  }));
+
+  return {
+    pending: pending.length,
+    notPending: refs ? refs.size - pending.length : 0,
+    missing: pending.filter((s) => !states.has(s.variantId)).length,
+    notAvailable: pending.filter((s) => states.has(s.variantId) && !states.get(s.variantId)!.available).length,
+    ready: ready.length,
+    targets,
+  };
+}
+
+/** GET — 미리보기만. 지금 재고가 풀린 신청 전부에게 무엇이 나갈지 (예전 크론 dryRun 과 같은 모양) */
+async function preview(req: VercelRequest, res: VercelResponse) {
   if (!authorized(req)) return res.status(401).json({ error: 'Unauthorized' });
-
-  const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
-  const enabled = process.env.LINE_RESTOCK_ENABLED === '1';
-  const now = Date.now();
-
-  if (!dryRun && !enabled) return res.status(200).json({ ok: true, skipped: 'LINE_RESTOCK_ENABLED 미설정' });
-  if (!dryRun && inQuietHours(new Date(now))) {
-    // 버리지 않는다. 다음 실행에서 같은 신청이 다시 잡힌다.
-    return res.status(200).json({ ok: true, skipped: '조용한 시간 (JST 21~09시)' });
+  const db = supabase();
+  if (!db) return res.status(500).json({ error: 'SUPABASE 미설정' });
+  try {
+    const plan = await planSend(db, Date.now(), null);
+    return res.status(200).json({
+      ok: true,
+      dryRun: true,
+      manualOnly: true,
+      enabled: process.env.LINE_RESTOCK_ENABLED === '1',
+      pending: plan.pending,
+      missing: plan.missing,
+      ready: plan.ready,
+      willSend: plan.targets.length,
+      samples: plan.targets.slice(0, 2).map((t) => t.text),
+    });
+  } catch (error) {
+    console.error('[LINE Restock] 미리보기 오류:', error);
+    return res.status(500).json({ error: error instanceof Error ? error.message : '미리보기 실패' });
   }
+}
 
-  // 🔴 중복 방지가 이 기록 위에 선다. 기록이 없으면 매시간 같은 사람에게 다시 보낸다.
+/**
+ * POST ?action=send — 어드민이 고른 신청에게 보낸다.
+ *   body { refs: string[], dryRun?: boolean }
+ *   dryRun 이면 보내지 않고 몇 명에게 어떤 문안이 나가는지만 돌려준다(화면의 확인 단계).
+ */
+async function sendSelected(req: VercelRequest, res: VercelResponse) {
+  if (!adminOnly(req)) return res.status(401).json({ error: 'Unauthorized' });
+
+  let payload: unknown = req.body ?? {};
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return res.status(400).json({ error: 'bad_request' });
+    }
+  }
+  const { refs, dryRun } = (payload ?? {}) as Record<string, unknown>;
+  if (!Array.isArray(refs) || refs.length === 0 || !refs.every((r) => typeof r === 'string' && r.length < 200)) {
+    return res.status(400).json({ error: '보낼 신청을 골라 주세요' });
+  }
+  const selected = new Set(refs as string[]);
+  const isDry = dryRun === true;
+  const enabled = process.env.LINE_RESTOCK_ENABLED === '1';
+  if (!isDry && !enabled) return res.status(409).json({ error: 'LINE_RESTOCK_ENABLED 가 꺼져 있어 보낼 수 없습니다' });
+
+  // 🔴 중복 방지가 발송 기록 위에 선다. 기록이 없으면 같은 사람에게 몇 번이고 나간다.
   const db = supabase();
   if (!db) return res.status(500).json({ error: '발송 기록 저장소가 없어 중단했습니다' });
 
   try {
-    const pending = await pendingSubscriptions(db, now);
-    const states = pending.length
-      ? await fetchVariantStates(await getAdminToken(), [...new Set(pending.map((s) => s.variantId))])
-      : new Map<string, VariantState>();
-
-    const ready = pending.filter((s) => states.get(s.variantId)?.available);
-
-    // 한 사람에게 한 통 — 같은 실행에 옵션 여러 개가 같이 풀렸으면 한 메시지에 묶는다
-    const byUser = new Map<string, Subscription[]>();
-    for (const s of ready) byUser.set(s.lineUserId, [...(byUser.get(s.lineUserId) ?? []), s]);
-    const targets = [...byUser.entries()].slice(0, MAX_PER_RUN).map(([userId, subs]) => ({
-      userId,
-      subs,
-      text: buildRestockMessage(subs.map((s) => states.get(s.variantId)!)),
-    }));
-
+    const plan = await planSend(db, Date.now(), selected);
     const result = {
       ok: true,
-      dryRun,
+      dryRun: isDry,
       enabled,
-      pending: pending.length,
-      // 신청은 남아 있는데 옵션이 삭제된 것 — 늘어나면 상품 정리 때 신청이 버려지고 있다는 뜻
-      missing: pending.filter((s) => !states.has(s.variantId)).length,
-      ready: ready.length,
-      willSend: targets.length,
+      quietHours: inQuietHours(new Date()),
+      selected: selected.size,
+      notPending: plan.notPending,
+      missing: plan.missing,
+      notAvailable: plan.notAvailable,
+      ready: plan.ready,
+      willSend: plan.targets.length,
       sent: 0,
       notFriend: 0,
       failed: 0,
-      samples: targets.slice(0, 2).map((t) => t.text),
+      samples: plan.targets.slice(0, 2).map((t) => t.text),
     };
-    if (dryRun || targets.length === 0) return res.status(200).json(result);
+    if (plan.targets.length > MAX_PER_RUN) {
+      return res.status(400).json({ ...result, ok: false, error: `한 번에 ${MAX_PER_RUN}명까지 보낼 수 있습니다 — 나눠서 골라 주세요` });
+    }
+    if (isDry || plan.targets.length === 0) return res.status(200).json(result);
 
-    // LINE 월 발송 한도. 모자라면 아예 보내지 않고 다음 실행으로 미룬다 — 일부만 보내면
+    // LINE 월 발송 한도. 모자라면 아예 보내지 않는다 — 일부만 보내면
     // 한도가 바닥난 뒤의 주문·배송 알림까지 같이 막힌다(2026-09-24 한도 소진 때 실제로 그랬다).
     const quota = await fetchQuota().catch(() => null);
-    if (quota && quota.remaining !== null && quota.remaining < targets.length) {
-      console.error(`[LINE Restock] 🔴 월 한도 부족 — 남은 ${quota.remaining}통 < 보낼 ${targets.length}명. 보류합니다`);
-      return res.status(200).json({ ...result, skipped: '월 발송 한도 부족' });
+    if (quota && quota.remaining !== null && quota.remaining < plan.targets.length) {
+      console.error(`[LINE Restock] 🔴 월 한도 부족 — 남은 ${quota.remaining}통 < 보낼 ${plan.targets.length}명. 보류합니다`);
+      return res.status(409).json({ ...result, ok: false, error: `LINE 월 발송 한도 부족 — 남은 ${quota.remaining}통` });
     }
 
-    for (const t of targets) {
+    for (const t of plan.targets) {
       // 직렬로 보낸다. 병렬은 레이트리밋에 걸리고 어디까지 나갔는지도 흐려진다.
       const r = await pushLine(t.userId, t.text);
       if (r === 'failed') {
@@ -736,7 +816,7 @@ async function dispatch(req: VercelRequest, res: VercelResponse) {
       }
       if (r === 'sent') result.sent++;
       else result.notFriend++;
-      // 친구가 아니어도 기록한다 — 다시 시도해도 같은 결과라 매시간 재시도하지 않도록
+      // 친구가 아니어도 기록한다 — 다시 보내도 같은 결과라 「발송 대기」에 계속 남지 않도록
       for (const s of t.subs) {
         await recordSends([t.userId], {
           campaignId: `journey_${JOURNEY}`,
@@ -750,11 +830,11 @@ async function dispatch(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    console.log(`[LINE Restock] 발송 ${result.sent}건 · 친구아님 ${result.notFriend} · 실패 ${result.failed}`);
+    console.log(`[LINE Restock] 수동 발송 ${result.sent}건 · 친구아님 ${result.notFriend} · 실패 ${result.failed}`);
     return res.status(200).json(result);
   } catch (error) {
-    console.error('[LINE Restock] Error:', error);
-    return res.status(500).json({ error: error instanceof Error ? error.message : '재입고 알림 실행 중 오류' });
+    console.error('[LINE Restock] 발송 오류:', error);
+    return res.status(500).json({ error: error instanceof Error ? error.message : '재입고 알림 발송 중 오류' });
   }
 }
 
@@ -764,6 +844,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method === 'POST' && req.query.action === 'send') return sendSelected(req, res);
   if (req.method === 'POST') {
     try {
       return await subscribe(req, res);
@@ -780,6 +861,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: error instanceof Error ? error.message : 'failed' });
     }
   }
-  if (req.method === 'GET') return dispatch(req, res);
+  if (req.method === 'GET') return preview(req, res);
   return res.status(405).json({ error: 'Method not allowed' });
 }
