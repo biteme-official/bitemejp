@@ -54,6 +54,7 @@ export const LOGIN_SOURCES = [
   'banner',     // 사이트 상단 로그인 유도 배너
   'floating',   // 사이트 우하단 플로팅 버튼
   'button',     // 그 외 화면 내 로그인 버튼
+  'insert',     // 택배 동봉 안내지 QR (전용 10%OFF 코드 — src/lib/lineWelcomeDiscount.ts)
   'other',
 ] as const;
 

@@ -53,6 +53,7 @@ export type LoginSource =
   | 'banner'
   | 'floating'
   | 'button'
+  | 'insert'
   | 'other';
 
 interface InitiateLineLoginOptions {
