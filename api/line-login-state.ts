@@ -51,6 +51,7 @@ export const LOGIN_SOURCES = [
   'welcome',    // LINE 웰컴(あいさつ) 메시지
   'richmenu',   // LINE 리치메뉴
   'broadcast',  // LINE 발송 메시지
+  'invite',     // 연결 안 된 친구에게 보내는 연결 유도 발송 (line-campaign invite_*)
   'banner',     // 사이트 상단 로그인 유도 배너
   'floating',   // 사이트 우하단 플로팅 버튼
   'button',     // 그 외 화면 내 로그인 버튼

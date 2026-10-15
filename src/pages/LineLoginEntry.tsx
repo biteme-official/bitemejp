@@ -22,6 +22,7 @@ const ALLOWED_SOURCES: readonly LoginSource[] = [
   'welcome',
   'richmenu',
   'broadcast',
+  'invite',
   'banner',
   'floating',
   'button',

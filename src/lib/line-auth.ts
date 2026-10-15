@@ -50,6 +50,7 @@ export type LoginSource =
   | 'welcome'
   | 'richmenu'
   | 'broadcast'
+  | 'invite'
   | 'banner'
   | 'floating'
   | 'button'
