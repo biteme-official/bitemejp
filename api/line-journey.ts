@@ -108,8 +108,15 @@ const REPEAT_URL = `https://biteme.co.jp/?utm_source=line&utm_medium=line&utm_ca
  * 날짜를 넣으면 성과가 하루 단위로 잘게 쪼개진다.
  */
 const FIRST_PURCHASE_UTM = 'line_firstbuy_d1';
-const FIRST_PURCHASE_URL =
-  `https://biteme.co.jp/discount/WELCOME10?utm_source=line&utm_medium=line&utm_campaign=${FIRST_PURCHASE_UTM}`;
+const firstPurchaseUrl = (code: string) =>
+  `https://biteme.co.jp/discount/${code}?utm_source=line&utm_medium=line&utm_campaign=${FIRST_PURCHASE_UTM}`;
+const FIRST_PURCHASE_URL = firstPurchaseUrl('WELCOME10');
+/**
+ * 연결 유도 발송(`line_src:invite`)으로 연결된 사람은 로그인 때 LINKUP10 을 받았다.
+ * 여기서 WELCOME10 링크를 주면 `/discount/` 코드가 우선이라 LINKUP10 을 덮어써, 이미 WELCOME10 을
+ * 쓴 사람은 할인을 못 받는다. 그래서 같은 코드로 링크한다 (src/lib/lineWelcomeDiscount.ts).
+ */
+const INVITE_FIRST_PURCHASE_URL = firstPurchaseUrl('LINKUP10');
 
 /**
  * 이탈로 인정하는 구간.
@@ -921,7 +928,7 @@ async function planRepeatPurchase(
  *    LINE 으로 만든 고객 레코드에 안 붙어 있어 우리가 알 방법이 없다. 「まだお使いでない方に」와
  *    「お一人さま1回限り」로 조건을 문장 안에 넣어, 이미 쓴 사람이 받아도 거짓이 되지 않게 한다.
  */
-const FIRST_PURCHASE_TEXT = [
+const firstPurchaseText = (url: string) => [
   'こんにちは、BITE ME JAPANです🐾',
   '',
   'ご登録ありがとうございます！',
@@ -933,8 +940,10 @@ const FIRST_PURCHASE_TEXT = [
   '（お一人さま1回限り）',
   '',
   'いま人気のアイテムを見る👇',
-  FIRST_PURCHASE_URL,
+  url,
 ].join('\n');
+const FIRST_PURCHASE_TEXT = firstPurchaseText(FIRST_PURCHASE_URL);
+const INVITE_FIRST_PURCHASE_TEXT = firstPurchaseText(INVITE_FIRST_PURCHASE_URL);
 
 async function planFirstPurchase(now: number, members: Member[]): Promise<JourneyPlan> {
   const handled = await alreadyHandled(FIRST_PURCHASE);
@@ -956,7 +965,7 @@ async function planFirstPurchase(now: number, members: Member[]): Promise<Journe
     candidates: eligible.map((m) => ({
       userId: m.lineUserId as string,
       ref: m.gid,
-      text: FIRST_PURCHASE_TEXT,
+      text: m.source === 'invite' ? INVITE_FIRST_PURCHASE_TEXT : FIRST_PURCHASE_TEXT,
     })),
     record: {
       campaignId: `journey_${FIRST_PURCHASE}`,
