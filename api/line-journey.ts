@@ -7,7 +7,7 @@
  *                         Shopify 는 결제창 이탈만 기록해서 여기가 통째로 사각지대였다.
  *                         2026-09-04 담기 이벤트 때 담기 293→1,341 인데 결제창 이탈은 15→16.
  *                         카트 스냅샷은 `/api/line-cart` 가 남긴다.
- *   3. repeat_purchase_d21 재구매 유도 — 마지막 주문 3주 뒤. 산 사람은 그동안 아무도
+ *   3. repeat_purchase_d21 재구매 유도 — 마지막 주문 출고 3주 뒤. 산 사람은 그동안 아무도
  *                         말을 걸지 않던 구간이었다. 2026-09-08 실측: LINE 연결 구매자
  *                         260명 중 252명(97%)이 1회 구매뿐이고, 전체 재구매 간격 중앙값은 20일.
  *   4. first_purchase_d1  연결 다음날 첫 구매 유도 — 볼륨이 가장 크다(월 약 300통).
@@ -67,7 +67,13 @@ const FIRST_PURCHASE_MIN_H = 24;
 const FIRST_PURCHASE_MAX_H = 48;
 
 /**
- * 재구매를 권하는 시점 — **마지막** 주문으로부터 21~22일.
+ * 재구매를 권하는 시점 — **마지막** 주문이 출고된 날로부터 21~22일.
+ *
+ * 🔴 시계는 주문일이 아니라 **출고일**에서 시작한다. 문안이 "받아 보니 어떠셨나요"라서,
+ *    주문일로 세면 예약배송 주문은 물건을 받기도 전에 감상을 묻게 된다.
+ *    2026-10-15 실측: 일반 주문은 주문→출고 최대 7일(중앙값 1.3일)인데, 예약 주문
+ *    37건이 주문 21일이 지나도록 출고 전이었다. 전부 출고되지 않은 주문(일부만 나간 것 포함)은
+ *    다 나갈 때까지 기다린다.
  *
  * 창을 딱 하루로 잡는 이유가 두 가지다.
  *
@@ -84,7 +90,11 @@ const FIRST_PURCHASE_MAX_H = 48;
 const REPEAT_MIN_H = 21 * 24;
 const REPEAT_MAX_H = 22 * 24;
 
-/** 재구매 저니가 훑는 주문 범위. 창보다 하루 넉넉히 봐야 「그 뒤에 또 샀는가」를 판정할 수 있다. */
+/**
+ * 재구매 저니가 훑는 주문 범위 — **수정일** 기준. 창보다 하루 넉넉히 봐야 「그 뒤에 또 샀는가」를
+ * 판정할 수 있다. 생성일로 자르면 두 달 전에 주문하고 3주 전에 출고된 예약 주문이 빠진다.
+ * 출고되면 주문 수정일이 갱신되므로 수정일로 자르면 함께 잡힌다.
+ */
 const REPEAT_LOOKBACK_DAYS = 23;
 
 const REPEAT_UTM = 'line_repeat_d21';
@@ -714,6 +724,8 @@ interface LastOrder {
   customerGid: string;
   orderGid: string;
   at: number;
+  /** 마지막 출고 시각. 아직 전부 출고되지 않았으면 null — 받기 전이라 감상을 물을 수 없다. */
+  shippedAt: number | null;
   itemTitle: string | null;
   itemCount: number;
 }
@@ -738,6 +750,9 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
             node: {
               id: string;
               createdAt: string;
+              cancelledAt: string | null;
+              displayFulfillmentStatus: string;
+              fulfillments: { createdAt: string }[];
               customer: { id: string } | null;
               lineItems: {
                 edges: {
@@ -761,6 +776,9 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
           edges { node {
             id
             createdAt
+            cancelledAt
+            displayFulfillmentStatus
+            fulfillments(first: 10) { createdAt }
             customer { id }
             lineItems(first: 5) { edges { node {
               title
@@ -770,7 +788,7 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
           } }
         }
       }`,
-      { cursor, q: `created_at:>=${since}` },
+      { cursor, q: `updated_at:>=${since}` },
     );
 
     const conn = res?.data?.orders;
@@ -779,6 +797,8 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
     for (const e of conn.edges) {
       const n = e.node;
       if (!n.customer) continue;
+      // 취소된 주문은 「마지막 주문」으로 치지 않는다. 출고가 안 되니 그 앞의 주문까지 막아 버린다.
+      if (n.cancelledAt) continue;
       const at = new Date(n.createdAt).getTime();
       const prev = latest.get(n.customer.id);
       if (prev && prev.at >= at) continue;
@@ -793,6 +813,10 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
         customerGid: n.customer.id,
         orderGid: n.id,
         at,
+        shippedAt:
+          n.displayFulfillmentStatus === 'FULFILLED' && n.fulfillments.length > 0
+            ? Math.max(...n.fulfillments.map((f) => new Date(f.createdAt).getTime()))
+            : null,
         itemTitle: items[0]?.node?.title ?? null,
         itemCount: items.reduce((sum, i) => sum + (i.node.quantity ?? 1), 0),
       });
@@ -850,8 +874,11 @@ async function planRepeatPurchase(
   const lineByGid = new Map<string, string>();
   for (const m of members) if (m.lineUserId) lineByGid.set(m.gid, m.lineUserId);
 
+  // 아직 다 출고되지 않은 주문 — 예약배송이 대부분이다. 다 나가면 그날부터 다시 센다.
+  const notShipped = lastOrders.filter((o) => o.shippedAt === null);
   const inWindow = lastOrders.filter((o) => {
-    const ageH = (now - o.at) / 3600_000;
+    if (o.shippedAt === null) return false;
+    const ageH = (now - o.shippedAt) / 3600_000;
     return ageH >= REPEAT_MIN_H && ageH < REPEAT_MAX_H;
   });
 
@@ -863,6 +890,8 @@ async function planRepeatPurchase(
     pool: lastOrders.length,
     found: inWindow.length,
     excluded: {
+      // 창 밖 숫자다(오늘 창에 든 사람에서 빠진 게 아니다). 예약 주문이 쌓이면 여기가 커진다.
+      출고전대기: notShipped.length,
       // 구매 고객의 대부분은 LINE 을 안 쓴다. 이 값이 크다고 이상한 게 아니다 —
       // 2026-09-08 기준 구매 고객 2,234명 중 LINE 연결은 260명(11.6%)이다.
       라인미연결: inWindow.filter((o) => !lineByGid.has(o.customerGid)).length,
@@ -873,7 +902,7 @@ async function planRepeatPurchase(
       // 주문 id 로 막는다. 사람으로 막으면 다음 주문 뒤에는 영영 못 보낸다.
       ref: o.orderGid,
       text: buildRepeatMessage(o.itemTitle, o.itemCount, REPEAT_URL),
-      note: `마지막 주문 ${new Date(o.at).toISOString()}`,
+      note: `마지막 주문 ${new Date(o.at).toISOString()} · 출고 ${new Date(o.shippedAt as number).toISOString()}`,
     })),
     record: {
       campaignId: `journey_${REPEAT_PURCHASE}`,
