@@ -29,7 +29,7 @@ const MULTICAST_CHUNK = 500;
 /** 실수로 대량 발송하는 것을 막는 상한. 늘려야 하면 코드에서 올린다(화면에서 못 넘긴다). */
 const MAX_RECIPIENTS = 2000;
 /** 캠페인 단위 발송 이력 (Supabase `events` 테이블 재사용) */
-const CAMPAIGN_EVENT = 'line_campaign';
+export const CAMPAIGN_EVENT = 'line_campaign';
 /** 수신자 단위 발송 기록. 빈도 제한과 저니 중복 방지가 전부 이 기록 위에 선다. */
 export const SEND_EVENT = 'line_send';
 
@@ -274,12 +274,12 @@ export async function fetchQuota(): Promise<QuotaInfo> {
  * 재시도 키. 같은 캠페인·같은 묶음이면 항상 같은 값이라, 네트워크 오류로 다시 쏴도
  * LINE 이 중복 발송을 막아준다. UUID 형식이어야 받아준다.
  */
-function retryKey(campaignId: string, chunkIndex: number): string {
+export function retryKey(campaignId: string, chunkIndex: number): string {
   const h = createHash('sha256').update(`${campaignId}#${chunkIndex}`).digest('hex');
   return [h.slice(0, 8), h.slice(8, 12), `4${h.slice(13, 16)}`, `8${h.slice(17, 20)}`, h.slice(20, 32)].join('-');
 }
 
-async function multicast(
+export async function multicast(
   userIds: string[],
   text: string,
   campaignId: string,
@@ -342,7 +342,7 @@ interface MessageInput {
   url?: string;
 }
 
-function buildMessage(input: MessageInput): { text: string; campaignId: string; campaign: string } {
+export function buildMessage(input: MessageInput): { text: string; campaignId: string; campaign: string } {
   const text = (input.text ?? '').trim();
   if (!text) throw new Error('본문(text)이 비어 있습니다');
   if (text.length > 900) throw new Error('본문이 900자를 넘습니다');
@@ -541,7 +541,7 @@ async function alreadySent(campaignId: string): Promise<boolean> {
   return (data ?? []).length > 0;
 }
 
-async function logCampaign(campaignId: string, properties: Record<string, unknown>): Promise<void> {
+export async function logCampaign(campaignId: string, properties: Record<string, unknown>): Promise<void> {
   const db = supabase();
   if (!db) {
     console.error('[LINE Campaign] 🔴 SUPABASE 미설정 — 발송 이력이 남지 않았습니다:', campaignId);

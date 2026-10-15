@@ -62,6 +62,9 @@
     },
     "api/home-banners.ts": {
       "maxDuration": 60
+    },
+    "api/line-invite.ts": {
+      "maxDuration": 60
     }
   },
   "rewrites": [
