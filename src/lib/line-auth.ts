@@ -102,6 +102,8 @@ export interface LineCallbackResult {
   lineSessionToken?: string;
   /** 서명된 state 에서 복원한 복귀 경로. localStorage 가 없을 때 사용한다. */
   returnTo?: string;
+  /** 서명된 state 에서 복원한 진입 경로. 보상 쿠폰을 고르는 데 쓴다 */
+  loginSource?: LoginSource | null;
 }
 
 /** 서명된 state 는 `<base64url payload>.<base64url 서명>` 형식이다 */

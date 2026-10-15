@@ -13,6 +13,20 @@
  */
 export const LINE_WELCOME_DISCOUNT_CODE = 'WELCOME10';
 
+/**
+ * 연결 유도 발송(`src=invite`)으로 들어온 사람에게 주는 쿠폰.
+ *
+ * WELCOME10 과 조건(10%·1인 1회)은 같지만 **코드를 따로 둔다** — 연결 없이 이메일 계정으로
+ * WELCOME10 을 이미 쓴 사람에게도 한 번 더 주기 위해서다. 같은 코드면 Shopify 가 조용히 무시한다.
+ * ⚠️ api/line-journey.ts · api/line-invite.ts 에도 같은 코드가 적혀 있다. 바꾸면 셋 다 + Shopify 설정.
+ */
+export const LINE_INVITE_DISCOUNT_CODE = 'LINKUP10';
+
+/** 로그인 진입 경로별 보상 쿠폰 — 연결 유도 발송만 별도 코드 */
+export function welcomeCodeFor(loginSource: string | null | undefined): string {
+  return loginSource === 'invite' ? LINE_INVITE_DISCOUNT_CODE : LINE_WELCOME_DISCOUNT_CODE;
+}
+
 /** localStorage 키 — affiliate_discount 와 별도로 둔다(우선순위: 어필리에이트 > 웰컴). */
 export const LINE_WELCOME_DISCOUNT_KEY = 'line_welcome_discount';
 

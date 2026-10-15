@@ -618,6 +618,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         channelSecret
       ),
       returnTo,
+      // 진입 경로별로 다른 쿠폰을 심는다(연결 유도 발송 = LINKUP10). 서명 검증된 값만 나간다
+      loginSource,
     });
   } catch (error) {
     console.error('[LINE Callback] Error:', error);
