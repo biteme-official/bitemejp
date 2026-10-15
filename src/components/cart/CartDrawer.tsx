@@ -15,6 +15,7 @@ import { ShoppingCart, Minus, Plus, Trash2, ExternalLink, Loader2, Gift } from "
 import { useCartStore } from "@/stores/cartStore";
 import { formatPrice, getPreorderDate, fetchCartPreview, CartDiscountInfo } from "@/lib/shopify";
 import { AffiliateOfferNote } from "@/components/affiliate/AffiliateOfferNote";
+import { WelcomeCouponNote } from "@/components/cart/WelcomeCouponNote";
 import { ThresholdBanner } from "./ThresholdBanner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { safeNavigate } from "@/lib/browser-utils";
@@ -375,6 +376,11 @@ export const CartDrawer = ({ open: controlledOpen, onOpenChange, showTrigger = t
                 )}
                 <AffiliateOfferNote
                   variant="cart"
+                  lines={regularItems.map(i => ({ productId: i.product.node.id, unitPrice: parseFloat(i.price.amount), quantity: i.quantity }))}
+                  currencyCode={currencyCode}
+                />
+                <WelcomeCouponNote
+                  base={discountInfo && discountInfo.totalSavings > 0 ? discountInfo.discountedTotal : totalPrice}
                   lines={regularItems.map(i => ({ productId: i.product.node.id, unitPrice: parseFloat(i.price.amount), quantity: i.quantity }))}
                   currencyCode={currencyCode}
                 />
