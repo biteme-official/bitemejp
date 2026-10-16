@@ -39,9 +39,9 @@ export function WelcomeCouponNote({ base, lines, currencyCode }: Props) {
   if (amount <= 0) return null;
   return (
     <div className="text-xs bg-red-50 px-3 py-2 rounded-lg text-red-700">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-start gap-2">
         <span>LINE会員クーポン {LINE_WELCOME_DISCOUNT_PERCENT}%OFF（お支払い時に自動適用）</span>
-        <span className="font-semibold" translate="no">約 -{formatPrice(amount.toFixed(0), currencyCode)}</span>
+        <span className="font-semibold shrink-0 whitespace-nowrap" translate="no">約 -{formatPrice(amount.toFixed(0), currencyCode)}</span>
       </div>
       <p className="mt-0.5 text-[10px] text-red-500">※お一人さま1回限り。ご利用済みの場合は適用されません</p>
     </div>
