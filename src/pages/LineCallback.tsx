@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { handleLineCallback, submitCustomerEmail } from '@/lib/line-auth';
-import { LINE_WELCOME_DISCOUNT_KEY, welcomeCodeFor } from '@/lib/lineWelcomeDiscount';
+import { LINE_NEW_LINK_KEY, LINE_WELCOME_DISCOUNT_KEY, welcomeCodeFor } from '@/lib/lineWelcomeDiscount';
 import { useAuthStore } from '@/stores/authStore';
 import { Loader2, CheckCircle2, Mail } from 'lucide-react';
 import { Input } from '@/components/ui/input';
@@ -79,6 +79,9 @@ export default function LineCallback() {
         // 따로 추적하지 않는다. 연결 유도 발송으로 들어온 사람은 별도 코드(LINKUP10).
         try {
           localStorage.setItem(LINE_WELCOME_DISCOUNT_KEY, welcomeCodeFor(profile.loginSource));
+          // 첫 연결일 때만 표시를 남긴다. 재로그인(false)으로 지우지는 않는다 — 연결한 뒤
+          // 아직 안 산 사람이 다시 로그인해도 줄은 보여야 한다(구매 후엔 미사용 확인이 숨긴다)
+          if (profile.newlyLinked) localStorage.setItem(LINE_NEW_LINK_KEY, '1');
         } catch { /* 저장 실패해도 로그인은 계속된다 */ }
 
         // 인증 수단이 하나라도 있으면 이메일을 등록할 수 있다.

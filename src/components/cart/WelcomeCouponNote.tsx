@@ -4,14 +4,15 @@
  * 쿠폰은 Shopify 결제 페이지에서 붙는다(cartStore.createCheckout). 장바구니에선 금액이 안 보여
  * 「할인이 안 되는 것 같다」는 오해가 생겨, 결제에서 실제로 넣을 코드와 같은 판정으로 미리 보여준다.
  *
- * ⚠️ 쿠폰 키는 로그인 때마다 저장되고 지워지지 않는다. 키만 보고 띄우면 이미 쓴 사람에게도 보여서
- *    (#236 → #241 되돌림) 서버가 「미사용」을 확인한 사람에게만 보인다 (#242). 조회 중·실패는 숨김.
+ * ⚠️ 쿠폰 키는 로그인 때마다 저장되고 지워지지 않는다. 키만 보고 띄우면 기존 연결 고객·이미 쓴 사람에게도
+ *    보여서(#236 → #241 되돌림) **이번에 새로 연결 + 서버가 「미사용」 확인**일 때만 보인다 (#242).
+ *    미사용 판정은 로그인한 Shopify 고객 기준 = Shopify 1인 1회 판정과 같은 기준. 조회 중·실패는 숨김.
  *    최종 판정은 여전히 Shopify 결제 단계라 「約」 + 결제 화면 확인 문구를 두고, 합계에는 더하지 않는다.
  */
 import { useAuthStore } from "@/stores/authStore";
 import { formatPrice } from "@/lib/shopify";
 import { getAffiliateOffer, orderOfferAndWelcome } from "@/lib/affiliate-offer";
-import { LINE_WELCOME_DISCOUNT_KEY, LINE_WELCOME_DISCOUNT_PERCENT } from "@/lib/lineWelcomeDiscount";
+import { LINE_NEW_LINK_KEY, LINE_WELCOME_DISCOUNT_KEY, LINE_WELCOME_DISCOUNT_PERCENT } from "@/lib/lineWelcomeDiscount";
 import { useWelcomeCouponStatus } from "@/lib/welcomeCouponStatus";
 
 interface Props {
@@ -27,12 +28,15 @@ export function WelcomeCouponNote({ base, lines, currencyCode }: Props) {
 
   let welcome: string | null = null;
   let affiliateCode: string | null = null;
+  let newlyLinked = false;
   try {
     welcome = localStorage.getItem(LINE_WELCOME_DISCOUNT_KEY);
     affiliateCode = localStorage.getItem("affiliate_discount");
+    newlyLinked = localStorage.getItem(LINE_NEW_LINK_KEY) === "1";
   } catch { /* 무시 — 줄을 안 보여줄 뿐 */ }
   // cartStore 와 같은 판정: 특별 코드(/discount/)가 있으면 웰컴은 안 넣는다
-  const candidate = isLoggedIn && base > 0 && welcome && !affiliateCode ? welcome : null;
+  // 이번에 새로 연결한 사람에게만 — 기존 연결 고객에겐 안 보인다
+  const candidate = isLoggedIn && newlyLinked && base > 0 && welcome && !affiliateCode ? welcome : null;
   const usage = useWelcomeCouponStatus(candidate, lineSessionToken);
   if (!candidate || usage !== "unused") return null;
   // 파트너 링크 할인이 더 크면 그쪽이 간다 — 그 줄은 AffiliateOfferNote 가 보여준다

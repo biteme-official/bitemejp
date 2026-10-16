@@ -30,6 +30,13 @@ export function welcomeCodeFor(loginSource: string | null | undefined): string {
 /** localStorage 키 — affiliate_discount 와 별도로 둔다(우선순위: 어필리에이트 > 웰컴). */
 export const LINE_WELCOME_DISCOUNT_KEY = 'line_welcome_discount';
 
+/**
+ * 이 브라우저에서 **처음 LINE 연결**을 했다는 표시 (#242).
+ * 장바구니 「約 -¥」 줄은 이 표시 + 쿠폰 미사용 확인이 둘 다 있을 때만 보인다 — 기존 연결 고객에겐
+ * 안 보인다. 쿠폰 자동 적용(cartStore)은 이 표시와 무관하게 그대로다.
+ */
+export const LINE_NEW_LINK_KEY = 'line_welcome_new_link';
+
 /** 배너·버튼 문구에 함께 쓰는 할인율. 표기와 실제 설정이 어긋나지 않도록 한곳에서 관리한다. */
 export const LINE_WELCOME_DISCOUNT_LABEL = '10%OFF';
 
