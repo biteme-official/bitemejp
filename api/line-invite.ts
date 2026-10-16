@@ -44,6 +44,7 @@ const ALLOWED_ORIGINS = [
 
 /** 소재명. 캠페인 ID(`YYMMDD_link-invite`)·UTM(`YYMMDD_line_link-invite`)이 여기서 나온다 */
 const CAMPAIGN_NAME = 'link-invite';
+export const INVITE_CAMPAIGN_NAME = CAMPAIGN_NAME;
 
 /** 로그인 입구. `line_src:invite` 태그로 이 발송이 만든 연결만 따로 센다 */
 const INVITE_URL = 'https://biteme.co.jp/line-login?src=invite';
@@ -84,6 +85,11 @@ const INVITE_TEXT = [
 
 function build() {
   return buildMessage({ name: CAMPAIGN_NAME, text: INVITE_TEXT, url: INVITE_URL });
+}
+
+/** 대시보드용 문구 — 실제 발송과 같은 함수로 만든다. 링크의 UTM 날짜만 오늘 날짜다 */
+export function inviteCopy(): string {
+  return build().text;
 }
 
 /** 날짜가 하루 밀려 보이지 않게 JST 로 */
@@ -351,6 +357,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       estimatedTargets: est.estimatedTargets,
       ok: r.ok,
       url: INVITE_URL,
+      // 대시보드 성과 표에 보여줄 원문 (line-campaign.ts attachCopy)
+      text: built.text,
     };
     // 성공했을 때만 남긴다. 실패를 남기면 30일 막기에 걸려 다시 못 보낸다.
     // 다시 눌러도 재시도 키가 같아서(24시간) LINE 이 이미 받은 요청이면 두 번 보내지 않는다.
