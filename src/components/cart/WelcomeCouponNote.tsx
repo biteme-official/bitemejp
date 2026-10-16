@@ -43,7 +43,7 @@ export function WelcomeCouponNote({ base, lines, currencyCode }: Props) {
         <span>LINE会員クーポン {LINE_WELCOME_DISCOUNT_PERCENT}%OFF（お支払い時に自動適用）</span>
         <span className="font-semibold shrink-0 whitespace-nowrap" translate="no">約 -{formatPrice(amount.toFixed(0), currencyCode)}</span>
       </div>
-      <p className="mt-0.5 text-[10px] text-red-500">※お一人さま1回限り。ご利用済みの場合は適用されません</p>
+      <p className="mt-0.5 text-[10px] text-red-500">※お一人さま1回限り。ご利用済みの場合は適用されません。最終的な割引額はお支払い画面でご確認ください</p>
     </div>
   );
 }
