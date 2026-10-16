@@ -302,23 +302,44 @@ async function fetchRecentBuyers(token: string, now: number): Promise<Set<string
   return set;
 }
 
-/** 이 저니로 이미 보낸 대상(ref) 집합. 체크아웃당·사람당 1회를 이걸로 지킨다. */
+/**
+ * 저니별 중복 확인 기간(일). 없으면 5일 — 발송 창이 하루 이틀이라 그 안에서만 겹친다.
+ *
+ * 🔴 재구매 유도는 **주문 1건당 평생 1통**이라 길게 본다. 발송 시점이 출고일에 묶여 있어서
+ *    출고가 늦어질수록 창이 뒤로 밀린다. 2026-10-16 실측: 주문일 기준(#230 이전)으로 10/10~10/12 에
+ *    이미 받은 주문들이 출고일 기준 창(출고 9/25 + 21일)에서 다시 잡혔는데, 5일만 보면 기록이 창
+ *    밖이라 같은 메시지가 한 번 더 나갈 뻔했다(11건). 예약 주문은 출고까지 두 달도 걸리므로 120일.
+ */
+const HANDLED_LOOKBACK_DAYS: Record<string, number> = {
+  [REPEAT_PURCHASE]: 120,
+};
+
+/** 이 저니로 이미 보낸 대상(ref) 집합. 체크아웃당·사람당·주문당 1회를 이걸로 지킨다. */
 async function alreadyHandled(journey: string): Promise<Set<string>> {
   const db = supabase();
   if (!db) return new Set();
-  const since = new Date(Date.now() - 5 * 86_400_000).toISOString();
-  const { data, error } = await db
-    .from('events')
-    .select('properties')
-    .eq('event_type', SEND_EVENT)
-    .gte('created_at', since);
-  if (error) {
-    // 확인이 안 되면 보내지 않는다. 여기서는 조용히 통과시키면 중복 발송이 된다.
-    throw new Error(`중복 확인 실패: ${error.message}`);
-  }
+  const days = HANDLED_LOOKBACK_DAYS[journey] ?? 5;
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
   const set = new Set<string>();
-  for (const row of (data ?? []) as { properties: { journey?: string; ref?: string } | null }[]) {
-    if (row.properties?.journey === journey && row.properties.ref) set.add(row.properties.ref);
+  // 🔴 끝까지 읽는다. Supabase 는 한 번에 1,000행까지만 주는데, 예전엔 그걸 넘으면 기록이 조용히
+  //    잘려 중복 발송이 날 수 있었다. 저니 이름으로 서버에서 걸러 읽는 양도 줄인다.
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db
+      .from('events')
+      .select('properties')
+      .eq('event_type', SEND_EVENT)
+      .eq('properties->>journey', journey)
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .range(from, from + 999);
+    if (error) {
+      // 확인이 안 되면 보내지 않는다. 여기서는 조용히 통과시키면 중복 발송이 된다.
+      throw new Error(`중복 확인 실패: ${error.message}`);
+    }
+    for (const row of (data ?? []) as { properties: { journey?: string; ref?: string } | null }[]) {
+      if (row.properties?.journey === journey && row.properties.ref) set.add(row.properties.ref);
+    }
+    if (!data || data.length < 1000) break;
   }
   return set;
 }
