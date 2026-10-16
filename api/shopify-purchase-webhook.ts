@@ -274,6 +274,35 @@ async function markNotified(customerGid: string, orderId: number): Promise<void>
 }
 
 /**
+ * LINE 로그인 보상 쿠폰(1인 1회)을 쓴 고객에 `coupon_used:<코드>` 태그를 단다 (#242).
+ * 장바구니 「約 -¥」 줄은 이 태그가 없는 사람에게만 보인다(api/customer-orders.ts coupon-status).
+ * 주문 조회는 최근 60일만 보여서, 오래 남는 기준은 이 태그뿐이다.
+ * ⚠️ 코드 목록은 api/customer-orders.ts COUPON_CODES 와 같아야 한다.
+ */
+const COUPON_USED_CODES = ['WELCOME10', 'LINKUP10'];
+
+async function tagCouponUsed(order: ShopifyOrder): Promise<void> {
+  const codes = (order.discount_codes ?? [])
+    .map((d) => d.code.toUpperCase())
+    .filter((c) => COUPON_USED_CODES.includes(c));
+  if (codes.length === 0 || !order.customer?.id) return;
+
+  const adminToken = await getAdminToken();
+  // tagsAdd 는 기존 태그를 건드리지 않는다 (customerUpdate 의 tags 는 전체 교체)
+  const result = await adminGraphQL(adminToken, `
+    mutation TagCouponUsed($id: ID!, $tags: [String!]!) {
+      tagsAdd(id: $id, tags: $tags) { userErrors { field message } }
+    }
+  `, { id: `gid://shopify/Customer/${order.customer.id}`, tags: codes.map((c) => `coupon_used:${c}`) });
+
+  const userErrors = result?.data?.tagsAdd?.userErrors ?? [];
+  if (result?.errors || userErrors.length > 0) {
+    // 실패해도 최근 60일은 주문 조회가 대신 잡는다. 그 뒤엔 줄이 다시 보일 수 있어 남긴다.
+    console.error(`[Coupon Tag] 🔴 태그 실패 order #${order.order_number}:`, JSON.stringify(result?.errors ?? userErrors));
+  }
+}
+
+/**
  * LINE 푸시 발송.
  * 친구가 아니거나 차단한 경우 LINE 이 4xx 를 준다 — 오류가 아니라 정상 상황이다.
  */
@@ -471,6 +500,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     lineUserId = (await notifyOrderCreated(order))?.lineUserId ?? null;
   } catch (err) {
     console.error('[LINE Notify] 🔴 주문 알림 처리 중 예외:', err);
+  }
+
+  try {
+    await tagCouponUsed(order);
+  } catch (err) {
+    console.error('[Coupon Tag] 🔴 처리 중 예외:', err);
   }
 
   // 어필리에이트 장부 (#178). AFFILIATE_ENABLED 가 꺼져 있으면 아무것도 하지 않는다.

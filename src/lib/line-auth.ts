@@ -104,6 +104,8 @@ export interface LineCallbackResult {
   returnTo?: string;
   /** 서명된 state 에서 복원한 진입 경로. 보상 쿠폰을 고르는 데 쓴다 */
   loginSource?: LoginSource | null;
+  /** 이번 로그인이 첫 LINE 연결인가 — 장바구니 쿠폰 할인 줄 표시 조건 (#242) */
+  newlyLinked?: boolean;
 }
 
 /** 서명된 state 는 `<base64url payload>.<base64url 서명>` 형식이다 */

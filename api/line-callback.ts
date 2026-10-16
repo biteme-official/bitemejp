@@ -87,6 +87,12 @@ interface ShopifySyncResult {
   shopifyCustomerId: string | null;
   /** 아직 실제 이메일이 없어 주문 확인 메일이 도달하지 못하는 상태 */
   needsEmail: boolean;
+  /**
+   * 이번 로그인이 이 고객의 **첫 LINE 연결**인가 (#242). 장바구니 쿠폰 할인 줄은 새로 연결한
+   * 사람에게만 보인다. line_id 로 찾은 기존 연결이거나 이미 line_member 태그가 있으면 false.
+   * 태그 조회가 실패하면 판정할 수 없으므로 false(줄 숨김) 쪽으로 둔다.
+   */
+  newlyLinked: boolean;
 }
 
 /**
@@ -235,6 +241,7 @@ async function syncLineUserToShopify(
     shopifyEmail: '',
     shopifyCustomerId: null,
     needsEmail: false,
+    newlyLinked: false,
   };
 
   const shop = process.env.VITE_SHOPIFY_STORE_DOMAIN;
@@ -341,6 +348,7 @@ async function syncLineUserToShopify(
 
   // 3. Admin API で顧客を検索して LINE userId をメタフィールドに保存
   let shopifyCustomerId: string | null = null;
+  let newlyLinked = false;
   try {
     if (!adminToken) throw new Error('Admin 토큰 없음');
 
@@ -385,6 +393,7 @@ async function syncLineUserToShopify(
       };
 
       if (Array.isArray(existingTags)) {
+        newlyLinked = !existing && !existingTags.includes(memberTag);
         // 유입경로 태그는 **처음 연결될 때만** 남긴다(first-touch). 재로그인마다 덮어쓰면
         // "무엇이 이 고객을 데려왔나"가 마지막 클릭으로 바뀌어, 웰컴 메시지·리치메뉴가
         // 만든 연결의 기여가 통째로 사라진다.
@@ -445,6 +454,7 @@ async function syncLineUserToShopify(
     shopifyEmail: email,
     shopifyCustomerId,
     needsEmail: email.endsWith(PLACEHOLDER_EMAIL_DOMAIN),
+    newlyLinked,
   };
 }
 
@@ -620,6 +630,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       returnTo,
       // 진입 경로별로 다른 쿠폰을 심는다(연결 유도 발송 = LINKUP10). 서명 검증된 값만 나간다
       loginSource,
+      newlyLinked: shopifyResult.newlyLinked,
     });
   } catch (error) {
     console.error('[LINE Callback] Error:', error);

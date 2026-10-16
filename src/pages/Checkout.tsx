@@ -11,6 +11,7 @@ import { track } from '@/lib/track';
 import { getGA4LinkerParam } from '@/lib/ga4-ecommerce';
 import { toast } from 'sonner';
 import { AffiliateOfferNote } from '@/components/affiliate/AffiliateOfferNote';
+import { WelcomeCouponNote } from '@/components/cart/WelcomeCouponNote';
 
 interface ShippingForm {
   email: string;
@@ -309,6 +310,12 @@ export default function Checkout() {
             {/* 파트너 링크 할인 — 금액은 Shopify 결제 화면에서 반영된다 (#202) */}
             <AffiliateOfferNote
               variant="cart"
+              lines={items.filter(i => !i.isGift).map(i => ({ productId: i.product.node.id, unitPrice: parseFloat(i.price.amount), quantity: i.quantity }))}
+              currencyCode={currencyCode}
+            />
+            {/* LINE 로그인 쿠폰 — 금액은 Shopify 결제 화면에서 반영된다 */}
+            <WelcomeCouponNote
+              base={discountInfo && discountInfo.totalSavings > 0 ? discountInfo.discountedTotal : subtotal}
               lines={items.filter(i => !i.isGift).map(i => ({ productId: i.product.node.id, unitPrice: parseFloat(i.price.amount), quantity: i.quantity }))}
               currencyCode={currencyCode}
             />
