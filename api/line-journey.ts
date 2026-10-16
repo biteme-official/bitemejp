@@ -754,6 +754,15 @@ interface LastOrder {
   at: number;
   /** 마지막 출고 시각. 아직 전부 출고되지 않았으면 null — 받기 전이라 감상을 물을 수 없다. */
   shippedAt: number | null;
+  /**
+   * 품목 중 가장 늦은 예약 출고일(상품 태그 `preorder:YYYY-MM-DD`, JST 0시). 예약 품목이 없으면 null.
+   *
+   * 🔴 예약 상품은 **송장을 먼저 발행해 Shopify 출고 처리를 해 두고, 실제 출고는 이 날** 한다.
+   *    그래서 `shippedAt` 만 보면 물건이 나가기도 전에 시계가 돈다. 2026-10-16 실측: #3759 는
+   *    송장 9/25·예약 출고 10/22 였는데 10/14 에 「その後、いかがでしょうか」를 받았다(고객 미수령).
+   *    Shopify 엔 택배 상태(배송중·배달완료)가 전혀 안 들어와서 이 태그가 유일한 단서다.
+   */
+  preorderAt: number | null;
   itemTitle: string | null;
   itemCount: number;
 }
@@ -764,6 +773,27 @@ interface LastOrder {
  * 🔴 「D+21 인 주문」을 바로 찾지 않고 **마지막 주문**을 고르는 게 핵심이다. 주문 단위로
  *    보면 3주 전에 사고 지난주에 또 산 사람에게 "그동안 어떠셨나요"가 나간다.
  */
+/** 상품 태그 `preorder:YYYY-MM-DD` 중 가장 늦은 날(JST 0시). 없으면 null. src/lib/shopify.ts getPreorderDate 와 같은 형식 */
+export function latestPreorder(tags: string[]): number | null {
+  let latest: number | null = null;
+  for (const t of tags) {
+    const m = /^preorder:(\d{4}-\d{2}-\d{2})$/.exec(t.trim());
+    if (!m) continue;
+    const at = Date.parse(`${m[1]}T00:00:00+09:00`);
+    if (Number.isFinite(at) && (latest === null || at > latest)) latest = at;
+  }
+  return latest;
+}
+
+/**
+ * 재구매 시계가 시작되는 때 — 실제로 물건이 나간 날.
+ * 송장 발행(Shopify 출고 처리)과 예약 출고일 중 늦은 쪽이다. 아직 전부 출고 처리 전이면 null.
+ */
+export function readyAtOf(o: Pick<LastOrder, 'shippedAt' | 'preorderAt'>): number | null {
+  if (o.shippedAt === null) return null;
+  return o.preorderAt === null ? o.shippedAt : Math.max(o.shippedAt, o.preorderAt);
+}
+
 async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]> {
   const since = new Date(now - REPEAT_LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
   const latest = new Map<string, LastOrder>();
@@ -788,6 +818,7 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
                     title: string;
                     quantity: number;
                     originalUnitPriceSet: { shopMoney: { amount: string } } | null;
+                    product: { tags: string[] } | null;
                   };
                 }[];
               };
@@ -808,10 +839,11 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
             displayFulfillmentStatus
             fulfillments(first: 10) { createdAt }
             customer { id }
-            lineItems(first: 5) { edges { node {
+            lineItems(first: 20) { edges { node {
               title
               quantity
               originalUnitPriceSet { shopMoney { amount } }
+              product { tags }
             } } }
           } }
         }
@@ -845,6 +877,8 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
           n.displayFulfillmentStatus === 'FULFILLED' && n.fulfillments.length > 0
             ? Math.max(...n.fulfillments.map((f) => new Date(f.createdAt).getTime()))
             : null,
+        // 예약 품목은 증정품 거름망과 무관하게 전부 본다 — 6번째 줄에 있어도 출고를 막는다
+        preorderAt: latestPreorder((n.lineItems?.edges ?? []).flatMap((i) => i.node.product?.tags ?? [])),
         itemTitle: items[0]?.node?.title ?? null,
         itemCount: items.reduce((sum, i) => sum + (i.node.quantity ?? 1), 0),
       });
@@ -904,9 +938,14 @@ async function planRepeatPurchase(
 
   // 아직 다 출고되지 않은 주문 — 예약배송이 대부분이다. 다 나가면 그날부터 다시 센다.
   const notShipped = lastOrders.filter((o) => o.shippedAt === null);
+  // 송장은 나갔지만 예약 출고일이 아직 안 온 주문 — 물건은 창고에 있다
+  const preorderWaiting = lastOrders.filter(
+    (o) => o.shippedAt !== null && o.preorderAt !== null && o.preorderAt > now,
+  );
   const inWindow = lastOrders.filter((o) => {
-    if (o.shippedAt === null) return false;
-    const ageH = (now - o.shippedAt) / 3600_000;
+    const readyAt = readyAtOf(o);
+    if (readyAt === null) return false;
+    const ageH = (now - readyAt) / 3600_000;
     return ageH >= REPEAT_MIN_H && ageH < REPEAT_MAX_H;
   });
 
@@ -920,6 +959,7 @@ async function planRepeatPurchase(
     excluded: {
       // 창 밖 숫자다(오늘 창에 든 사람에서 빠진 게 아니다). 예약 주문이 쌓이면 여기가 커진다.
       출고전대기: notShipped.length,
+      예약출고대기: preorderWaiting.length,
       // 구매 고객의 대부분은 LINE 을 안 쓴다. 이 값이 크다고 이상한 게 아니다 —
       // 2026-09-08 기준 구매 고객 2,234명 중 LINE 연결은 260명(11.6%)이다.
       라인미연결: inWindow.filter((o) => !lineByGid.has(o.customerGid)).length,
@@ -930,7 +970,9 @@ async function planRepeatPurchase(
       // 주문 id 로 막는다. 사람으로 막으면 다음 주문 뒤에는 영영 못 보낸다.
       ref: o.orderGid,
       text: buildRepeatMessage(o.itemTitle, o.itemCount, REPEAT_URL),
-      note: `마지막 주문 ${new Date(o.at).toISOString()} · 출고 ${new Date(o.shippedAt as number).toISOString()}`,
+      note:
+        `마지막 주문 ${new Date(o.at).toISOString()} · 출고 ${new Date(o.shippedAt as number).toISOString()}` +
+        (o.preorderAt !== null ? ` · 예약 출고 ${new Date(o.preorderAt).toISOString()}` : ''),
     })),
     record: {
       campaignId: `journey_${REPEAT_PURCHASE}`,
