@@ -603,6 +603,19 @@ interface CampaignStat {
    * (합계에는 그대로 들어간다). 매니저 브로드캐스트는 발송 기록 자체가 없어 daily 가 없다.
    */
   daily: CampaignDay[] | null;
+  /**
+   * 이 캠페인이 보내는(보낸) 문구. `attachCopy` 가 붙인다.
+   *   - template: 코드의 문안 함수로 만든 예시. 사람마다 다른 자리는 〔 〕 자리표시자
+   *   - sent: 발송할 때 이력에 남긴 원문 그대로
+   * 매니저 브로드캐스트와 원문 기록 이전의 직접 발송은 null 이다.
+   */
+  copy?: CampaignCopy | null;
+}
+
+interface CampaignCopy {
+  source: 'template' | 'sent';
+  /** 같은 캠페인 안에서 조건에 따라 문안이 갈리면 여러 개 */
+  variants: { label: string | null; text: string }[];
 }
 
 interface CampaignDay {
@@ -940,6 +953,55 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     .sort((a, b) => b.firstSentAt.localeCompare(a.firstSentAt));
 }
 
+/**
+ * 성과 표의 캠페인마다 문구를 붙인다.
+ *
+ * 저니는 사람마다 문안이 조금씩 달라(상품명·링크) 원문을 한 벌로 남길 수 없다. 대신
+ * **실제 발송에 쓰는 문안 함수**로 예시를 만든다 — 문구를 고치면 여기도 저절로 바뀐다.
+ * 직접 발송은 발송 때 `line_campaign` 이력에 남긴 원문(`text`)을 읽는다.
+ *
+ * 저니 모듈은 이 파일을 import 하므로 여기서는 **함수 안에서 동적으로** 불러온다.
+ * 맨 위에서 import 하면 서로 물려 한쪽 상수가 초기화되기 전에 읽힌다.
+ */
+async function attachCopy(campaigns: CampaignStat[]): Promise<CampaignStat[]> {
+  const [{ journeyCopy }, { restockCopy }, { inviteCopy, INVITE_CAMPAIGN_NAME }] = await Promise.all([
+    import('./line-journey.js'),
+    import('./line-restock.js'),
+    import('./line-invite.js'),
+  ]);
+  const templates: Record<string, CampaignCopy['variants']> = { ...journeyCopy(), restock: restockCopy() };
+
+  const sentById = new Map<string, string>();
+  const sentByUtm = new Map<string, string>();
+  const db = supabase();
+  if (db) {
+    const { data, error } = await db
+      .from('events')
+      .select('properties')
+      .eq('event_type', CAMPAIGN_EVENT)
+      .gte('created_at', new Date(Date.now() - 60 * 86_400_000).toISOString());
+    if (error) console.error('[LINE Campaign] 문구 이력 조회 실패:', error.message);
+    for (const row of (data ?? []) as { properties: { campaignId?: string; campaign?: string; text?: string } | null }[]) {
+      const p = row.properties;
+      if (!p?.text) continue;
+      if (p.campaignId) sentById.set(p.campaignId, p.text);
+      if (p.campaign) sentByUtm.set(p.campaign, p.text);
+    }
+  }
+
+  // 연결 유도는 매니저 발송처럼 UTM 으로만 표에 잡힌다(사람 단위 기록이 없는 narrowcast).
+  // 원문 기록 이전 발송도 문안 상수가 그대로라 코드에서 만들어 보여줄 수 있다.
+  const inviteSlug = `_line_${INVITE_CAMPAIGN_NAME}`;
+
+  return campaigns.map((c): CampaignStat => {
+    const sent = sentById.get(c.key) ?? sentByUtm.get(c.key);
+    if (sent) return { ...c, copy: { source: 'sent', variants: [{ label: null, text: sent }] } };
+    if (c.kind === 'journey' && templates[c.key]) return { ...c, copy: { source: 'template', variants: templates[c.key] } };
+    if (c.key.endsWith(inviteSlug)) return { ...c, copy: { source: 'template', variants: [{ label: null, text: inviteCopy() }] } };
+    return { ...c, copy: null };
+  });
+}
+
 // ─── 집계 ────────────────────────────────────────────────────────────────────
 
 function summarize(members: Member[]) {
@@ -1005,9 +1067,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         recentCampaigns(),
       ]);
       const audience = await fetchAudience();
-      const campaigns = await campaignStats(audience).catch((err) => {
+      const stats = await campaignStats(audience).catch((err) => {
         console.error('[LINE Campaign] 발송 성과 계산 실패:', err);
         return [];
+      });
+      // 문구는 덤이다 — 못 붙여도 성과 표는 그대로 나가야 한다
+      const campaigns = await attachCopy(stats).catch((err) => {
+        console.error('[LINE Campaign] 문구 붙이기 실패:', err);
+        return stats;
       });
       return res.status(200).json({
         ok: true,
@@ -1145,6 +1212,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       failedChunks: failures.length,
       url: message.url ?? null,
       textLength: built.text.length,
+      // 대시보드 성과 표에서 「무엇을 보냈나」를 보여주는 원문. 이 필드가 생기기 전 발송엔 없다
+      text: built.text,
     };
     await logCampaign(campaignId, record);
 

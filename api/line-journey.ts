@@ -346,7 +346,7 @@ export function trackedUrl(recoveryUrl: string, checkoutId: string): string {
   return `${CLICK_ORIGIN}/api/line-click?t=${signClick(recoveryUrl, ref, secret)}`;
 }
 
-function buildMessage(c: Candidate, url: string): string {
+function buildMessage(c: Pick<Candidate, 'itemTitle' | 'itemCount'>, url: string): string {
   const item = c.itemTitle
     ? `「${c.itemTitle}」${c.itemCount > 1 ? ` ほか${c.itemCount - 1}点` : ''}`
     : 'お選びいただいた商品';
@@ -1029,6 +1029,39 @@ async function deliver(plan: JourneyPlan, now: number, dryRun: boolean): Promise
     });
   }
   return base;
+}
+
+/**
+ * 대시보드에 보여줄 저니별 문구 — `GET /api/line-campaign` 의 `campaigns[].copy` 로 나간다.
+ *
+ * 문안을 여기서 따로 적지 않고 **실제 발송에 쓰는 함수를 그대로 부른다.** 문구를 고치면
+ * 대시보드도 저절로 바뀌고, 보여주는 문구와 나가는 문구가 어긋날 수가 없다.
+ * 사람마다 달라지는 자리(상품명·개인 링크)만 〔 〕 자리표시자로 채운다.
+ */
+export interface CopyVariant {
+  /** 같은 저니 안에서 문안이 갈리는 조건. 하나뿐이면 null */
+  label: string | null;
+  text: string;
+}
+
+const ITEM = '〔상품명〕';
+
+export function journeyCopy(): Record<string, CopyVariant[]> {
+  return {
+    [CART_RECOVERY]: [
+      { label: null, text: buildMessage({ itemTitle: ITEM, itemCount: 2 }, '〔고객별 장바구니 복구 링크〕') },
+    ],
+    [CART_ADD]: [
+      { label: null, text: buildCartAddMessage([{ productId: '', variantId: '', title: ITEM, quantity: 2 }], '〔고객별 장바구니 복구 링크〕') },
+    ],
+    [REPEAT_PURCHASE]: [
+      { label: null, text: buildRepeatMessage(ITEM, 2, REPEAT_URL) },
+    ],
+    [FIRST_PURCHASE]: [
+      { label: '일반 연결 (WELCOME10)', text: FIRST_PURCHASE_TEXT },
+      { label: '연결 유도 발송으로 연결 (LINKUP10)', text: INVITE_FIRST_PURCHASE_TEXT },
+    ],
+  };
 }
 
 /** `LINE_JOURNEY_ENABLED` 에 적힌 저니만 돈다. `all` 이면 전부. 값이 없으면 아무것도 안 보낸다. */

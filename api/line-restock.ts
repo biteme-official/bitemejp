@@ -619,6 +619,11 @@ export function buildRestockMessage(items: { productId: string; productTitle: st
   return lines.join('\n');
 }
 
+/** 대시보드용 문구 — 실제 발송 함수로 만든다. 상품 자리만 자리표시자다(line-journey.ts 의 journeyCopy 와 같은 규칙) */
+export function restockCopy(): { label: string | null; text: string }[] {
+  return [{ label: null, text: buildRestockMessage([{ productId: '〔상품ID〕', productTitle: '〔상품명〕', variantTitle: '' }]) }];
+}
+
 // ─── POST: 신청 ──────────────────────────────────────────────────────────────
 
 async function subscribe(req: VercelRequest, res: VercelResponse) {
