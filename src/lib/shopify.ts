@@ -62,11 +62,16 @@ export interface ShopifyProduct {
 }
 
 // 예약배송 태그 파싱: "preorder:YYYY-MM-DD" 형식 태그에서 날짜 추출
-export function getPreorderDate(tags: string[]): string | null {
+// 🔴 예약일(JST)이 지난 태그는 무시한다. 태그 삭제를 깜빡하면 상세·목록·장바구니·결제 전부에
+//    지난 날짜가 「発送予定」로 뜨고 「まとめて発送」 안내까지 붙는다 (#246).
+//    예약일 당일까지는 보여준다 — 그날 나가는 물건이다.
+export function getPreorderDate(tags: string[], now: number = Date.now()): string | null {
   const tag = tags.find(t => t.startsWith('preorder:'));
   if (!tag) return null;
   const date = tag.split(':')[1];
-  return date || null;
+  if (!date) return null;
+  const todayJst = new Date(now + 9 * 3600_000).toISOString().slice(0, 10);
+  return date < todayJst ? null : date;
 }
 
 // Storefront API helper function - proxied through server for secure token management

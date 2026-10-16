@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import { ShopifyProduct, createStorefrontCheckoutWithDiscount, fetchProductById, fetchCartPreview } from '@/lib/shopify';
+import { ShopifyProduct, createStorefrontCheckoutWithDiscount, fetchProductById, fetchCartPreview, fetchProductsByVariantIds } from '@/lib/shopify';
 import {
   GIFT_THRESHOLD, GIFT_PRODUCT_ID, GIFT_DISCOUNT_CODE,
   isGiftLine, shouldSendGiftCode,
@@ -60,6 +60,7 @@ interface CartStore {
   setCheckoutUrl: (url: string) => void;
   setLoading: (loading: boolean) => void;
   syncGiftItem: () => Promise<void>;
+  refreshProducts: () => Promise<void>;
   createCheckout: (lineItems?: { variantId: string; quantity: number }[], email?: string) => Promise<string | null>;
   getTotalItems: () => number;
   getTotalPrice: () => number;
@@ -196,6 +197,31 @@ export const useCartStore = create<CartStore>()(
         }
       },
 
+      /**
+       * 담긴 상품 정보를 최신으로 바꾼다.
+       *
+       * 🔴 카트는 **담을 때의 상품 정보(태그 포함)를 그대로 저장**한다. 그래서 운영에서 예약 태그를
+       *    지워도 이미 담긴 카트에는 「発送予定」가 계속 떴다 (#246). 페이지를 열 때 한 번 다시 받아
+       *    덮어쓴다. 수량·가격·옵션은 건드리지 않는다 — 상품 노드(태그·이름·이미지)만 바꾼다.
+       *    못 받아 온 옵션(삭제·네트워크 실패)은 예전 정보를 그대로 둔다. 조용히 지우지 않는다.
+       */
+      refreshProducts: async () => {
+        const ids = get().items.map(i => i.variantId);
+        if (ids.length === 0) return;
+        try {
+          const latest = await fetchProductsByVariantIds([...new Set(ids)]);
+          if (latest.size === 0) return;
+          set({
+            items: get().items.map(i => {
+              const node = latest.get(i.variantId);
+              return node ? { ...i, product: { node } } : i;
+            }),
+          });
+        } catch (e) {
+          console.warn('[Cart] 상품 정보 갱신 실패 — 저장된 정보로 표시합니다', e);
+        }
+      },
+
       createCheckout: async (lineItems, email) => {
         const { items, setLoading, setCheckoutUrl } = get();
         const checkoutItems = lineItems ?? items.map(item => ({
@@ -252,6 +278,10 @@ export const useCartStore = create<CartStore>()(
         cartId: state.cartId,
         checkoutUrl: state.checkoutUrl,
       }),
+      // 저장된 카트를 불러온 직후(페이지를 열 때마다 한 번) 상품 정보를 최신으로 맞춘다
+      onRehydrateStorage: () => (state) => {
+        void state?.refreshProducts();
+      },
     }
   )
 );
