@@ -432,7 +432,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                       <img
                         src={image.url}
                         alt={image.altText || product.node.title}
-                        className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${isCompletelyOutOfStock ? 'opacity-50' : ''}`}
+                        className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${isCompletelyOutOfStock && !launch ? 'opacity-50' : ''}`}
                         loading="lazy"
                       />
                     ) : (
@@ -557,7 +557,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                             );
                           }
                           return (
-                            <span className={`font-bold text-sm ${isCompletelyOutOfStock ? 'text-muted-foreground' : 'text-primary'}`} translate="no">
+                            <span className={`font-bold text-sm ${isCompletelyOutOfStock && !launch ? 'text-muted-foreground' : 'text-primary'}`} translate="no">
                               {formatPrice(price.amount, price.currencyCode)}
                             </span>
                           );
