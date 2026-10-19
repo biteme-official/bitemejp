@@ -14,7 +14,8 @@ import { trackViewItemList, shopifyToGA4Item } from '@/lib/ga4-ecommerce';
 import { track } from '@/lib/track';
 import { RestockCardButton } from '@/components/product/RestockNotifyButton';
 import { toRestockProduct } from '@/stores/restockStore';
-import { isHiddenSoldOut } from '@/lib/productStock';
+import { getUpcomingLaunch, isHiddenSoldOut, launchLabel } from '@/lib/productStock';
+import { LaunchCardButton } from '@/components/product/LaunchNotifyButton';
 
 // Product skeleton component
 const ProductSkeleton = () => (
@@ -419,6 +420,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
               const image = product.node.images.edges[0]?.node;
               const price = product.node.priceRange.minVariantPrice;
               const isCompletelyOutOfStock = !product.node.variants.edges.some(v => v.node.availableForSale);
+              const launch = getUpcomingLaunch(product.node);
 
               return (
                 <div
@@ -459,8 +461,20 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                         className={`h-4 w-4 ${isWishlisted(product.node.id) ? 'fill-red-500 text-red-500' : 'text-muted-foreground'}`}
                       />
                     </button>
+                    {/* 출시 예정 — 품절이 아니라 아직 판매 전 (#248) */}
+                    {launch && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/40">
+                        <span className="bg-primary text-primary-foreground px-4 py-2 text-sm font-bold uppercase tracking-wider">
+                          Coming Soon
+                        </span>
+                        <span className="bg-background/85 text-foreground text-xs font-semibold px-2 py-0.5 rounded">
+                          {launchLabel(launch)}
+                        </span>
+                        <LaunchCardButton productId={product.node.id} />
+                      </div>
+                    )}
                     {/* Sold Out Overlay */}
-                    {isCompletelyOutOfStock && (
+                    {isCompletelyOutOfStock && !launch && (
                       <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/60">
                         <span className="bg-foreground text-background px-4 py-2 text-sm font-bold uppercase tracking-wider">
                           Sold Out

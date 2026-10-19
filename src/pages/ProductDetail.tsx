@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Share2, Minus, Plus, ShoppingCart, Check, Truck, Shield, Heart } from "lucide-react";
+import { ChevronLeft, ChevronRight, Share2, Minus, Plus, ShoppingCart, Check, Truck, Shield, Heart, Bell } from "lucide-react";
 import DOMPurify from "dompurify";
 
 const sanitizeHtml = (html: string): string =>
@@ -19,8 +19,9 @@ import { ReviewWidget } from "@/components/product/ReviewWidget";
 import { useAuthStore } from "@/stores/authStore";
 import { PartnerProductLink } from "@/components/product/PartnerProductLink";
 import { RestockNotifyButton } from "@/components/product/RestockNotifyButton";
+import { LaunchNotifyButton } from "@/components/product/LaunchNotifyButton";
 import { RESTOCK_PARAM, toRestockProduct } from "@/stores/restockStore";
-import { isVariantDiscontinued } from "@/lib/productStock";
+import { getLaunchTag, isVariantDiscontinued, launchLabel } from "@/lib/productStock";
 import { AffiliateOfferNote } from "@/components/affiliate/AffiliateOfferNote";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -530,6 +531,8 @@ export default function ProductDetail() {
   const price = selectedVariant?.price || product.priceRange.minVariantPrice;
   const totalPrice = parseFloat(price.amount) * quantity;
   const maxQuantity = selectedVariant?.quantityAvailable ?? 99;
+  // 출시 예정 (#248) — 태그가 있고 살 수 있는 옵션이 하나도 없을 때만. 하나라도 풀리면 보통 상품
+  const launch = product.variants.edges.some(v => isVariantAvailable(v.node)) ? null : getLaunchTag(product.tags);
 
   return (
     <div className="bg-background min-h-screen flex flex-col pb-24 overflow-x-hidden w-full max-w-[100vw]">
@@ -845,7 +848,7 @@ export default function ProductDetail() {
               ) : (
                 // Size/other options - text buttons with availability status
                 <div className="space-y-2">
-                  {!product.variants.edges.every(v => isVariantAvailable(v.node)) && (
+                  {!launch && !product.variants.edges.every(v => isVariantAvailable(v.node)) && (
                     <p className="text-xs text-destructive font-medium">
                       {product.variants.edges.some(v => isVariantAvailable(v.node)) ? t('product.someSizesUnavailable') : t('product.soldOut')}
                     </p>
@@ -912,10 +915,21 @@ export default function ProductDetail() {
           </div>
         </div>
 
+        {/* 출시 예정 안내 (#248) */}
+        {launch && (
+          <div className="flex items-center gap-3 px-4 py-3 mb-4 rounded-lg bg-primary/5 border border-primary/30">
+            <Bell className="h-5 w-5 flex-shrink-0 text-primary" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">COMING SOON · {launchLabel(launch)}</p>
+              <p className="text-xs text-muted-foreground">発売したらLINEでお知らせします（下のボタンから登録）</p>
+            </div>
+          </div>
+        )}
+
         {/* 予約配送バナー */}
         {(() => {
           const preorderDate = getPreorderDate(product.tags ?? []);
-          if (!preorderDate) return null;
+          if (!preorderDate || launch) return null;
           const [y, m, d] = preorderDate.split('-');
           return (
             <div className="space-y-2 mb-4">
@@ -1071,7 +1085,10 @@ export default function ProductDetail() {
               )}
             />
           </button>
-          {selectedVariant && !isVariantAvailable(selectedVariant) && isVariantDiscontinued(product.tags, selectedVariant.title) ? (
+          {launch ? (
+            // 출시 예정 → 담기·바로구매·재입고 대신 오픈 LINE 알림 신청 (#248)
+            <LaunchNotifyButton productId={product.id} />
+          ) : selectedVariant && !isVariantAvailable(selectedVariant) && isVariantDiscontinued(product.tags, selectedVariant.title) ? (
             // 판매 종료 옵션 → 다시 들어오지 않으니 알림도 받지 않는다 (#223)
             <Button disabled variant="outline" className="flex-1 h-12 font-semibold">
               販売終了
