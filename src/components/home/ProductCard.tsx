@@ -5,6 +5,8 @@ import { useWishlistStore } from "@/stores/wishlistStore";
 import { cn } from "@/lib/utils";
 import { RestockCardButton } from "@/components/product/RestockNotifyButton";
 import { toRestockProduct } from "@/stores/restockStore";
+import { LaunchCardButton } from "@/components/product/LaunchNotifyButton";
+import { getUpcomingLaunch, launchLabel } from "@/lib/productStock";
 
 /**
  * 메인 섹션(新商品·人気商品·특집)이 공통으로 쓰는 상품 카드 (#185).
@@ -81,6 +83,7 @@ export function ProductCard({
   const productUrl = `/product/${node.id.split("/").pop()}`;
   const isAvailable = node.variants.edges.some(v => v.node.availableForSale);
   const preorderDate = getPreorderDate(node.tags ?? []);
+  const launch = getUpcomingLaunch(node);
   const { pct, final, original } = resolvePrice(product, discountPct, collectionDiscountPct);
   const wishlisted = isWishlisted(node.id);
 
@@ -152,7 +155,18 @@ export function ProductCard({
           <Heart className={cn("h-3.5 w-3.5", wishlisted ? "fill-red-500 text-red-500" : "text-muted-foreground")} />
         </button>
 
-        {!isAvailable && (
+        {launch ? (
+          // 출시 예정 — 품절이 아니라 아직 판매 전 (#248)
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+            <span className="bg-primary text-primary-foreground text-[10px] font-bold px-2 py-0.5 rounded">
+              Coming Soon
+            </span>
+            <span className="bg-background/85 text-foreground text-[10px] font-semibold px-1.5 py-0.5 rounded">
+              {launchLabel(launch)}
+            </span>
+            <LaunchCardButton productId={node.id} size="sm" />
+          </div>
+        ) : !isAvailable && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
             <span className="bg-foreground/80 text-background text-[10px] font-bold px-2 py-0.5 rounded">
               Sold Out

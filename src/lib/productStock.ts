@@ -45,3 +45,54 @@ export function isHiddenSoldOut(p: ShopifyProduct): boolean {
   if (isProductAvailable(p)) return false;
   return p.node.variants.edges.every((e) => isVariantDiscontinued(p.node.tags, e.node.title));
 }
+
+/**
+ * 출시 예정 (#248) — 아직 판매 전인 신상품. 「SOLD OUT」 대신 「COMING SOON」, 재입고 대신 오픈 알림.
+ *
+ * Shopify 상품 태그로 정한다.
+ *   - `発売予定`              발매일 미정 → 「近日発売」
+ *   - `発売予定:2026-11-01`   발매일 표시 → 「11月1日発売予定」 (날짜가 지났으면 「近日発売」)
+ * `coming_soon`·`출시예정` 도 같은 뜻으로 받는다.
+ *
+ * 🔑 옵션이 하나라도 살 수 있게 되면 태그가 남아 있어도 보통 상품으로 보인다 — 오픈 때 태그 떼기를
+ *    깜빡해도 「COMING SOON」이 살 수 있는 상품을 가리지 않게.
+ * api/line-launch.ts 에 같은 규칙이 한 벌 더 있다(서버는 src 를 import 하지 않는다) — 같이 고칠 것.
+ */
+const LAUNCH_TAGS = ["発売予定", "coming_soon", "출시예정"];
+
+export interface LaunchInfo {
+  /** 발매일 YYYY-MM-DD (JST). 미정이거나 지났으면 null */
+  date: string | null;
+}
+
+/** 출시 예정 태그 — 판매 여부와 상관없이 태그만 본다 */
+export function getLaunchTag(tags: string[] | undefined, now: number = Date.now()): LaunchInfo | null {
+  for (const raw of tags ?? []) {
+    const t = raw.trim();
+    for (const key of LAUNCH_TAGS) {
+      if (t.toLowerCase() === key.toLowerCase()) return { date: null };
+      if (!t.toLowerCase().startsWith(`${key.toLowerCase()}:`)) continue;
+      const date = t.slice(key.length + 1).trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { date: null };
+      const todayJst = new Date(now + 9 * 3600_000).toISOString().slice(0, 10);
+      return { date: date < todayJst ? null : date };
+    }
+  }
+  return null;
+}
+
+/** 지금 「COMING SOON」으로 보여 줄 상품인가 — 태그가 있고 살 수 있는 옵션이 하나도 없음 */
+export function getUpcomingLaunch(node: {
+  tags?: string[];
+  variants: { edges: { node: { availableForSale: boolean } }[] };
+}): LaunchInfo | null {
+  if (node.variants.edges.some((e) => e.node.availableForSale)) return null;
+  return getLaunchTag(node.tags);
+}
+
+/** 「11月1日発売予定」 · 「近日発売」 */
+export function launchLabel(info: LaunchInfo): string {
+  if (!info.date) return "近日発売";
+  const [, m, d] = info.date.split("-").map(Number);
+  return `${m}月${d}日発売予定`;
+}

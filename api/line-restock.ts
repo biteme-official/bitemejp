@@ -54,8 +54,8 @@ const ALLOWED_ORIGINS = [
 const PRODUCT_GID = /^gid:\/\/shopify\/Product\/\d+$/;
 const VARIANT_GID = /^gid:\/\/shopify\/ProductVariant\/\d+$/;
 
-/** api/line-callback.ts 의 signSessionToken 과 한 쌍 (api/line-cart.ts 와 같은 구현) */
-function verifySessionToken(token: unknown, secret: string): { lineUserId: string } | null {
+/** api/line-callback.ts 의 signSessionToken 과 한 쌍 (api/line-cart.ts 와 같은 구현). api/line-launch.ts 도 쓴다 */
+export function verifySessionToken(token: unknown, secret: string): { lineUserId: string } | null {
   if (typeof token !== 'string') return null;
 
   const dot = token.indexOf('.');
@@ -79,7 +79,7 @@ function verifySessionToken(token: unknown, secret: string): { lineUserId: strin
   }
 }
 
-function getCorsOrigin(req: VercelRequest): string {
+export function getCorsOrigin(req: VercelRequest): string {
   const origin = req.headers.origin || '';
   return ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
 }
@@ -93,7 +93,7 @@ function authorized(req: VercelRequest): boolean {
 }
 
 /** 발송·어드민 목록은 어드민만 — 크론 시크릿으로는 열지 않는다 */
-function adminOnly(req: VercelRequest): boolean {
+export function adminOnly(req: VercelRequest): boolean {
   return !!process.env.ADMIN_SECRET && req.headers.authorization === `Bearer ${process.env.ADMIN_SECRET}`;
 }
 
@@ -184,7 +184,7 @@ async function fetchVariantStates(token: string, variantIds: string[]): Promise<
  * 공식계정 친구인가. push 는 친구에게만 닿으므로 신청 시점에 알려 준다.
  * 확인이 안 되면(토큰 없음·LINE 장애) null — 신청은 받고 안내만 생략한다.
  */
-async function isFriend(userId: string): Promise<boolean | null> {
+export async function isFriend(userId: string): Promise<boolean | null> {
   try {
     const res = await fetch(`https://api.line.me/v2/bot/profile/${encodeURIComponent(userId)}`, {
       headers: { Authorization: `Bearer ${lineToken()}` },
@@ -198,7 +198,7 @@ async function isFriend(userId: string): Promise<boolean | null> {
   }
 }
 
-async function pushLine(userId: string, text: string): Promise<'sent' | 'not-friend' | 'failed'> {
+export async function pushLine(userId: string, text: string): Promise<'sent' | 'not-friend' | 'failed'> {
   const res = await fetch('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${lineToken()}` },
@@ -226,13 +226,13 @@ function subRef(variantId: string, createdAt: string): string {
   return `${variantId.split('/').pop()}@${createdAt}`;
 }
 
-type Db = NonNullable<ReturnType<typeof supabase>>;
+export type Db = NonNullable<ReturnType<typeof supabase>>;
 
 /**
  * PostgREST 는 한 번에 1,000행까지만 준다 — 조용히 잘리지 않게 끝까지 읽는다.
  * 정렬은 created_at 으로 고정한다(페이지 사이에 행이 밀리지 않도록).
  */
-async function readAll<T>(db: Db, eventType: string, columns: string, since: string): Promise<T[]> {
+export async function readAll<T>(db: Db, eventType: string, columns: string, since: string): Promise<T[]> {
   const out: T[] = [];
   for (let from = 0; from < 100_000; from += 1000) {
     const { data, error } = await db
@@ -481,7 +481,7 @@ export interface RestockAdminRow {
   sentAt: string | null;
 }
 
-async function lineDisplayName(userId: string): Promise<string | null> {
+export async function lineDisplayName(userId: string): Promise<string | null> {
   try {
     const res = await fetch(`https://api.line.me/v2/bot/profile/${encodeURIComponent(userId)}`, {
       headers: { Authorization: `Bearer ${lineToken()}` },
@@ -595,7 +595,7 @@ function productUrl(productId: string): string {
 }
 
 /** 줄바꿈·제어문자를 지운다. 상품명에 섞여 들어오면 문안 줄이 어긋난다. */
-function oneLine(v: string): string {
+export function oneLine(v: string): string {
   return [...v].map((ch) => (ch.codePointAt(0)! < 0x20 || ch.codePointAt(0)! === 0x7f ? ' ' : ch)).join('').trim();
 }
 
