@@ -14,6 +14,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import ListPager from "@/components/admin/ListPager";
+import { usePaged } from "@/hooks/usePaged";
 
 type Status = "waiting" | "ready" | "sent" | "not_friend" | "gone";
 
@@ -184,6 +186,10 @@ export default function LaunchTab({ secret }: { secret: string }) {
     }
   };
 
+  // 목록마다 10개씩 (#254)
+  const productPage = usePaged(products);
+  const rowPage = usePaged(rows);
+
   if (isLoading) return <p className="text-xs text-muted-foreground py-8 text-center">불러오는 중…</p>;
   if (error || !data) {
     return (
@@ -285,7 +291,7 @@ export default function LaunchTab({ secret }: { secret: string }) {
               {products.length === 0 && (
                 <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">출시 예정 상품이 없습니다. Shopify 상품에 「発売予定」 태그를 달아 주세요.</td></tr>
               )}
-              {products.map((p) => {
+              {productPage.items.map((p) => {
                 const canPick = p.state === "open" && p.waiting > 0;
                 return (
                   <tr key={p.productId} className={cn("border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top", canPick && "bg-amber-50/50")}>
@@ -314,6 +320,7 @@ export default function LaunchTab({ secret }: { secret: string }) {
               })}
             </tbody>
           </table>
+          <ListPager p={productPage} />
         </CardContent>
       </Card>
 
@@ -332,7 +339,7 @@ export default function LaunchTab({ secret }: { secret: string }) {
               {rows.length === 0 && (
                 <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">신청이 없습니다.</td></tr>
               )}
-              {rows.map((r) => (
+              {rowPage.items.map((r) => (
                 <tr key={r.ref + r.userTail} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
                   <td className="whitespace-nowrap tabular-nums">{jst(r.createdAt)}</td>
                   <td>
@@ -350,6 +357,7 @@ export default function LaunchTab({ secret }: { secret: string }) {
               ))}
             </tbody>
           </table>
+          <ListPager p={rowPage} />
         </CardContent>
       </Card>
 
