@@ -417,8 +417,46 @@ ${JSON.stringify(titles)}`;
   return out;
 }
 
+interface ProductNodesResponse {
+  data?: { nodes: ({ id: string; title: string; nameKo: { value: string } | null } | null)[] };
+  errors?: unknown;
+}
+
+/** 상품 id 목록의 현재 일본어명 + 한글명 메타필드. 없는(삭제된) 상품은 빠진다 */
+async function fetchProductNames(
+  token: string,
+  productIds: string[],
+): Promise<{ productId: string; title: string; titleKo: string | null; titleKoSource: 'shopify' | 'ai' | null }[]> {
+  const out: { productId: string; title: string; titleKo: string | null; titleKoSource: 'shopify' | 'ai' | null }[] = [];
+  for (let i = 0; i < productIds.length; i += 250) {
+    const res = await adminGraphQL<ProductNodesResponse>(
+      token,
+      `query($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          ... on Product {
+            id
+            title
+            nameKo: metafield(namespace: "${NAME_KO_NAMESPACE}", key: "${NAME_KO_KEY}") { value }
+          }
+        }
+      }`,
+      { ids: productIds.slice(i, i + 250) },
+    );
+    if (!res?.data?.nodes) throw new Error(`상품명 조회 실패: ${JSON.stringify(res?.errors ?? res).slice(0, 200)}`);
+    for (const n of res.data.nodes) {
+      if (!n?.id || !n.title) continue;
+      const ko = n.nameKo?.value?.trim() || null;
+      out.push({ productId: n.id, title: n.title, titleKo: ko, titleKoSource: ko ? 'shopify' : null });
+    }
+  }
+  return out;
+}
+
 /** 메타필드가 없는 상품에 AI 한글명을 붙인다. 번역은 저장해 두고 다음부터 재사용 */
-async function attachKoreanTitles(db: Db, products: SoldOutProduct[]): Promise<void> {
+async function attachKoreanTitles(
+  db: Db,
+  products: { title: string; titleKo: string | null; titleKoSource: 'shopify' | 'ai' | null }[],
+): Promise<void> {
   const need = products.filter((p) => !p.titleKo);
   if (need.length === 0) return;
   const cached = await readAll<{ properties: { title?: string; ko?: string } | null }>(
@@ -576,8 +614,24 @@ async function adminList(req: VercelRequest, res: VercelResponse) {
     soldOutError = e instanceof Error ? e.message : '품절 목록 조회 실패';
   }
 
+  // 신청 상품의 한글명 (#258) — 품절 목록에서 이미 붙인 건 그대로 쓰고, 나머지만 조회·번역한다.
+  // 실패해도 목록은 일본어만으로 보여 준다
+  const namesKo: Record<string, { ko: string; source: 'shopify' | 'ai' }> = {};
+  for (const p of soldOut) if (p.titleKo && p.titleKoSource) namesKo[p.productId] = { ko: p.titleKo, source: p.titleKoSource };
+  try {
+    const missing = [...new Set(out.map((r) => r.productId))].filter((id) => !namesKo[id]).slice(0, 250);
+    if (missing.length) {
+      const named = await fetchProductNames(await getAdminToken(), missing);
+      await attachKoreanTitles(db, named);
+      for (const p of named) if (p.titleKo && p.titleKoSource) namesKo[p.productId] = { ko: p.titleKo, source: p.titleKoSource };
+    }
+  } catch (e) {
+    console.error('[LINE Restock] 신청 상품 한글명 실패:', e instanceof Error ? e.message : e);
+  }
+
   return res.status(200).json({
     rows: out,
+    namesKo,
     soldOut,
     soldOutError,
     enabled: process.env.LINE_RESTOCK_ENABLED === '1',
