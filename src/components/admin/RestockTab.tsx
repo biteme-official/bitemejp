@@ -54,6 +54,8 @@ interface RestockAdminData {
   /** 지금 품절 옵션이 있는 판매 중 상품 (#225) */
   soldOut?: SoldOutProduct[];
   soldOutError?: string | null;
+  /** 신청 상품의 한글명 (#258) — 메타필드 custom.name_ko, 없으면 AI 번역 */
+  namesKo?: Record<string, { ko: string; source: "shopify" | "ai" }>;
   enabled: boolean;
   /** 지금 JST 21~09시인가 — 막지는 않고 경고만 */
   quietHours?: boolean;
@@ -407,12 +409,12 @@ export default function RestockTab({ secret }: { secret: string }) {
           <table className="w-full text-xs">
             <thead className="border-b text-muted-foreground">
               <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
-                <th>상품</th><th>옵션 · 신청 수</th><th className="text-right">재입고됨</th><th className="text-right">품절 중</th><th className="text-right" />
+                <th>상품</th><th>한글 상품명</th><th>옵션 · 신청 수</th><th className="text-right">재입고됨</th><th className="text-right">품절 중</th><th className="text-right" />
               </tr>
             </thead>
             <tbody>
               {groupShown.length === 0 && (
-                <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">해당하는 상품이 없습니다.</td></tr>
+                <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">해당하는 상품이 없습니다.</td></tr>
               )}
               {groupPage.items.map((p) => {
                 const on = p.refs.length > 0 && productFilter === p.productId && picked.length === p.refs.length && p.refs.every((ref) => selected.has(ref));
@@ -420,6 +422,16 @@ export default function RestockTab({ secret }: { secret: string }) {
                   <tr key={p.productId} className={cn("border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top", on && "bg-amber-50")}>
                     <td className="min-w-[200px]">
                       <a href={productLink(p.productId)} target="_blank" rel="noopener noreferrer" className="hover:underline">{p.title}</a>
+                    </td>
+                    <td className="min-w-[160px]">
+                      {data.namesKo?.[p.productId] ? (
+                        <>
+                          {data.namesKo[p.productId].ko}
+                          {data.namesKo[p.productId].source === "ai" && <span className="ml-1 rounded bg-muted px-1 text-[10px] text-muted-foreground">자동 번역</span>}
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td>
                       <div className="flex flex-wrap gap-1">
