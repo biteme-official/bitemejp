@@ -6,8 +6,11 @@
  *
  * 발송은 자동이 아니다 (#227). 재고가 풀린 신청(「재입고됨」)을 이 화면에서 골라 「선택 발송」을 눌러야 나간다.
  * 누르면 먼저 미리보기(몇 명·어떤 문안)를 받고, 확인을 한 번 더 눌러야 실제로 보낸다.
+ *
+ * 상품별 발송 (#252) — 「재입고됨」 신청을 상품으로 묶어 「이 상품만 보내기」로 한 상품만 고른다.
+ * 신청 목록의 「전체 선택」은 보이는 줄에만 걸리므로, 상품 필터로 거르면 그 상품만 선택된다.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Send } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -142,6 +145,8 @@ export default function RestockTab({ secret }: { secret: string }) {
     staleTime: 60_000,
   });
   const [filter, setFilter] = useState<Status | "all">("all");
+  const [productFilter, setProductFilter] = useState<string>("all");
+  const listRef = useRef<HTMLDivElement>(null);
   const [soldKind, setSoldKind] = useState<"temp" | "ended">("temp");
   const [soldQuery, setSoldQuery] = useState("");
   // 수동 발송 (#227) — 고른 신청 → 미리보기(preview) → 확정
@@ -173,11 +178,48 @@ export default function RestockTab({ secret }: { secret: string }) {
     () => rows.filter((r) => r.sentAt).sort((a, b) => (b.sentAt ?? "").localeCompare(a.sentAt ?? "")),
     [rows],
   );
-  const shown = filter === "all" ? rows : rows.filter((r) => r.status === filter);
+  const shown = rows.filter(
+    (r) => (filter === "all" || r.status === filter) && (productFilter === "all" || r.productId === productFilter),
+  );
+
+  // 신청 목록 상품 필터 — 신청이 있는 상품만, 신청 많은 순
+  const productOptions = useMemo(() => {
+    const m = new Map<string, { title: string; n: number }>();
+    for (const r of rows) {
+      const cur = m.get(r.productId) ?? { title: r.productTitle || "(상품명 없음)", n: 0 };
+      cur.n++;
+      m.set(r.productId, cur);
+    }
+    return [...m.entries()].sort((a, b) => b[1].n - a[1].n || a[1].title.localeCompare(b[1].title));
+  }, [rows]);
+
+  // 「재입고됨」을 상품별로 — 한 상품만 골라 보내기용 (#252)
+  const readyByProduct = useMemo(() => {
+    const m = new Map<string, { productId: string; title: string; refs: string[]; variants: Map<string, number> }>();
+    for (const r of rows) {
+      if (r.status !== "ready") continue;
+      const cur = m.get(r.productId) ?? { productId: r.productId, title: r.productTitle || "(상품명 없음)", refs: [], variants: new Map() };
+      cur.refs.push(r.ref);
+      if (r.variantTitle) cur.variants.set(r.variantTitle, (cur.variants.get(r.variantTitle) ?? 0) + 1);
+      m.set(r.productId, cur);
+    }
+    return [...m.values()].sort((a, b) => b.refs.length - a.refs.length || a.title.localeCompare(b.title));
+  }, [rows]);
 
   // 고를 수 있는 건 「재입고됨」뿐. 목록이 새로 오면 더는 보낼 수 없게 된 선택은 지운다
   const readyRefs = useMemo(() => rows.filter((r) => r.status === "ready").map((r) => r.ref), [rows]);
   const picked = useMemo(() => readyRefs.filter((ref) => selected.has(ref)), [readyRefs, selected]);
+  // 미리보기에 「어느 상품이 몇 건」 — 의도하지 않은 상품이 섞였는지 바로 보이게
+  const pickedByProduct = useMemo(() => {
+    const m = new Map<string, { title: string; n: number }>();
+    for (const r of rows) {
+      if (r.status !== "ready" || !selected.has(r.ref)) continue;
+      const cur = m.get(r.productId) ?? { title: r.productTitle || "(상품명 없음)", n: 0 };
+      cur.n++;
+      m.set(r.productId, cur);
+    }
+    return [...m.values()].sort((a, b) => b.n - a.n);
+  }, [rows, selected]);
   const shownReady = shown.filter((r) => r.status === "ready");
   const allShownPicked = shownReady.length > 0 && shownReady.every((r) => selected.has(r.ref));
 
@@ -202,17 +244,28 @@ export default function RestockTab({ secret }: { secret: string }) {
     });
   };
 
-  const askPreview = async () => {
+  const askPreview = async (refs: string[] = picked) => {
     setBusy("preview");
     setSendMsg(null);
     try {
-      setPreview(await postSend(secret, picked, true));
+      setPreview(await postSend(secret, refs, true));
     } catch (e) {
       setSendMsg({ ok: false, text: `미리보기 실패: ${e instanceof Error ? e.message : ""}` });
     } finally {
       setBusy(null);
     }
   };
+  /** 한 상품만 — 그 상품의 「재입고됨」 신청만 고르고, 목록도 그 상품으로 거른 뒤 미리보기 */
+  const pickProduct = (productId: string, refs: string[]) => {
+    setPreview(null);
+    setSelected(new Set(refs));
+    setFilter("ready");
+    setProductFilter(productId);
+    // 미리보기는 아래 신청 목록에 뜬다 — 위에서 누르면 안 보이므로 내려 준다
+    listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    askPreview(refs);
+  };
+
   const confirmSend = async () => {
     setBusy("send");
     try {
@@ -399,17 +452,76 @@ export default function RestockTab({ secret }: { secret: string }) {
         </CardContent>
       </Card>
 
-      <Card>
+      {readyByProduct.length > 0 && (
+        <Card className="border-amber-300">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">
+              재입고됨 · 상품별 발송 <span className="font-normal text-muted-foreground">({readyByProduct.length}개 상품)</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <p className="mb-2 text-[11px] text-muted-foreground">
+              「이 상품만 보내기」를 누르면 그 상품 신청만 골라 미리보기를 띄웁니다 — 아래 신청 목록에서 확인 후 한 번 더 눌러야 나갑니다
+            </p>
+            <table className="w-full text-xs">
+              <thead className="border-b text-muted-foreground">
+                <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
+                  <th>상품</th><th>옵션</th><th className="text-right">보낼 신청</th><th className="text-right" />
+                </tr>
+              </thead>
+              <tbody>
+                {readyByProduct.map((p) => {
+                  const on = productFilter === p.productId && picked.length === p.refs.length && p.refs.every((ref) => selected.has(ref));
+                  return (
+                    <tr key={p.productId} className={cn("border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top", on && "bg-amber-50")}>
+                      <td className="min-w-[200px]">
+                        <a href={productLink(p.productId)} target="_blank" rel="noopener noreferrer" className="hover:underline">{p.title}</a>
+                      </td>
+                      <td>
+                        <div className="flex flex-wrap gap-1">
+                          {[...p.variants].map(([v, n]) => (
+                            <span key={v} className="rounded bg-muted px-1.5 py-0.5 text-[11px]">{v} {n}</span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="text-right tabular-nums font-semibold">{p.refs.length}건</td>
+                      <td className="text-right">
+                        <Button size="sm" variant={on ? "default" : "outline"} disabled={busy !== null} onClick={() => pickProduct(p.productId, p.refs)}>
+                          <Send className="h-3.5 w-3.5 mr-1" />
+                          {busy === "preview" && on ? "확인 중…" : "이 상품만 보내기"}
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card ref={listRef} className="scroll-mt-4">
         <CardHeader className="pb-2 flex flex-row flex-wrap items-center gap-2 space-y-0">
           <CardTitle className="text-sm mr-auto">
             신청 목록 <span className="font-normal text-muted-foreground">({shown.length}건{filter !== "all" && ` · ${STATUS[filter].label}`})</span>
           </CardTitle>
+          <select
+            value={productFilter}
+            onChange={(e) => setProductFilter(e.target.value)}
+            aria-label="상품으로 거르기"
+            className="h-7 max-w-[220px] rounded border bg-background px-2 text-xs"
+          >
+            <option value="all">상품 전체</option>
+            {productOptions.map(([id, o]) => (
+              <option key={id} value={id}>{o.title} ({o.n})</option>
+            ))}
+          </select>
           {readyRefs.length > 0 && filter !== "ready" && (
             <button onClick={() => setFilter("ready")} className="text-xs text-muted-foreground hover:text-foreground underline">
               재입고됨만 보기 ({readyRefs.length})
             </button>
           )}
-          <Button size="sm" disabled={picked.length === 0 || busy !== null} onClick={askPreview}>
+          <Button size="sm" disabled={picked.length === 0 || busy !== null} onClick={() => askPreview()}>
             <Send className="h-3.5 w-3.5 mr-1" />
             {busy === "preview" ? "확인 중…" : `선택 ${picked.length}건 보내기`}
           </Button>
@@ -424,6 +536,12 @@ export default function RestockTab({ secret }: { secret: string }) {
                   <p className="font-semibold">
                     {preview.willSend}명에게 LINE 을 보냅니다 (신청 {preview.ready}건{preview.ready > preview.willSend && " — 한 사람의 여러 옵션은 한 통으로 묶음"})
                   </p>
+                  {pickedByProduct.length > 0 && (
+                    <p>
+                      {pickedByProduct.length > 1 && <span className="font-semibold text-red-700">상품 {pickedByProduct.length}개가 섞여 있습니다 — </span>}
+                      {pickedByProduct.map((p) => `${p.title} ${p.n}건`).join(" · ")}
+                    </p>
+                  )}
                   {skippedNote(preview) && <p>{skippedNote(preview)}</p>}
                   {preview.quietHours && <p className="text-red-700 font-semibold">지금은 일본 시간 21~09시입니다 — 고객에게 밤·새벽에 도착합니다.</p>}
                   {!data.enabled && <p className="text-red-700 font-semibold">LINE_RESTOCK_ENABLED 가 꺼져 있어 보낼 수 없습니다.</p>}
