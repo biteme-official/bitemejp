@@ -9,6 +9,8 @@
  *
  * 상품별 발송 (#252) — 「재입고됨」 신청을 상품으로 묶어 「이 상품만 보내기」로 한 상품만 고른다.
  * 신청 목록의 「전체 선택」은 보이는 줄에만 걸리므로, 상품 필터로 거르면 그 상품만 선택된다.
+ *
+ * 목록은 10개씩 페이지로 나눈다 (#254). 「전체 선택」은 지금 페이지가 아니라 걸러진 목록 전체(모든 페이지)에 걸린다.
  */
 import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -17,6 +19,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import ListPager from "@/components/admin/ListPager";
+import { usePaged } from "@/hooks/usePaged";
 
 type Status = "waiting" | "ready" | "sent" | "not_friend" | "gone" | "discontinued";
 
@@ -313,6 +317,13 @@ export default function RestockTab({ secret }: { secret: string }) {
     );
   }, [soldOut, soldKind, soldQuery]);
 
+  // 목록마다 10개씩 (#254) — 필터·검색이 바뀌면 1페이지로
+  const soldPage = usePaged(soldShown, `${soldKind}|${soldQuery}`);
+  const waitPage = usePaged(byProduct);
+  const readyPage = usePaged(readyByProduct);
+  const listPage = usePaged(shown, `${filter}|${productFilter}`);
+  const sendPage = usePaged(sends);
+
   if (isLoading) return <p className="text-xs text-muted-foreground py-8 text-center">불러오는 중…</p>;
   if (error || !data) {
     return (
@@ -394,7 +405,7 @@ export default function RestockTab({ secret }: { secret: string }) {
               {soldShown.length === 0 && (
                 <tr><td colSpan={3} className="py-6 text-center text-muted-foreground">해당하는 품절 상품이 없습니다.</td></tr>
               )}
-              {soldShown.map((p) => (
+              {soldPage.items.map((p) => (
                 <tr key={p.productId} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
                   <td className="min-w-[220px]">
                     <a href={productLink(p.productId)} target="_blank" rel="noopener noreferrer" className="hover:underline">{p.title}</a>
@@ -419,6 +430,7 @@ export default function RestockTab({ secret }: { secret: string }) {
               ))}
             </tbody>
           </table>
+          <ListPager p={soldPage} />
           <p className="mt-2 text-[11px] text-muted-foreground">
             한글 상품명은 Shopify 상품 메타필드 <code>custom.name_ko</code> 에 적어 두면 그 값을 쓰고, 없으면 AI 가 번역합니다(「자동 번역」).
           </p>
@@ -440,7 +452,7 @@ export default function RestockTab({ secret }: { secret: string }) {
               {byProduct.length === 0 && (
                 <tr><td colSpan={3} className="py-6 text-center text-muted-foreground">기다리는 신청이 없습니다.</td></tr>
               )}
-              {byProduct.map(({ r, waiting, total }) => (
+              {waitPage.items.map(({ r, waiting, total }) => (
                 <tr key={r.variantId} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3">
                   <td><Product r={r} /></td>
                   <td className="text-right tabular-nums font-semibold">{waiting}명</td>
@@ -449,6 +461,7 @@ export default function RestockTab({ secret }: { secret: string }) {
               ))}
             </tbody>
           </table>
+          <ListPager p={waitPage} />
         </CardContent>
       </Card>
 
@@ -470,7 +483,7 @@ export default function RestockTab({ secret }: { secret: string }) {
                 </tr>
               </thead>
               <tbody>
-                {readyByProduct.map((p) => {
+                {readyPage.items.map((p) => {
                   const on = productFilter === p.productId && picked.length === p.refs.length && p.refs.every((ref) => selected.has(ref));
                   return (
                     <tr key={p.productId} className={cn("border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top", on && "bg-amber-50")}>
@@ -496,6 +509,7 @@ export default function RestockTab({ secret }: { secret: string }) {
                 })}
               </tbody>
             </table>
+            <ListPager p={readyPage} />
           </CardContent>
         </Card>
       )}
@@ -572,7 +586,8 @@ export default function RestockTab({ secret }: { secret: string }) {
               <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th]:text-left">
                 <th className="w-6">
                   <Checkbox
-                    aria-label="보이는 재입고됨 신청 전체 선택"
+                    aria-label="걸러진 재입고됨 신청 전체 선택 (모든 페이지)"
+                    title="걸러진 재입고됨 신청 전체 선택 (모든 페이지)"
                     disabled={shownReady.length === 0 || busy === "send"}
                     checked={allShownPicked}
                     onCheckedChange={(v) => toggleShown(v === true)}
@@ -585,7 +600,7 @@ export default function RestockTab({ secret }: { secret: string }) {
               {shown.length === 0 && (
                 <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">신청이 없습니다.</td></tr>
               )}
-              {shown.map((r) => (
+              {listPage.items.map((r) => (
                 <tr key={`${r.userTail}|${r.variantId}|${r.createdAt}`} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
                   <td>
                     {r.status === "ready" && (
@@ -605,6 +620,7 @@ export default function RestockTab({ secret }: { secret: string }) {
               ))}
             </tbody>
           </table>
+          <ListPager p={listPage} />
         </CardContent>
       </Card>
 
@@ -623,7 +639,7 @@ export default function RestockTab({ secret }: { secret: string }) {
               {sends.length === 0 && (
                 <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">아직 나간 알림이 없습니다.</td></tr>
               )}
-              {sends.map((r) => (
+              {sendPage.items.map((r) => (
                 <tr key={`${r.userTail}|${r.variantId}|${r.createdAt}`} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
                   <td className="whitespace-nowrap tabular-nums">{jst(r.sentAt)}</td>
                   <td><Customer r={r} /></td>
@@ -634,6 +650,7 @@ export default function RestockTab({ secret }: { secret: string }) {
               ))}
             </tbody>
           </table>
+          <ListPager p={sendPage} />
         </CardContent>
       </Card>
 
