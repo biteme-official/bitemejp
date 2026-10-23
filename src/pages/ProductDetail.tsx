@@ -21,7 +21,7 @@ import { PartnerProductLink } from "@/components/product/PartnerProductLink";
 import { RestockNotifyButton } from "@/components/product/RestockNotifyButton";
 import { LaunchNotifyButton } from "@/components/product/LaunchNotifyButton";
 import { RESTOCK_PARAM, toRestockProduct } from "@/stores/restockStore";
-import { getLaunchTag, isVariantDiscontinued, launchLabel } from "@/lib/productStock";
+import { getLaunchTag, isLaunchHeld, isVariantDiscontinued, launchLabel } from "@/lib/productStock";
 import { AffiliateOfferNote } from "@/components/affiliate/AffiliateOfferNote";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -532,7 +532,8 @@ export default function ProductDetail() {
   const totalPrice = parseFloat(price.amount) * quantity;
   const maxQuantity = selectedVariant?.quantityAvailable ?? 99;
   // 출시 예정 (#248) — 태그가 있고 살 수 있는 옵션이 하나도 없을 때만. 하나라도 풀리면 보통 상품
-  const launch = product.variants.edges.some(v => isVariantAvailable(v.node)) ? null : getLaunchTag(product.tags);
+  // (발매일이 아직 안 왔으면 재고가 있어도 출시 예정)
+  const launch = !isLaunchHeld(product.tags) && product.variants.edges.some(v => isVariantAvailable(v.node)) ? null : getLaunchTag(product.tags);
 
   return (
     <div className="bg-background min-h-screen flex flex-col pb-24 overflow-x-hidden w-full max-w-[100vw]">
