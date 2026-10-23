@@ -56,6 +56,8 @@ export function isHiddenSoldOut(p: ShopifyProduct): boolean {
  *
  * 🔑 옵션이 하나라도 살 수 있게 되면 태그가 남아 있어도 보통 상품으로 보인다 — 오픈 때 태그 떼기를
  *    깜빡해도 「COMING SOON」이 살 수 있는 상품을 가리지 않게.
+ *    단 발매일이 붙어 있고 그날이 아직 안 왔으면 재고가 있어도 「COMING SOON」을 지킨다 — 재고가 자동 연동돼
+ *    발매 전에 판매가 열려 버리는 일을 막으려고. 발매일(JST)이 되면 위 규칙대로 저절로 열린다.
  * api/line-launch.ts 에 같은 규칙이 한 벌 더 있다(서버는 src 를 import 하지 않는다) — 같이 고칠 것.
  */
 const LAUNCH_TAGS = ["発売予定", "coming_soon", "출시예정"];
@@ -81,12 +83,20 @@ export function getLaunchTag(tags: string[] | undefined, now: number = Date.now(
   return null;
 }
 
-/** 지금 「COMING SOON」으로 보여 줄 상품인가 — 태그가 있고 살 수 있는 옵션이 하나도 없음 */
+/** 발매일이 아직 안 온 출시 예정 상품 — 재고가 있어도 팔지 않는다 */
+export function isLaunchHeld(tags: string[] | undefined, now: number = Date.now()): boolean {
+  const date = getLaunchTag(tags, now)?.date;
+  if (!date) return false;
+  const todayJst = new Date(now + 9 * 3600_000).toISOString().slice(0, 10);
+  return date > todayJst;
+}
+
+/** 지금 「COMING SOON」으로 보여 줄 상품인가 — 태그가 있고 살 수 있는 옵션이 하나도 없음(발매일 전이면 재고 무관) */
 export function getUpcomingLaunch(node: {
   tags?: string[];
   variants: { edges: { node: { availableForSale: boolean } }[] };
 }): LaunchInfo | null {
-  if (node.variants.edges.some((e) => e.node.availableForSale)) return null;
+  if (!isLaunchHeld(node.tags) && node.variants.edges.some((e) => e.node.availableForSale)) return null;
   return getLaunchTag(node.tags);
 }
 

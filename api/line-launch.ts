@@ -9,6 +9,7 @@
  * 출시 예정 = Shopify 상품 태그 `発売予定` 또는 `発売予定:YYYY-MM-DD` (`coming_soon`·`출시예정` 도 같은 뜻).
  * src/lib/productStock.ts 의 getLaunchTag 와 같은 규칙 — 같이 고칠 것.
  * 「오픈」 = 상품이 판매 중(ACTIVE)이고 옵션이 하나라도 구매 가능. 태그를 떼지 않아도 오픈으로 본다.
+ *   단 `発売予定:YYYY-MM-DD` 의 발매일(JST)이 아직 안 왔으면 재고가 있어도 오픈 전이다(사이트도 「COMING SOON」).
  *
  * 🔴 자동 발송은 하지 않는다 — 재입고 알림(#227)과 같은 이유. 재고 수정 실수에도 바로 나가 버린다.
  *
@@ -65,6 +66,12 @@ function launchTag(tags: string[]): { date: string | null } | null {
   return null;
 }
 
+/** 발매일이 아직 안 왔는가 — 재고가 있어도 오픈 전으로 본다 (src/lib/productStock.ts isLaunchHeld 와 같은 규칙) */
+function launchHeld(date: string | null, now: number = Date.now()): boolean {
+  if (!date) return false;
+  return date > new Date(now + 9 * 3600_000).toISOString().slice(0, 10);
+}
+
 // ─── Shopify ─────────────────────────────────────────────────────────────────
 
 interface ProductState {
@@ -107,7 +114,7 @@ async function fetchProduct(token: string, productId: string): Promise<ProductSt
     productId: p.id,
     title: p.title,
     titleKo: null,
-    open: p.status === 'ACTIVE' && p.variants.nodes.some((v) => v.availableForSale),
+    open: p.status === 'ACTIVE' && !launchHeld(tag?.date ?? null) && p.variants.nodes.some((v) => v.availableForSale),
     tagged: !!tag,
     launchDate: tag?.date ?? null,
   };
@@ -170,7 +177,7 @@ async function fetchAllProducts(token: string): Promise<Map<string, ProductState
         tagged: !!tag,
         launchDate: tag?.date ?? null,
       };
-      if (p.status === 'ACTIVE' && v.availableForSale) cur.open = true;
+      if (p.status === 'ACTIVE' && v.availableForSale && !launchHeld(cur.launchDate)) cur.open = true;
       out.set(p.id, cur);
     }
     if (!conn.pageInfo.hasNextPage) break;
