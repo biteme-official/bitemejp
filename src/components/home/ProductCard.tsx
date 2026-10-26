@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Heart, ShoppingCart } from "lucide-react";
 import { ShopifyProduct, formatPrice, getPreorderDate } from "@/lib/shopify";
 import { useWishlistStore } from "@/stores/wishlistStore";
-import { cn } from "@/lib/utils";
+import { cn, shopifyImageUrl } from "@/lib/utils";
 import { RestockCardButton } from "@/components/product/RestockNotifyButton";
 import { toRestockProduct } from "@/stores/restockStore";
 import { LaunchCardButton } from "@/components/product/LaunchNotifyButton";
@@ -97,7 +97,7 @@ export function ProductCard({
       <div className="aspect-square bg-secondary relative overflow-hidden">
         {image ? (
           <img
-            src={image.url}
+            src={shopifyImageUrl(image.url, 480)}
             alt={image.altText || node.title}
             className={cn(
               "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",
