@@ -431,7 +431,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                   <div className="aspect-square bg-muted relative overflow-hidden">
                     {image ? (
                       <img
-                        src={shopifyImageUrl(image.url, 600)}
+                        src={shopifyImageUrl(image.url, 480)}
                         alt={image.altText || product.node.title}
                         className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${isCompletelyOutOfStock && !launch ? 'opacity-50' : ''}`}
                         loading="lazy"

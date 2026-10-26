@@ -9,7 +9,7 @@ import { CartDrawer } from "@/components/cart/CartDrawer";
 import { SearchAutocomplete } from "@/components/layout/SearchAutocomplete";
 import { fetchMenu, fetchCollections, ShopifyMenuItem, ShopifyMenu, ShopifyCollection, extractHandleFromUrl } from "@/lib/shopify";
 import biteMeLogo from "@/assets/bite-me-logo.png";
-import { cn } from "@/lib/utils";
+import { cn, shopifyImageUrl } from "@/lib/utils";
 
 interface HeaderProps {
   onSearch?: (query: string) => void;
@@ -249,7 +249,7 @@ export function Header({ onSearch, onCollectionSelect }: HeaderProps) {
                       <div className="flex items-center gap-3">
                         {collection.image ? (
                           <img
-                            src={collection.image.url}
+                            src={shopifyImageUrl(collection.image.url, 120)}
                             alt={collection.image.altText || collection.title}
                             className="h-8 w-8 rounded-md object-cover"
                           />

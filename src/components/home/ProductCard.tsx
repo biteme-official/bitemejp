@@ -97,7 +97,7 @@ export function ProductCard({
       <div className="aspect-square bg-secondary relative overflow-hidden">
         {image ? (
           <img
-            src={shopifyImageUrl(image.url, 600)}
+            src={shopifyImageUrl(image.url, 480)}
             alt={image.altText || node.title}
             className={cn(
               "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",
