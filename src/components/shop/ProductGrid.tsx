@@ -16,6 +16,7 @@ import { RestockCardButton } from '@/components/product/RestockNotifyButton';
 import { toRestockProduct } from '@/stores/restockStore';
 import { getUpcomingLaunch, isHiddenSoldOut, launchLabel } from '@/lib/productStock';
 import { LaunchCardButton } from '@/components/product/LaunchNotifyButton';
+import { shopifyImageUrl } from '@/lib/utils';
 
 // Product skeleton component
 const ProductSkeleton = () => (
@@ -430,7 +431,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                   <div className="aspect-square bg-muted relative overflow-hidden">
                     {image ? (
                       <img
-                        src={image.url}
+                        src={shopifyImageUrl(image.url, 600)}
                         alt={image.altText || product.node.title}
                         className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${isCompletelyOutOfStock && !launch ? 'opacity-50' : ''}`}
                         loading="lazy"

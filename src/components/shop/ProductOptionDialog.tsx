@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Minus, Plus, Check, ShoppingCart } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { cn, shopifyImageUrl } from '@/lib/utils';
 import { toast } from 'sonner';
 
 interface ProductOptionDialogProps {
@@ -123,7 +123,7 @@ export const ProductOptionDialog = ({ product, open, onOpenChange }: ProductOpti
           {image && (
             <div className="w-20 h-20 rounded-lg overflow-hidden bg-muted flex-shrink-0">
               <img 
-                src={image.url} 
+                src={shopifyImageUrl(image.url, 240)} 
                 alt={image.altText || productNode.title} 
                 className="w-full h-full object-cover"
               />
@@ -207,7 +207,7 @@ export const ProductOptionDialog = ({ product, open, onOpenChange }: ProductOpti
                             : "border-border hover:border-foreground/50",
                         )}>
                           {variantImage ? (
-                            <img src={variantImage} alt={value} className="w-full h-full object-cover" />
+                            <img src={shopifyImageUrl(variantImage, 200)} alt={value} className="w-full h-full object-cover" />
                           ) : (
                             <div className="w-full h-full" style={{ backgroundColor: bgColor }} />
                           )}
