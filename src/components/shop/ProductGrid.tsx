@@ -578,7 +578,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                         aria-label="カートに追加"
                         onClick={(e) => handleAddToCart(e, product)}
                         className="relative z-10 shrink-0 w-8 h-8 rounded-full bg-foreground text-background flex items-center justify-center hover:bg-primary transition-colors disabled:opacity-40 disabled:hover:bg-foreground"
-                        disabled={isCompletelyOutOfStock}
+                        disabled={isCompletelyOutOfStock || !!launch}
                       >
                         <ShoppingCart className="h-4 w-4" />
                       </button>

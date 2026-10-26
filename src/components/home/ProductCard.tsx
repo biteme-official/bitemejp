@@ -201,7 +201,7 @@ export function ProductCard({
           <button
             type="button"
             aria-label="カートに追加"
-            disabled={!isAvailable}
+            disabled={!isAvailable || !!launch}
             onClick={(e) => { e.stopPropagation(); onAddToCart(product); }}
             className="relative z-10 shrink-0 w-7 h-7 rounded-full bg-foreground text-background flex items-center justify-center hover:bg-primary transition-colors disabled:opacity-40 disabled:hover:bg-foreground"
           >
