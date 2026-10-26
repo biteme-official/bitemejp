@@ -52,19 +52,35 @@ export function isHiddenSoldOut(p: ShopifyProduct): boolean {
  * Shopify 상품 태그로 정한다.
  *   - `発売予定`              발매일 미정 → 「近日発売」
  *   - `発売予定:2026-11-01`   발매일 표시 → 「11月1日発売予定」 (날짜가 지났으면 「近日発売」)
+ *   - `発売予定:2026-11-01 20:00`  발매 시각까지 → 「11月1日 20時発売予定」 (시각이 지났으면 「近日発売」)
  * `coming_soon`·`출시예정` 도 같은 뜻으로 받는다.
  *
  * 🔑 옵션이 하나라도 살 수 있게 되면 태그가 남아 있어도 보통 상품으로 보인다 — 오픈 때 태그 떼기를
  *    깜빡해도 「COMING SOON」이 살 수 있는 상품을 가리지 않게.
  *    단 발매일이 붙어 있고 그날이 아직 안 왔으면 재고가 있어도 「COMING SOON」을 지킨다 — 재고가 자동 연동돼
- *    발매 전에 판매가 열려 버리는 일을 막으려고. 발매일(JST)이 되면 위 규칙대로 저절로 열린다.
+ *    발매 전에 판매가 열려 버리는 일을 막으려고. 발매일(JST) 0시, 시각이 있으면 그 시각이 되면 위 규칙대로 저절로 열린다.
  * api/line-launch.ts 에 같은 규칙이 한 벌 더 있다(서버는 src 를 import 하지 않는다) — 같이 고칠 것.
  */
 const LAUNCH_TAGS = ["発売予定", "coming_soon", "출시예정"];
 
 export interface LaunchInfo {
-  /** 발매일 YYYY-MM-DD (JST). 미정이거나 지났으면 null */
+  /** 발매일 `YYYY-MM-DD` 또는 `YYYY-MM-DD HH:MM` (JST). 미정이거나 지났으면 null */
   date: string | null;
+}
+
+/** `2026-11-01` · `2026-11-01 20:00` (`9:30` 처럼 한 자리 시도 받아 두 자리로) — 형식이 틀리면 null */
+function parseLaunchDate(s: string): string | null {
+  const m = /^(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}):(\d{2}))?$/.exec(s);
+  if (!m) return null;
+  if (m[2] === undefined) return m[1];
+  const h = Number(m[2]);
+  if (h > 23 || Number(m[3]) > 59) return null;
+  return `${m[1]} ${String(h).padStart(2, "0")}:${m[3]}`;
+}
+
+/** 지금 JST `YYYY-MM-DD HH:MM` — 발매일 문자열과 그대로 비교한다(날짜만인 `2026-11-01` 은 `2026-11-01 00:00` 보다 앞이라 그날 0시에 열린다) */
+function nowJst(now: number): string {
+  return new Date(now + 9 * 3600_000).toISOString().slice(0, 16).replace("T", " ");
 }
 
 /** 출시 예정 태그 — 판매 여부와 상관없이 태그만 본다 */
@@ -74,10 +90,12 @@ export function getLaunchTag(tags: string[] | undefined, now: number = Date.now(
     for (const key of LAUNCH_TAGS) {
       if (t.toLowerCase() === key.toLowerCase()) return { date: null };
       if (!t.toLowerCase().startsWith(`${key.toLowerCase()}:`)) continue;
-      const date = t.slice(key.length + 1).trim();
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { date: null };
-      const todayJst = new Date(now + 9 * 3600_000).toISOString().slice(0, 10);
-      return { date: date < todayJst ? null : date };
+      const date = parseLaunchDate(t.slice(key.length + 1).trim());
+      if (!date) return { date: null };
+      const cur = nowJst(now);
+      // 날짜만이면 그날 하루는 표시, 시각이 있으면 그 시각까지만
+      const passed = date.length > 10 ? date <= cur : date < cur.slice(0, 10);
+      return { date: passed ? null : date };
     }
   }
   return null;
@@ -87,8 +105,7 @@ export function getLaunchTag(tags: string[] | undefined, now: number = Date.now(
 export function isLaunchHeld(tags: string[] | undefined, now: number = Date.now()): boolean {
   const date = getLaunchTag(tags, now)?.date;
   if (!date) return false;
-  const todayJst = new Date(now + 9 * 3600_000).toISOString().slice(0, 10);
-  return date > todayJst;
+  return date > nowJst(now);
 }
 
 /** 지금 「COMING SOON」으로 보여 줄 상품인가 — 태그가 있고 살 수 있는 옵션이 하나도 없음(발매일 전이면 재고 무관) */
@@ -100,9 +117,12 @@ export function getUpcomingLaunch(node: {
   return getLaunchTag(node.tags);
 }
 
-/** 「11月1日発売予定」 · 「近日発売」 */
+/** 「11月1日発売予定」 · 「11月1日 20時発売予定」 · 「11月1日 20時30分発売予定」 · 「近日発売」 */
 export function launchLabel(info: LaunchInfo): string {
   if (!info.date) return "近日発売";
-  const [, m, d] = info.date.split("-").map(Number);
-  return `${m}月${d}日発売予定`;
+  const [day, time] = info.date.split(" ");
+  const [, m, d] = day.split("-").map(Number);
+  if (!time) return `${m}月${d}日発売予定`;
+  const [h, min] = time.split(":").map(Number);
+  return `${m}月${d}日 ${h}時${min ? `${min}分` : ""}発売予定`;
 }

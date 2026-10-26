@@ -10,6 +10,7 @@
  * src/lib/productStock.ts 의 getLaunchTag 와 같은 규칙 — 같이 고칠 것.
  * 「오픈」 = 상품이 판매 중(ACTIVE)이고 옵션이 하나라도 구매 가능. 태그를 떼지 않아도 오픈으로 본다.
  *   단 `発売予定:YYYY-MM-DD` 의 발매일(JST)이 아직 안 왔으면 재고가 있어도 오픈 전이다(사이트도 「COMING SOON」).
+ *   `発売予定:YYYY-MM-DD HH:MM` 이면 그 시각(JST)까지 오픈 전.
  *
  * 🔴 자동 발송은 하지 않는다 — 재입고 알림(#227)과 같은 이유. 재고 수정 실수에도 바로 나가 버린다.
  *
@@ -59,17 +60,27 @@ function launchTag(tags: string[]): { date: string | null } | null {
     for (const key of LAUNCH_TAGS.map((k) => k.toLowerCase())) {
       if (t === key) return { date: null };
       if (!t.startsWith(`${key}:`)) continue;
-      const date = t.slice(key.length + 1).trim();
-      return { date: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null };
+      return { date: parseLaunchDate(t.slice(key.length + 1).trim()) };
     }
   }
   return null;
 }
 
-/** 발매일이 아직 안 왔는가 — 재고가 있어도 오픈 전으로 본다 (src/lib/productStock.ts isLaunchHeld 와 같은 규칙) */
+/** `2026-11-01` · `2026-11-01 20:00` (`9:30` 처럼 한 자리 시도 받아 두 자리로) — 형식이 틀리면 null */
+function parseLaunchDate(s: string): string | null {
+  const m = /^(\d{4}-\d{2}-\d{2})(?:\s+(\d{1,2}):(\d{2}))?$/.exec(s);
+  if (!m) return null;
+  if (m[2] === undefined) return m[1];
+  const h = Number(m[2]);
+  if (h > 23 || Number(m[3]) > 59) return null;
+  return `${m[1]} ${String(h).padStart(2, '0')}:${m[3]}`;
+}
+
+/** 발매일(시각)이 아직 안 왔는가 — 재고가 있어도 오픈 전으로 본다 (src/lib/productStock.ts isLaunchHeld 와 같은 규칙)
+ *  지금 JST `YYYY-MM-DD HH:MM` 과 문자열로 비교 — 날짜만이면 그날 0시에 열린다 */
 function launchHeld(date: string | null, now: number = Date.now()): boolean {
   if (!date) return false;
-  return date > new Date(now + 9 * 3600_000).toISOString().slice(0, 10);
+  return date > new Date(now + 9 * 3600_000).toISOString().slice(0, 16).replace('T', ' ');
 }
 
 // ─── Shopify ─────────────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { fetchProductsByVariantIds } from '@/lib/shopify';
 import { useCartStore, type CartItem } from '@/stores/cartStore';
+import { isLaunchHeld } from '@/lib/productStock';
 
 /**
  * /r/:c — LINE 담기 이탈 저니의 복구 링크가 도착하는 곳.
@@ -106,6 +107,8 @@ export default function CartRestore() {
         //    `Math.min(수량, quantityAvailable)` 로 자르는데 `?? Infinity` 는 null 만
         //    걸러서 0 이 그대로 살아남는다. 그 줄을 들고 결제로 가면 살 수 없다.
         if (!variant || !variant.availableForSale || variant.quantityAvailable === 0) continue;
+        // 발매일(시각) 전 출시 예정 상품은 재고가 있어도 담지 않는다 (#260) — 상세·목록의 담기를 막은 것과 같은 규칙
+        if (isLaunchHeld(node.tags)) continue;
 
         rebuilt.push({
           product: { node },
