@@ -61,7 +61,7 @@
       "includeFiles": "data/**"
     },
     "api/site-report.ts": {
-      "maxDuration": 60
+      "maxDuration": 120
     },
     "api/home-banners.ts": {
       "maxDuration": 60

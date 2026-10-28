@@ -486,7 +486,7 @@ export default function SiteReportTab({ secret }: { secret: string }) {
         </div>
       </div>
 
-      {isLoading && <p className="text-xs text-muted-foreground py-8 text-center">불러오는 중… (처음 여는 기간은 10~20초)</p>}
+      {isLoading && <p className="text-xs text-muted-foreground py-8 text-center">불러오는 중… (처음 여는 기간은 10~30초, 90일은 더 걸릴 수 있습니다)</p>}
       {error && <p className="text-xs text-red-600 py-8 text-center">{error instanceof Error ? error.message : "불러오기 실패"}</p>}
 
       {data && cards && (

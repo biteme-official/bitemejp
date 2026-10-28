@@ -25,8 +25,11 @@ const ALLOWED_ORIGINS = ['https://biteme.co.jp', 'https://www.biteme.co.jp', 'ht
 const PREVIEW_ORIGIN = /^https:\/\/bitemejp(-admin)?(-git-[a-z0-9-]+)?-biteme\.vercel\.app$/;
 
 const DAY_OPTIONS = [7, 30, 90] as const;
-/** events 표를 읽는 상한 — 넘으면 truncated 로 알린다 */
-const MAX_EVENT_ROWS = 300_000;
+/** events 표를 읽는 상한 — 넘으면 truncated 로 알린다(90일 실측 9만 줄대) */
+const MAX_EVENT_ROWS = 600_000;
+/** 기간을 이 날수씩 잘라 종류×구간을 동시에 읽는다 — 90일 한 줄로 읽으면 40초 넘게 걸림 */
+const WINDOW_DAYS = 15;
+const READ_CONCURRENCY = 12;
 const CACHE_TTL_MS = 30 * 60_000;
 
 // ─── GA4 ─────────────────────────────────────────────────────────────────────
@@ -215,32 +218,47 @@ function jstRange(days: number) {
 async function slotPart(from: Date, to: Date) {
   const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
   // 색인이 (event_type, created_at) 이라 종류를 섞어 시각순으로 읽으면 전체 정렬 → statement timeout.
-  // 종류마다 따로, 마지막 created_at 다음부터(keyset) 읽는다. 같은 시각(마이크로초)이 페이지 경계에
-  // 걸리면 한 줄 빠질 수 있지만 집계엔 영향 없는 수준
+  // 종류 하나 × 기간 구간 하나씩, 마지막 created_at 다음부터(keyset) 읽는다. 같은 시각(마이크로초)이
+  // 페이지 경계에 걸리면 한 줄 빠질 수 있지만 집계엔 영향 없는 수준
   let truncated = false;
-  const perType = Math.floor(MAX_EVENT_ROWS / EVENT_TYPES.length);
-  const readType = async (type: string): Promise<EventRow[]> => {
+  let total = 0;
+  const readChunk = async (type: string, start: Date, end: Date): Promise<EventRow[]> => {
     const out: EventRow[] = [];
     let cursor: string | null = null;
     for (;;) {
+      if (total >= MAX_EVENT_ROWS) { truncated = true; break; }
       let q = sb
         .from('events')
         .select('event_type, session_id, properties, page_path, created_at')
         .eq('event_type', type)
-        .lt('created_at', to.toISOString());
-      q = cursor ? q.gt('created_at', cursor) : q.gte('created_at', from.toISOString());
+        .lt('created_at', end.toISOString());
+      q = cursor ? q.gt('created_at', cursor) : q.gte('created_at', start.toISOString());
       const { data, error } = await q.order('created_at', { ascending: true }).limit(1000);
       if (error) throw new Error(`events(${type}): ${error.message}`);
       const page = (data ?? []) as EventRow[];
       out.push(...page);
+      total += page.length;
       if (page.length < 1000) break;
-      if (out.length >= perType) { truncated = true; break; }
       cursor = page[page.length - 1].created_at;
     }
     return out;
   };
+  const jobs: (() => Promise<EventRow[]>)[] = [];
+  for (let t = from.getTime(); t < to.getTime(); t += WINDOW_DAYS * 86_400_000) {
+    const ws = new Date(t);
+    const we = new Date(Math.min(to.getTime(), t + WINDOW_DAYS * 86_400_000));
+    for (const type of EVENT_TYPES) jobs.push(() => readChunk(type, ws, we));
+  }
+  const chunks: EventRow[][] = [];
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, jobs.length) }, async () => {
+    while (next < jobs.length) {
+      const i = next++;
+      chunks[i] = await jobs[i]();
+    }
+  }));
   // 시각순이어야 「클릭 뒤 주문」을 가릴 수 있다 — 합친 뒤 정렬
-  const rows = (await Promise.all(EVENT_TYPES.map(readType))).flat().sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
+  const rows = chunks.flat().sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
 
   // 세션별 — 메인 진입·결제 시작·주문(시각·금액)
   const homeSessions = new Set<string>();
