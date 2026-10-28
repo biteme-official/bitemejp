@@ -1,5 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { PartyPopper, ChevronRight } from "lucide-react";
+import { track } from "@/lib/track";
 
 export function AffiliatePromo() {
   const navigate = useNavigate();
@@ -7,7 +8,11 @@ export function AffiliatePromo() {
   return (
     <section className="px-4 mt-6">
       <button
-        onClick={() => navigate("/affiliate")}
+        onClick={() => {
+          // 어드민 「사이트 성과」 메인 화면 구좌 집계용 (#264)
+          track("promo_click", { slot: "affiliate", target: "/affiliate" });
+          navigate("/affiliate");
+        }}
         className="w-full text-left rounded-2xl bg-primary text-primary-foreground px-5 py-4 shadow-sm hover:opacity-95 transition-opacity"
         aria-label="アフィリエイト募集ページへ"
       >

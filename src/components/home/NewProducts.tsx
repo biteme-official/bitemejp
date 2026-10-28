@@ -39,6 +39,7 @@ export function NewProducts() {
       discountMap={discountMap}
       moreTo="/?sort=created_at_desc"
       trackName="new"
+      trackSource="home_new"
       className="mt-8"
       style={{ animationDelay: "0.2s" }}
     />

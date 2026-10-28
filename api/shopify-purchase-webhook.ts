@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
+import { createClient } from '@supabase/supabase-js';
 import { applyCancelWebhook, applyRefundWebhook, recordConversionFromOrder, type OrderForAttribution } from './_affiliate.js';
 
 // Vercel 자동 JSON 파싱 비활성화 — HMAC 검증에 raw body 필요
@@ -82,6 +83,26 @@ function verifyHmac(rawBody: string, signature: string, secrets: string[]): bool
     const computed = createHmac('sha256', secret).update(rawBody, 'utf8').digest();
     return computed.length === received.length && timingSafeEqual(computed, received);
   });
+}
+
+/**
+ * 사이트 세션과 주문 잇기 (#264) — 카트 속성 bm_sid(사이트 자체 세션)가 있으면 events 표에 order_paid 한 줄.
+ * 결제 뒤 사이트로 안 돌아와도 주문이 잡혀, 어드민 「사이트 성과」가 구좌별 주문을 셀 수 있다.
+ * 웹훅 재전송으로 두 번 들어와도 리포트가 order_number 로 한 번만 센다.
+ */
+async function recordSiteOrder(order: ShopifyOrder): Promise<void> {
+  const sid = (order.note_attributes ?? []).find((a) => a.name === 'bm_sid')?.value;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!sid || !url || !key) return;
+  const { error } = await createClient(url, key).from('events').insert({
+    event_type: 'order_paid',
+    session_id: sid.slice(0, 100),
+    properties: { order_number: order.order_number, order_value: parseFloat(order.total_price), currency: order.currency },
+    page_path: null,
+    referrer: null,
+  });
+  if (error) throw new Error(error.message);
 }
 
 async function sendGA4Purchase(order: ShopifyOrder, apiSecret: string): Promise<void> {
@@ -491,6 +512,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log(`GA4 purchase: order #${order.order_number} ${order.total_price} ${order.currency}`);
   } catch (err) {
     console.error('GA4 purchase webhook error:', err);
+  }
+
+  try {
+    await recordSiteOrder(order);
+  } catch (err) {
+    console.error('[Site order] 🔴 events 기록 실패:', err);
   }
 
   // LINE 알림은 GA4 와 독립적으로 처리한다. 한쪽이 실패해도 다른 쪽은 나가야 한다.

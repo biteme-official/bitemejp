@@ -60,6 +60,9 @@
     "api/kr-reviews.ts": {
       "includeFiles": "data/**"
     },
+    "api/site-report.ts": {
+      "maxDuration": 120
+    },
     "api/home-banners.ts": {
       "maxDuration": 60
     },
