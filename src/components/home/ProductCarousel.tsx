@@ -31,6 +31,8 @@ interface ProductCarouselProps {
   moreTo?: string;
   /** 클릭 트래킹용 섹션 식별자 */
   trackName?: string;
+  /** 어느 구좌의 상품 줄인지 — product_click 의 source (home_new / home_category / popular) */
+  trackSource?: string;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -67,6 +69,7 @@ export function ProductCarousel({
   moreLabel = "すべて見る",
   moreTo,
   trackName,
+  trackSource,
   className,
   style,
 }: ProductCarouselProps) {
@@ -146,6 +149,7 @@ export function ProductCarousel({
       product_title: product.node.title,
       price: parseFloat(product.node.priceRange.minVariantPrice.amount),
       collection: trackName,
+      source: trackSource,
     });
   };
 

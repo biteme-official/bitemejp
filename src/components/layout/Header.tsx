@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { track } from "@/lib/track";
 import { useNavigate } from "react-router-dom";
 import { Menu, Phone, ChevronRight, ChevronDown, Package, User, LogOut, BookOpen, BadgePercent, Search } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
@@ -285,7 +286,7 @@ export function Header({ onSearch, onCollectionSelect }: HeaderProps) {
               {/* Affiliate */}
               <div className="border-b border-border/50">
                 <button
-                  onClick={() => { navigate("/affiliate"); setIsMenuOpen(false); }}
+                  onClick={() => { track("promo_click", { slot: "affiliate_menu", target: "/affiliate" }); navigate("/affiliate"); setIsMenuOpen(false); }}
                   className="w-full flex items-center justify-between px-4 py-3 hover:bg-secondary/50 transition-colors"
                 >
                   <div className="flex items-center gap-3">

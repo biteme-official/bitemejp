@@ -199,7 +199,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
 
   // 이동은 카드 안의 Link(진짜 <a>)가 한다 — Ctrl+클릭 새 탭이 되도록 (#185). 여기선 트래킹·스크롤 저장만
   const handleProductClick = (numericId: string, title?: string, price?: number) => {
-    track('product_click', { product_id: numericId, product_title: title, price, collection: collectionHandle ?? undefined });
+    track('product_click', { product_id: numericId, product_title: title, price, collection: collectionHandle ?? undefined, source: 'grid' });
     saveScrollPosition(location.pathname);
   };
 
