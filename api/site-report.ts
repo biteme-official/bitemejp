@@ -214,28 +214,33 @@ function jstRange(days: number) {
 
 async function slotPart(from: Date, to: Date) {
   const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
-  const rows: EventRow[] = [];
+  // 색인이 (event_type, created_at) 이라 종류를 섞어 시각순으로 읽으면 전체 정렬 → statement timeout.
+  // 종류마다 따로, 마지막 created_at 다음부터(keyset) 읽는다. 같은 시각(마이크로초)이 페이지 경계에
+  // 걸리면 한 줄 빠질 수 있지만 집계엔 영향 없는 수준
   let truncated = false;
-  // offset 으로 넘기면 90일에서 statement timeout — 마지막 created_at 다음부터 읽는다(keyset).
-  // 같은 시각(마이크로초)까지 겹친 줄이 페이지 경계에 걸리면 한 줄 빠질 수 있지만 집계엔 영향 없는 수준
-  let cursor = from.toISOString();
-  let first = true;
-  for (;;) {
-    let q = sb
-      .from('events')
-      .select('event_type, session_id, properties, page_path, created_at')
-      .in('event_type', EVENT_TYPES)
-      .lt('created_at', to.toISOString());
-    q = first ? q.gte('created_at', cursor) : q.gt('created_at', cursor);
-    const { data, error } = await q.order('created_at', { ascending: true }).limit(1000);
-    if (error) throw new Error(`events: ${error.message}`);
-    const page = (data ?? []) as EventRow[];
-    rows.push(...page);
-    if (page.length < 1000) break;
-    if (rows.length >= MAX_EVENT_ROWS) { truncated = true; break; }
-    cursor = page[page.length - 1].created_at;
-    first = false;
-  }
+  const perType = Math.floor(MAX_EVENT_ROWS / EVENT_TYPES.length);
+  const readType = async (type: string): Promise<EventRow[]> => {
+    const out: EventRow[] = [];
+    let cursor: string | null = null;
+    for (;;) {
+      let q = sb
+        .from('events')
+        .select('event_type, session_id, properties, page_path, created_at')
+        .eq('event_type', type)
+        .lt('created_at', to.toISOString());
+      q = cursor ? q.gt('created_at', cursor) : q.gte('created_at', from.toISOString());
+      const { data, error } = await q.order('created_at', { ascending: true }).limit(1000);
+      if (error) throw new Error(`events(${type}): ${error.message}`);
+      const page = (data ?? []) as EventRow[];
+      out.push(...page);
+      if (page.length < 1000) break;
+      if (out.length >= perType) { truncated = true; break; }
+      cursor = page[page.length - 1].created_at;
+    }
+    return out;
+  };
+  // 시각순이어야 「클릭 뒤 주문」을 가릴 수 있다 — 합친 뒤 정렬
+  const rows = (await Promise.all(EVENT_TYPES.map(readType))).flat().sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
 
   // 세션별 — 메인 진입·결제 시작·주문(시각·금액)
   const homeSessions = new Set<string>();
