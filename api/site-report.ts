@@ -11,8 +11,8 @@ import { createSign } from 'crypto';
  *  - GA4  : 유입 경로(채널·소스/매체) · 구매 퍼널(이벤트별 고객) · 일별 추이 · 요약
  *  - events 표(자체 track) : 메인 화면 구좌 — 구좌별 클릭 세션과 「같은 세션 안 주문」
  *
- * events 의 세션 = 탭 하나(sessionStorage). 결제 후 사이트로 돌아오지 않으면 order_complete 가 안 남아
- * 구좌 전환은 낮게 잡힌다 — 화면 각주에 적는다.
+ * events 의 세션 = 탭 하나(sessionStorage). 주문은 주문 웹훅이 카트 속성 bm_sid 로 같은 세션에 남긴 order_paid
+ * (2026-10-28 배포부터) + 결제 뒤 사이트로 돌아온 order_complete. 그 전 주문은 구좌와 못 잇는다 — 화면 각주에 적는다.
  *
  * 같은 기간을 여러 번 열면 GA4·DB 를 다시 안 부르게 함수 인스턴스 안에 30분 캐시. `fresh=1` 이면 새로.
  */
@@ -157,7 +157,8 @@ const SLOTS = [
 ] as const;
 type SlotKey = (typeof SLOTS)[number]['key'];
 
-const EVENT_TYPES = ['page_view', 'banner_click', 'category_click', 'product_click', 'promo_click', 'reel_click', 'checkout_start', 'order_complete'];
+/** order_paid = 주문 웹훅이 카트 속성 bm_sid 로 남긴 주문(#264). order_complete = 결제 뒤 사이트 복귀(예전 방식) */
+const EVENT_TYPES = ['page_view', 'banner_click', 'category_click', 'product_click', 'promo_click', 'reel_click', 'checkout_start', 'order_complete', 'order_paid'];
 
 interface EventRow {
   event_type: string;
@@ -234,12 +235,20 @@ async function slotPart(from: Date, to: Date) {
   const homeSessions = new Set<string>();
   const checkoutAt = new Map<string, number[]>();
   const orders = new Map<string, { at: number; value: number }[]>();
+  const seenOrders = new Set<string>();
   for (const e of rows) {
     const at = Date.parse(e.created_at);
     if (e.event_type === 'page_view' && (e.page_path ?? '').split('?')[0] === '/') homeSessions.add(e.session_id);
     if (e.event_type === 'checkout_start') checkoutAt.set(e.session_id, [...(checkoutAt.get(e.session_id) ?? []), at]);
-    if (e.event_type === 'order_complete') {
-      const v = Number((e.properties ?? {}).order_value ?? 0);
+    if (e.event_type === 'order_complete' || e.event_type === 'order_paid') {
+      const p = e.properties ?? {};
+      // 같은 주문이 웹훅 재전송·복귀 페이지로 두 번 남을 수 있다 — 주문 번호로 한 번만
+      const oid = String(p.order_number ?? p.order_id ?? '').replace(/^shopify_/, '').replace(/^#/, '');
+      if (oid) {
+        if (seenOrders.has(oid)) continue;
+        seenOrders.add(oid);
+      }
+      const v = Number(p.order_value ?? 0);
       orders.set(e.session_id, [...(orders.get(e.session_id) ?? []), { at, value: Number.isFinite(v) ? v : 0 }]);
     }
   }
@@ -315,7 +324,7 @@ async function slotPart(from: Date, to: Date) {
       { step: 'home', label: '메인 화면 진입', sessions: step1.size },
       { step: 'click', label: '메인 구좌 클릭', sessions: step2.length },
       { step: 'checkout', label: '결제 시작', sessions: step3.length },
-      { step: 'order', label: '주문 완료(사이트 복귀)', sessions: step4.length },
+      { step: 'order', label: '주문 완료', sessions: step4.length },
     ],
   };
 }

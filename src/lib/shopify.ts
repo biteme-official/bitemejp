@@ -1361,6 +1361,11 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
   const [clientId, sessionId] = await Promise.all([getGA4ClientId(), getGA4SessionId()]);
   if (clientId) trackingAttributes.push({ key: 'ga_client_id', value: clientId });
   if (sessionId) trackingAttributes.push({ key: 'ga_session_id', value: sessionId });
+  // 사이트 자체 세션(track.ts 의 _bm_sid) — 어드민 「사이트 성과」 구좌별 주문 연결용 (#264)
+  try {
+    const bmSid = sessionStorage.getItem('_bm_sid');
+    if (bmSid) trackingAttributes.push({ key: 'bm_sid', value: bmSid });
+  } catch { /* ignore */ }
   // 어필리에이트 링크 귀속 — 보조 경로 (#178 설계 §5). 주 경로는 서버측 회원 터치이고,
   // 이 두 줄은 그 터치가 누락됐을 때 웹훅이 note_attributes 로 읽는 안전망이다.
   // 값 규약: aff_ref = "CODE" 또는 "CODE:clickId", aff_ref_at = 클릭 시각 ISO.
