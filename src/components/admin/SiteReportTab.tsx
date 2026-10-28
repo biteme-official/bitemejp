@@ -382,7 +382,7 @@ function SlotsTab({ site }: { site: NonNullable<SiteReport["site"]> }) {
             onSelect={(k) => setPicked((p) => (p === k ? null : k))}
           />
         </Section>
-        <Section title="구좌별 구매 전환율" hint="누른 세션 중 그 뒤 같은 세션에서 주문까지 간 비율. 점선 = 전체 평균">
+        <Section title="구좌별 구매 전환율" hint={totalOrder > 0 ? "누른 세션 중 그 뒤 같은 세션에서 주문까지 간 비율. 점선 = 전체 평균" : "아직 구좌와 이어진 주문이 없습니다 — 2026-10-28 배포 이후 주문부터 쌓입니다"}>
           <HBars
             rows={slots.map((s) => ({ key: s.key, label: s.label, value: s.sessions > 0 ? s.orderSessions / s.sessions : 0, display: pct(s.orderSessions, s.sessions, 1), sub: `${n(s.orderSessions)}건` }))}
             avg={avg}
@@ -467,7 +467,7 @@ export default function SiteReportTab({ secret }: { secret: string }) {
   const cards = useMemo(() => {
     if (!data) return null;
     const s = data.ga4?.summary;
-    const topSlot = [...(data.site?.slots ?? [])].sort((a, b) => b.sessions - a.sessions)[0];
+    const topSlot = [...(data.site?.slots ?? [])].filter((x) => x.key !== "product_legacy").sort((a, b) => b.sessions - a.sessions)[0];
     const topChannel = [...(data.ga4?.channels ?? [])].sort((a, b) => b.transactions - a.transactions)[0];
     return { s, topSlot, topChannel };
   }, [data]);
@@ -523,7 +523,7 @@ export default function SiteReportTab({ secret }: { secret: string }) {
           {tab === "slots" && (data.site ? <SlotsTab site={data.site} /> : <p className="text-xs text-muted-foreground">자체 이벤트를 못 불러왔습니다</p>)}
 
           <div className="text-[10px] text-muted-foreground leading-relaxed space-y-0.5 pt-2">
-            <p>· 유입 경로·구매 퍼널(GA4)·매출은 GA4 기준입니다. 구매는 결제 뒤 사이트로 돌아온 경우에 잡혀 Shopify 주문 수보다 적을 수 있습니다.</p>
+            <p>· 유입 경로·구매 퍼널(GA4)·매출은 GA4 기준입니다. 구매·매출은 Shopify 주문 웹훅이 GA4 로 보낸 값이고, 결제 직전 세션 정보가 없는 주문은 「직접 유입」으로 잡힐 수 있습니다.</p>
             <p>· 메인 화면 구좌는 사이트 자체 클릭 기록입니다. 세션 = 브라우저 탭 하나. 「주문」 = 그 구좌를 누른 뒤 같은 세션(탭)에서 결제한 주문. 결제 때 사이트 세션 번호를 주문에 싣기 시작한 2026-10-28 배포 이후 주문부터 잡히고, 그 전 기간은 0 으로 나옵니다.</p>
             <p>· 어필리에이트 배너·메뉴·푸터 링크, 인스타 릴스, 상품 줄 구분(신상품·카테고리별·인기·전체 목록)은 2026-10-28 배포부터 셉니다. 그 전 상품 클릭은 「상품 클릭 (구좌 구분 전)」에 모입니다.</p>
             <p>· 한 세션이 여러 구좌를 누르면 구좌마다 셉니다(구좌끼리 더하면 중복).</p>
