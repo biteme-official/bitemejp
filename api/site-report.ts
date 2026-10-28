@@ -216,19 +216,25 @@ async function slotPart(from: Date, to: Date) {
   const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
   const rows: EventRow[] = [];
   let truncated = false;
-  for (let offset = 0; ; offset += 1000) {
-    const { data, error } = await sb
+  // offset 으로 넘기면 90일에서 statement timeout — 마지막 created_at 다음부터 읽는다(keyset).
+  // 같은 시각(마이크로초)까지 겹친 줄이 페이지 경계에 걸리면 한 줄 빠질 수 있지만 집계엔 영향 없는 수준
+  let cursor = from.toISOString();
+  let first = true;
+  for (;;) {
+    let q = sb
       .from('events')
       .select('event_type, session_id, properties, page_path, created_at')
       .in('event_type', EVENT_TYPES)
-      .gte('created_at', from.toISOString())
-      .lt('created_at', to.toISOString())
-      .order('created_at', { ascending: true })
-      .range(offset, offset + 999);
+      .lt('created_at', to.toISOString());
+    q = first ? q.gte('created_at', cursor) : q.gt('created_at', cursor);
+    const { data, error } = await q.order('created_at', { ascending: true }).limit(1000);
     if (error) throw new Error(`events: ${error.message}`);
-    rows.push(...((data ?? []) as EventRow[]));
-    if (!data || data.length < 1000) break;
+    const page = (data ?? []) as EventRow[];
+    rows.push(...page);
+    if (page.length < 1000) break;
     if (rows.length >= MAX_EVENT_ROWS) { truncated = true; break; }
+    cursor = page[page.length - 1].created_at;
+    first = false;
   }
 
   // 세션별 — 메인 진입·결제 시작·주문(시각·금액)
