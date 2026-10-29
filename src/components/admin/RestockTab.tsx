@@ -6,14 +6,23 @@
  *
  * 발송은 자동이 아니다 (#227). 재고가 풀린 신청(「재입고됨」)을 이 화면에서 골라 「선택 발송」을 눌러야 나간다.
  * 누르면 먼저 미리보기(몇 명·어떤 문안)를 받고, 확인을 한 번 더 눌러야 실제로 보낸다.
+ *
+ * 상품별 발송 (#252) — 신청을 상품으로 묶어 「이 상품만 보내기」로 한 상품만 고른다.
+ * 신청 목록의 「전체 선택」은 보이는 줄에만 걸리므로, 상품 필터로 거르면 그 상품만 선택된다.
+ *
+ * 목록은 10개씩 페이지로 나눈다 (#254). 「전체 선택」은 지금 페이지가 아니라 걸러진 목록 전체(모든 페이지)에 걸린다.
+ *
+ * 순서 (#256): 상품별 재입고 알림 목록(재입고됨·품절 중을 버튼으로 거름) → 신청 목록 → 발송 목록 → 지금 품절 목록
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Send } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import ListPager from "@/components/admin/ListPager";
+import { usePaged } from "@/hooks/usePaged";
 
 type Status = "waiting" | "ready" | "sent" | "not_friend" | "gone" | "discontinued";
 
@@ -45,6 +54,8 @@ interface RestockAdminData {
   /** 지금 품절 옵션이 있는 판매 중 상품 (#225) */
   soldOut?: SoldOutProduct[];
   soldOutError?: string | null;
+  /** 신청 상품의 한글명 (#258) — 메타필드 custom.name_ko, 없으면 AI 번역 */
+  namesKo?: Record<string, { ko: string; source: "shopify" | "ai" }>;
   enabled: boolean;
   /** 지금 JST 21~09시인가 — 막지는 않고 경고만 */
   quietHours?: boolean;
@@ -142,6 +153,9 @@ export default function RestockTab({ secret }: { secret: string }) {
     staleTime: 60_000,
   });
   const [filter, setFilter] = useState<Status | "all">("all");
+  const [productFilter, setProductFilter] = useState<string>("all");
+  const [groupFilter, setGroupFilter] = useState<"all" | "ready" | "waiting">("all");
+  const listRef = useRef<HTMLDivElement>(null);
   const [soldKind, setSoldKind] = useState<"temp" | "ended">("temp");
   const [soldQuery, setSoldQuery] = useState("");
   // 수동 발송 (#227) — 고른 신청 → 미리보기(preview) → 확정
@@ -157,27 +171,78 @@ export default function RestockTab({ secret }: { secret: string }) {
     return c;
   }, [rows]);
 
-  // 상품별 — 아직 알림을 기다리는 사람이 많은 옵션부터. 재입고 우선순위 판단용
-  const byProduct = useMemo(() => {
-    const m = new Map<string, { r: Row; waiting: number; total: number }>();
-    for (const r of rows) {
-      const cur = m.get(r.variantId) ?? { r, waiting: 0, total: 0 };
-      cur.total++;
-      if (r.status === "waiting" || r.status === "ready") cur.waiting++;
-      m.set(r.variantId, cur);
-    }
-    return [...m.values()].filter((v) => v.waiting > 0).sort((a, b) => b.waiting - a.waiting);
-  }, [rows]);
 
   const sends = useMemo(
     () => rows.filter((r) => r.sentAt).sort((a, b) => (b.sentAt ?? "").localeCompare(a.sentAt ?? "")),
     [rows],
   );
-  const shown = filter === "all" ? rows : rows.filter((r) => r.status === filter);
+  const shown = rows.filter(
+    (r) => (filter === "all" || r.status === filter) && (productFilter === "all" || r.productId === productFilter),
+  );
+
+  // 신청 목록 상품 필터 — 신청이 있는 상품만, 신청 많은 순
+  const productOptions = useMemo(() => {
+    const m = new Map<string, { title: string; n: number }>();
+    for (const r of rows) {
+      const cur = m.get(r.productId) ?? { title: r.productTitle || "(상품명 없음)", n: 0 };
+      cur.n++;
+      m.set(r.productId, cur);
+    }
+    return [...m.entries()].sort((a, b) => b[1].n - a[1].n || a[1].title.localeCompare(b[1].title));
+  }, [rows]);
+
+  // 상품별 재입고 알림 목록 (#256) — 아직 안 보낸 신청(재입고됨 + 품절 중)을 상품으로 묶는다.
+  // 재입고된 신청이 하나라도 있으면 「재입고됨」, 전부 품절이면 「품절 중」
+  const productGroups = useMemo(() => {
+    const m = new Map<
+      string,
+      { productId: string; title: string; refs: string[]; waiting: number; variants: Map<string, { n: number; ready: boolean }> }
+    >();
+    for (const r of rows) {
+      if (r.status !== "ready" && r.status !== "waiting") continue;
+      const cur = m.get(r.productId) ?? { productId: r.productId, title: r.productTitle || "(상품명 없음)", refs: [], waiting: 0, variants: new Map() };
+      if (r.status === "ready") cur.refs.push(r.ref);
+      else cur.waiting++;
+      const key = r.variantTitle || "";
+      const v = cur.variants.get(key) ?? { n: 0, ready: r.status === "ready" };
+      v.n++;
+      cur.variants.set(key, v);
+      m.set(r.productId, cur);
+    }
+    return [...m.values()].sort(
+      (a, b) => b.refs.length - a.refs.length || b.waiting - a.waiting || a.title.localeCompare(b.title),
+    );
+  }, [rows]);
+  const groupCounts = useMemo(
+    () => ({
+      all: productGroups.length,
+      ready: productGroups.filter((g) => g.refs.length > 0).length,
+      waiting: productGroups.filter((g) => g.refs.length === 0).length,
+    }),
+    [productGroups],
+  );
+  const groupShown = useMemo(
+    () =>
+      groupFilter === "all"
+        ? productGroups
+        : productGroups.filter((g) => (groupFilter === "ready" ? g.refs.length > 0 : g.refs.length === 0)),
+    [productGroups, groupFilter],
+  );
 
   // 고를 수 있는 건 「재입고됨」뿐. 목록이 새로 오면 더는 보낼 수 없게 된 선택은 지운다
   const readyRefs = useMemo(() => rows.filter((r) => r.status === "ready").map((r) => r.ref), [rows]);
   const picked = useMemo(() => readyRefs.filter((ref) => selected.has(ref)), [readyRefs, selected]);
+  // 미리보기에 「어느 상품이 몇 건」 — 의도하지 않은 상품이 섞였는지 바로 보이게
+  const pickedByProduct = useMemo(() => {
+    const m = new Map<string, { title: string; n: number }>();
+    for (const r of rows) {
+      if (r.status !== "ready" || !selected.has(r.ref)) continue;
+      const cur = m.get(r.productId) ?? { title: r.productTitle || "(상품명 없음)", n: 0 };
+      cur.n++;
+      m.set(r.productId, cur);
+    }
+    return [...m.values()].sort((a, b) => b.n - a.n);
+  }, [rows, selected]);
   const shownReady = shown.filter((r) => r.status === "ready");
   const allShownPicked = shownReady.length > 0 && shownReady.every((r) => selected.has(r.ref));
 
@@ -202,17 +267,28 @@ export default function RestockTab({ secret }: { secret: string }) {
     });
   };
 
-  const askPreview = async () => {
+  const askPreview = async (refs: string[] = picked) => {
     setBusy("preview");
     setSendMsg(null);
     try {
-      setPreview(await postSend(secret, picked, true));
+      setPreview(await postSend(secret, refs, true));
     } catch (e) {
       setSendMsg({ ok: false, text: `미리보기 실패: ${e instanceof Error ? e.message : ""}` });
     } finally {
       setBusy(null);
     }
   };
+  /** 한 상품만 — 그 상품의 「재입고됨」 신청만 고르고, 목록도 그 상품으로 거른 뒤 미리보기 */
+  const pickProduct = (productId: string, refs: string[]) => {
+    setPreview(null);
+    setSelected(new Set(refs));
+    setFilter("ready");
+    setProductFilter(productId);
+    // 미리보기는 아래 신청 목록에 뜬다 — 위에서 누르면 안 보이므로 내려 준다
+    listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    askPreview(refs);
+  };
+
   const confirmSend = async () => {
     setBusy("send");
     try {
@@ -260,6 +336,12 @@ export default function RestockTab({ secret }: { secret: string }) {
     );
   }, [soldOut, soldKind, soldQuery]);
 
+  // 목록마다 10개씩 (#254) — 필터·검색이 바뀌면 1페이지로
+  const soldPage = usePaged(soldShown, `${soldKind}|${soldQuery}`);
+  const groupPage = usePaged(groupShown, groupFilter);
+  const listPage = usePaged(shown, `${filter}|${productFilter}`);
+  const sendPage = usePaged(sends);
+
   if (isLoading) return <p className="text-xs text-muted-foreground py-8 text-center">불러오는 중…</p>;
   if (error || !data) {
     return (
@@ -279,7 +361,7 @@ export default function RestockTab({ secret }: { secret: string }) {
         )}
       >
         <span className="font-semibold">{data.enabled ? "● 수동 발송" : "○ 발송 꺼짐 — LINE_RESTOCK_ENABLED 미설정 (미리보기만)"}</span>
-        <span>자동으로 나가지 않습니다 — 재고를 넣으면 「재입고됨」으로 바뀌고, 아래 신청 목록에서 골라 보내야 LINE 이 나갑니다</span>
+        <span>자동으로 나가지 않습니다 — 재고를 넣으면 「재입고됨」으로 바뀌고, 상품별 목록이나 신청 목록에서 골라 보내야 LINE 이 나갑니다</span>
         <button
           onClick={() => refetch()}
           className="ml-auto inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
@@ -301,6 +383,229 @@ export default function RestockTab({ secret }: { secret: string }) {
           </button>
         ))}
       </div>
+
+      <Card className="border-amber-300">
+        <CardHeader className="pb-2 flex flex-row flex-wrap items-center gap-2 space-y-0">
+          <CardTitle className="text-sm mr-auto">
+            상품별 재입고 알림 목록 <span className="font-normal text-muted-foreground">({productGroups.length}개 상품)</span>
+          </CardTitle>
+          {(["all", "ready", "waiting"] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => setGroupFilter(k)}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs",
+                groupFilter === k ? "bg-foreground text-background border-foreground" : "text-muted-foreground",
+              )}
+            >
+              {k === "all" ? "전체" : k === "ready" ? "재입고됨" : "품절 중"} {groupCounts[k]}
+            </button>
+          ))}
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <p className="mb-2 text-[11px] text-muted-foreground">
+            아직 알림을 보내지 않은 신청을 상품별로 묶었습니다 · 「이 상품만 보내기」를 누르면 그 상품의 재입고된 신청만 골라 미리보기를 띄웁니다 — 아래 신청 목록에서 확인 후 한 번 더 눌러야 나갑니다
+          </p>
+          <table className="w-full text-xs">
+            <thead className="border-b text-muted-foreground">
+              <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
+                <th>상품</th><th>한글 상품명</th><th>옵션 · 신청 수</th><th className="text-right">재입고됨</th><th className="text-right">품절 중</th><th className="text-right" />
+              </tr>
+            </thead>
+            <tbody>
+              {groupShown.length === 0 && (
+                <tr><td colSpan={6} className="py-6 text-center text-muted-foreground">해당하는 상품이 없습니다.</td></tr>
+              )}
+              {groupPage.items.map((p) => {
+                const on = p.refs.length > 0 && productFilter === p.productId && picked.length === p.refs.length && p.refs.every((ref) => selected.has(ref));
+                return (
+                  <tr key={p.productId} className={cn("border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top", on && "bg-amber-50")}>
+                    <td className="min-w-[200px]">
+                      <a href={productLink(p.productId)} target="_blank" rel="noopener noreferrer" className="hover:underline">{p.title}</a>
+                    </td>
+                    <td className="min-w-[160px]">
+                      {data.namesKo?.[p.productId] ? (
+                        <>
+                          {data.namesKo[p.productId].ko}
+                          {data.namesKo[p.productId].source === "ai" && <span className="ml-1 rounded bg-muted px-1 text-[10px] text-muted-foreground">자동 번역</span>}
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="flex flex-wrap gap-1">
+                        {[...p.variants].map(([v, { n, ready }]) => (
+                          <span
+                            key={v}
+                            title={ready ? "재입고됨" : "품절 중"}
+                            className={cn("rounded px-1.5 py-0.5 text-[11px]", ready ? "bg-amber-100 text-amber-800" : "bg-muted text-muted-foreground")}
+                          >
+                            {v || "단일 옵션"} {n}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="text-right tabular-nums">{p.refs.length > 0 ? <span className="font-semibold">{p.refs.length}건</span> : <span className="text-muted-foreground">0</span>}</td>
+                    <td className="text-right tabular-nums text-muted-foreground">{p.waiting}건</td>
+                    <td className="text-right">
+                      {p.refs.length > 0 ? (
+                        <Button size="sm" variant={on ? "default" : "outline"} disabled={busy !== null} onClick={() => pickProduct(p.productId, p.refs)}>
+                          <Send className="h-3.5 w-3.5 mr-1" />
+                          {busy === "preview" && on ? "확인 중…" : "이 상품만 보내기"}
+                        </Button>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground whitespace-nowrap">재고 입고 전</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <ListPager p={groupPage} />
+        </CardContent>
+      </Card>
+
+      <Card ref={listRef} className="scroll-mt-4">
+        <CardHeader className="pb-2 flex flex-row flex-wrap items-center gap-2 space-y-0">
+          <CardTitle className="text-sm mr-auto">
+            신청 목록 <span className="font-normal text-muted-foreground">({shown.length}건{filter !== "all" && ` · ${STATUS[filter].label}`})</span>
+          </CardTitle>
+          <select
+            value={productFilter}
+            onChange={(e) => setProductFilter(e.target.value)}
+            aria-label="상품으로 거르기"
+            className="h-7 max-w-[220px] rounded border bg-background px-2 text-xs"
+          >
+            <option value="all">상품 전체</option>
+            {productOptions.map(([id, o]) => (
+              <option key={id} value={id}>{o.title} ({o.n})</option>
+            ))}
+          </select>
+          {readyRefs.length > 0 && filter !== "ready" && (
+            <button onClick={() => setFilter("ready")} className="text-xs text-muted-foreground hover:text-foreground underline">
+              재입고됨만 보기 ({readyRefs.length})
+            </button>
+          )}
+          <Button size="sm" disabled={picked.length === 0 || busy !== null} onClick={() => askPreview()}>
+            <Send className="h-3.5 w-3.5 mr-1" />
+            {busy === "preview" ? "확인 중…" : `선택 ${picked.length}건 보내기`}
+          </Button>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          {preview && (
+            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 space-y-2">
+              {preview.willSend === 0 ? (
+                <p className="font-semibold">보낼 사람이 없습니다. {skippedNote(preview)}</p>
+              ) : (
+                <>
+                  <p className="font-semibold">
+                    {preview.willSend}명에게 LINE 을 보냅니다 (신청 {preview.ready}건{preview.ready > preview.willSend && " — 한 사람의 여러 옵션은 한 통으로 묶음"})
+                  </p>
+                  {pickedByProduct.length > 0 && (
+                    <p>
+                      {pickedByProduct.length > 1 && <span className="font-semibold text-red-700">상품 {pickedByProduct.length}개가 섞여 있습니다 — </span>}
+                      {pickedByProduct.map((p) => `${p.title} ${p.n}건`).join(" · ")}
+                    </p>
+                  )}
+                  {skippedNote(preview) && <p>{skippedNote(preview)}</p>}
+                  {preview.quietHours && <p className="text-red-700 font-semibold">지금은 일본 시간 21~09시입니다 — 고객에게 밤·새벽에 도착합니다.</p>}
+                  {!data.enabled && <p className="text-red-700 font-semibold">LINE_RESTOCK_ENABLED 가 꺼져 있어 보낼 수 없습니다.</p>}
+                  {preview.samples[0] && (
+                    <pre className="whitespace-pre-wrap rounded border bg-white p-2 text-[11px] text-foreground font-sans">{preview.samples[0]}</pre>
+                  )}
+                </>
+              )}
+              <div className="flex gap-2">
+                {preview.willSend > 0 && (
+                  <Button size="sm" disabled={busy !== null || !data.enabled} onClick={confirmSend}>
+                    {busy === "send" ? "보내는 중…" : `${preview.willSend}명에게 보내기`}
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" disabled={busy === "send"} onClick={() => setPreview(null)}>
+                  취소
+                </Button>
+              </div>
+            </div>
+          )}
+          {sendMsg && (
+            <p className={cn("mb-3 rounded px-3 py-2 text-xs", sendMsg.ok ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700")}>
+              {sendMsg.text}
+            </p>
+          )}
+          <table className="w-full text-xs">
+            <thead className="border-b text-muted-foreground">
+              <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th]:text-left">
+                <th className="w-6">
+                  <Checkbox
+                    aria-label="걸러진 재입고됨 신청 전체 선택 (모든 페이지)"
+                    title="걸러진 재입고됨 신청 전체 선택 (모든 페이지)"
+                    disabled={shownReady.length === 0 || busy === "send"}
+                    checked={allShownPicked}
+                    onCheckedChange={(v) => toggleShown(v === true)}
+                  />
+                </th>
+                <th>신청 (JST)</th><th>고객</th><th>상품 · 옵션</th><th>상태</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.length === 0 && (
+                <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">신청이 없습니다.</td></tr>
+              )}
+              {listPage.items.map((r) => (
+                <tr key={`${r.userTail}|${r.variantId}|${r.createdAt}`} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
+                  <td>
+                    {r.status === "ready" && (
+                      <Checkbox
+                        aria-label="이 신청 선택"
+                        disabled={busy === "send"}
+                        checked={selected.has(r.ref)}
+                        onCheckedChange={(v) => toggle(r.ref, v === true)}
+                      />
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap tabular-nums">{jst(r.createdAt)}</td>
+                  <td><Customer r={r} /></td>
+                  <td><Product r={r} /></td>
+                  <td><span className={cn("rounded px-1.5 py-0.5 text-[11px] whitespace-nowrap", STATUS[r.status].className)}>{STATUS[r.status].label}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <ListPager p={listPage} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">발송 목록 <span className="font-normal text-muted-foreground">({sends.length}건)</span></CardTitle>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="border-b text-muted-foreground">
+              <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th]:text-left">
+                <th>발송 (JST)</th><th>고객</th><th>상품 · 옵션</th><th>결과</th><th>신청 (JST)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sends.length === 0 && (
+                <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">아직 나간 알림이 없습니다.</td></tr>
+              )}
+              {sendPage.items.map((r) => (
+                <tr key={`${r.userTail}|${r.variantId}|${r.createdAt}`} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
+                  <td className="whitespace-nowrap tabular-nums">{jst(r.sentAt)}</td>
+                  <td><Customer r={r} /></td>
+                  <td><Product r={r} /></td>
+                  <td><span className={cn("rounded px-1.5 py-0.5 text-[11px] whitespace-nowrap", STATUS[r.status].className)}>{STATUS[r.status].label}</span></td>
+                  <td className="whitespace-nowrap tabular-nums text-muted-foreground">{jst(r.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <ListPager p={sendPage} />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2 flex flex-row flex-wrap items-center gap-2 space-y-0">
@@ -341,7 +646,7 @@ export default function RestockTab({ secret }: { secret: string }) {
               {soldShown.length === 0 && (
                 <tr><td colSpan={3} className="py-6 text-center text-muted-foreground">해당하는 품절 상품이 없습니다.</td></tr>
               )}
-              {soldShown.map((p) => (
+              {soldPage.items.map((p) => (
                 <tr key={p.productId} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
                   <td className="min-w-[220px]">
                     <a href={productLink(p.productId)} target="_blank" rel="noopener noreferrer" className="hover:underline">{p.title}</a>
@@ -366,156 +671,10 @@ export default function RestockTab({ secret }: { secret: string }) {
               ))}
             </tbody>
           </table>
+          <ListPager p={soldPage} />
           <p className="mt-2 text-[11px] text-muted-foreground">
             한글 상품명은 Shopify 상품 메타필드 <code>custom.name_ko</code> 에 적어 두면 그 값을 쓰고, 없으면 AI 가 번역합니다(「자동 번역」).
           </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">기다리는 사람이 많은 옵션</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <table className="w-full text-xs">
-            <thead className="border-b text-muted-foreground">
-              <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
-                <th>상품 · 옵션</th><th className="text-right">대기</th><th className="text-right">누적 신청</th>
-              </tr>
-            </thead>
-            <tbody>
-              {byProduct.length === 0 && (
-                <tr><td colSpan={3} className="py-6 text-center text-muted-foreground">기다리는 신청이 없습니다.</td></tr>
-              )}
-              {byProduct.map(({ r, waiting, total }) => (
-                <tr key={r.variantId} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3">
-                  <td><Product r={r} /></td>
-                  <td className="text-right tabular-nums font-semibold">{waiting}명</td>
-                  <td className="text-right tabular-nums text-muted-foreground">{total}명</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2 flex flex-row flex-wrap items-center gap-2 space-y-0">
-          <CardTitle className="text-sm mr-auto">
-            신청 목록 <span className="font-normal text-muted-foreground">({shown.length}건{filter !== "all" && ` · ${STATUS[filter].label}`})</span>
-          </CardTitle>
-          {readyRefs.length > 0 && filter !== "ready" && (
-            <button onClick={() => setFilter("ready")} className="text-xs text-muted-foreground hover:text-foreground underline">
-              재입고됨만 보기 ({readyRefs.length})
-            </button>
-          )}
-          <Button size="sm" disabled={picked.length === 0 || busy !== null} onClick={askPreview}>
-            <Send className="h-3.5 w-3.5 mr-1" />
-            {busy === "preview" ? "확인 중…" : `선택 ${picked.length}건 보내기`}
-          </Button>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          {preview && (
-            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 space-y-2">
-              {preview.willSend === 0 ? (
-                <p className="font-semibold">보낼 사람이 없습니다. {skippedNote(preview)}</p>
-              ) : (
-                <>
-                  <p className="font-semibold">
-                    {preview.willSend}명에게 LINE 을 보냅니다 (신청 {preview.ready}건{preview.ready > preview.willSend && " — 한 사람의 여러 옵션은 한 통으로 묶음"})
-                  </p>
-                  {skippedNote(preview) && <p>{skippedNote(preview)}</p>}
-                  {preview.quietHours && <p className="text-red-700 font-semibold">지금은 일본 시간 21~09시입니다 — 고객에게 밤·새벽에 도착합니다.</p>}
-                  {!data.enabled && <p className="text-red-700 font-semibold">LINE_RESTOCK_ENABLED 가 꺼져 있어 보낼 수 없습니다.</p>}
-                  {preview.samples[0] && (
-                    <pre className="whitespace-pre-wrap rounded border bg-white p-2 text-[11px] text-foreground font-sans">{preview.samples[0]}</pre>
-                  )}
-                </>
-              )}
-              <div className="flex gap-2">
-                {preview.willSend > 0 && (
-                  <Button size="sm" disabled={busy !== null || !data.enabled} onClick={confirmSend}>
-                    {busy === "send" ? "보내는 중…" : `${preview.willSend}명에게 보내기`}
-                  </Button>
-                )}
-                <Button size="sm" variant="outline" disabled={busy === "send"} onClick={() => setPreview(null)}>
-                  취소
-                </Button>
-              </div>
-            </div>
-          )}
-          {sendMsg && (
-            <p className={cn("mb-3 rounded px-3 py-2 text-xs", sendMsg.ok ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700")}>
-              {sendMsg.text}
-            </p>
-          )}
-          <table className="w-full text-xs">
-            <thead className="border-b text-muted-foreground">
-              <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th]:text-left">
-                <th className="w-6">
-                  <Checkbox
-                    aria-label="보이는 재입고됨 신청 전체 선택"
-                    disabled={shownReady.length === 0 || busy === "send"}
-                    checked={allShownPicked}
-                    onCheckedChange={(v) => toggleShown(v === true)}
-                  />
-                </th>
-                <th>신청 (JST)</th><th>고객</th><th>상품 · 옵션</th><th>상태</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.length === 0 && (
-                <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">신청이 없습니다.</td></tr>
-              )}
-              {shown.map((r) => (
-                <tr key={`${r.userTail}|${r.variantId}|${r.createdAt}`} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
-                  <td>
-                    {r.status === "ready" && (
-                      <Checkbox
-                        aria-label="이 신청 선택"
-                        disabled={busy === "send"}
-                        checked={selected.has(r.ref)}
-                        onCheckedChange={(v) => toggle(r.ref, v === true)}
-                      />
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap tabular-nums">{jst(r.createdAt)}</td>
-                  <td><Customer r={r} /></td>
-                  <td><Product r={r} /></td>
-                  <td><span className={cn("rounded px-1.5 py-0.5 text-[11px] whitespace-nowrap", STATUS[r.status].className)}>{STATUS[r.status].label}</span></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">발송 목록 <span className="font-normal text-muted-foreground">({sends.length}건)</span></CardTitle>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <table className="w-full text-xs">
-            <thead className="border-b text-muted-foreground">
-              <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th]:text-left">
-                <th>발송 (JST)</th><th>고객</th><th>상품 · 옵션</th><th>결과</th><th>신청 (JST)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sends.length === 0 && (
-                <tr><td colSpan={5} className="py-6 text-center text-muted-foreground">아직 나간 알림이 없습니다.</td></tr>
-              )}
-              {sends.map((r) => (
-                <tr key={`${r.userTail}|${r.variantId}|${r.createdAt}`} className="border-b last:border-0 [&>td]:py-2 [&>td]:pr-3 [&>td]:align-top">
-                  <td className="whitespace-nowrap tabular-nums">{jst(r.sentAt)}</td>
-                  <td><Customer r={r} /></td>
-                  <td><Product r={r} /></td>
-                  <td><span className={cn("rounded px-1.5 py-0.5 text-[11px] whitespace-nowrap", STATUS[r.status].className)}>{STATUS[r.status].label}</span></td>
-                  <td className="whitespace-nowrap tabular-nums text-muted-foreground">{jst(r.createdAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </CardContent>
       </Card>
 

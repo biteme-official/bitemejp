@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import AffiliateTab from "@/components/admin/AffiliateTab";
 import HomeBannersTab from "@/components/admin/HomeBannersTab";
+import SiteReportTab from "@/components/admin/SiteReportTab";
 import RestockTab from "@/components/admin/RestockTab";
 import LaunchTab from "@/components/admin/LaunchTab";
 
@@ -2505,13 +2506,14 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               <TabsTrigger value="members" className="text-xs px-4">회원 분석</TabsTrigger>
               <TabsTrigger value="weekly" className="text-xs px-4">주간회고</TabsTrigger>
               </>)}
+              <TabsTrigger value="site" className="text-xs px-4">사이트 성과</TabsTrigger>
               <TabsTrigger value="affiliate" className="text-xs px-4">어필리에이트</TabsTrigger>
               <TabsTrigger value="banners" className="text-xs px-4">메인 배너</TabsTrigger>
               <TabsTrigger value="restock" className="text-xs px-4">재입고 알림</TabsTrigger>
               <TabsTrigger value="launch" className="text-xs px-4">오픈 알림</TabsTrigger>
             </TabsList>
 
-            {SHOW_ANALYTICS && !data && !shopify && !["affiliate", "banners", "restock", "launch"].includes(activeTab) && (
+            {SHOW_ANALYTICS && !data && !shopify && !["site", "affiliate", "banners", "restock", "launch"].includes(activeTab) && (
               <p className="text-xs text-muted-foreground py-8 text-center">
                 분석 데이터를 못 불러왔습니다. 어필리에이트·메인 배너 탭은 이 상태에서도 쓸 수 있습니다.
               </p>
@@ -2765,6 +2767,11 @@ function DashboardView({ secret, onLogout }: { secret: string; onLogout: () => v
               </p>
             </TabsContent>
             </>)}
+
+            {/* ══ 사이트 성과 탭 (#264) — 열 때만 GA4·자체 이벤트 조회 ══ */}
+            <TabsContent value="site" className="space-y-5 mt-0">
+              {activeTab === "site" && <SiteReportTab secret={secret} />}
+            </TabsContent>
 
             {/* ══ 어필리에이트 탭 (#178 Phase 0) ══ */}
             <TabsContent value="affiliate" className="space-y-5 mt-0">

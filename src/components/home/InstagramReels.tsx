@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { track } from "@/lib/track";
 import { Play, Instagram, X } from "lucide-react";
 
 interface Reel {
@@ -37,6 +38,7 @@ export function InstagramReels() {
           <h2 className="text-lg font-bold">インスタで見てね🐶</h2>
           <a
             href="https://www.instagram.com/biteme_jp/"
+            onClick={() => track("promo_click", { slot: "instagram", target: "instagram" })}
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm text-muted-foreground hover:text-pink-500 transition-colors"
@@ -59,7 +61,7 @@ export function InstagramReels() {
             {reels.map((reel) => (
               <button
                 key={reel.id}
-                onClick={() => setSelectedReel(reel)}
+                onClick={() => { track("reel_click", { reel_id: reel.id }); setSelectedReel(reel); }}
                 className="flex-none w-36 aspect-[9/16] relative rounded-xl overflow-hidden bg-muted group cursor-pointer snap-start"
               >
                 <img

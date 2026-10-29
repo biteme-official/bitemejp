@@ -16,6 +16,7 @@ import { RestockCardButton } from '@/components/product/RestockNotifyButton';
 import { toRestockProduct } from '@/stores/restockStore';
 import { getUpcomingLaunch, isHiddenSoldOut, launchLabel } from '@/lib/productStock';
 import { LaunchCardButton } from '@/components/product/LaunchNotifyButton';
+import { shopifyImageUrl } from '@/lib/utils';
 
 // Product skeleton component
 const ProductSkeleton = () => (
@@ -198,7 +199,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
 
   // 이동은 카드 안의 Link(진짜 <a>)가 한다 — Ctrl+클릭 새 탭이 되도록 (#185). 여기선 트래킹·스크롤 저장만
   const handleProductClick = (numericId: string, title?: string, price?: number) => {
-    track('product_click', { product_id: numericId, product_title: title, price, collection: collectionHandle ?? undefined });
+    track('product_click', { product_id: numericId, product_title: title, price, collection: collectionHandle ?? undefined, source: 'grid' });
     saveScrollPosition(location.pathname);
   };
 
@@ -430,9 +431,9 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                   <div className="aspect-square bg-muted relative overflow-hidden">
                     {image ? (
                       <img
-                        src={image.url}
+                        src={shopifyImageUrl(image.url, 480)}
                         alt={image.altText || product.node.title}
-                        className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${isCompletelyOutOfStock && !launch ? 'opacity-50' : ''}`}
+                        className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${isCompletelyOutOfStock || launch ? 'opacity-50' : ''}`}
                         loading="lazy"
                       />
                     ) : (
@@ -577,7 +578,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                         aria-label="カートに追加"
                         onClick={(e) => handleAddToCart(e, product)}
                         className="relative z-10 shrink-0 w-8 h-8 rounded-full bg-foreground text-background flex items-center justify-center hover:bg-primary transition-colors disabled:opacity-40 disabled:hover:bg-foreground"
-                        disabled={isCompletelyOutOfStock}
+                        disabled={isCompletelyOutOfStock || !!launch}
                       >
                         <ShoppingCart className="h-4 w-4" />
                       </button>

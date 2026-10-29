@@ -43,6 +43,8 @@ import { cn } from "@/lib/utils";
  * 「상품 링크로」: 디자이너 배너 없이 상품 링크만 주면 그 상품 이미지들을 보여주고, 고른 한 장을 오른쪽에 놓는다.
  * 상품 썸네일은 위 25~30% 에 제목이 박혀 있어 「위 자르기」(기본 28%)로 잘라낸다 — 미리보기 보며 조절.
  *
+ * 「내 이미지 올리기」: 상품 링크 대신 파일을 올리면 가운데를 정사각으로 잘라(상품 썸네일 모양) 같은 자리에 놓는다.
+ *
  * 「AI 문구 제안」(#215): 메모 한 줄 + 링크 상품 정보 + 배너 사진을 보고 일본어 문구 3안(한국어 뜻 포함)을 받는다.
  * 고르면 배지·부제·헤드라인·CTA 칸이 채워질 뿐 — 저장 전엔 메인에 안 나간다. 배지는 NEW / SALE / HOT 드롭다운.
  */
@@ -112,6 +114,34 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+/**
+ * 직접 올리는 상품 사진 — 가운데를 정사각으로 잘라(긴 변 1200px 까지) 상품 썸네일과 같은 모양으로 만든다.
+ * PNG 는 투명 배경을 지키려고 PNG 로, 나머지는 JPEG 로.
+ */
+function squareCrop(dataUrl: string, type: string): Promise<{ file: File; dataUrl: string; size: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const side = Math.min(img.naturalWidth, img.naturalHeight);
+      const size = Math.min(1200, side);
+      const c = document.createElement("canvas");
+      c.width = size;
+      c.height = size;
+      const ctx = c.getContext("2d");
+      if (!ctx) return reject(new Error("이미지를 못 읽었습니다"));
+      ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
+      const outType = type === "image/png" ? "image/png" : "image/jpeg";
+      const out = c.toDataURL(outType, 0.9);
+      c.toBlob((blob) => {
+        if (!blob) return reject(new Error("이미지를 못 읽었습니다"));
+        resolve({ file: new File([blob], outType === "image/png" ? "photo.png" : "photo.jpg", { type: outType }), dataUrl: out, size });
+      }, outType, 0.9);
+    };
+    img.onerror = () => reject(new Error("이미지를 못 읽었습니다"));
+    img.src = dataUrl;
+  });
+}
+
 async function uploadImage(secret: string, file: File, dataUrl: string): Promise<string> {
   const res = await fetch(API, {
     method: "POST",
@@ -130,9 +160,10 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [importedFromShopify, setImportedFromShopify] = useState(false);
-  const [uploading, setUploading] = useState<"pc" | "mobile" | null>(null);
+  const [uploading, setUploading] = useState<"pc" | "mobile" | "photo" | null>(null);
   const pcFileRef = useRef<HTMLInputElement>(null);
   const mobileFileRef = useRef<HTMLInputElement>(null);
+  const photoFileRef = useRef<HTMLInputElement>(null);
   const [productInput, setProductInput] = useState("");
   const [product, setProduct] = useState<ProductForBanner | null>(null);
   const [productLoading, setProductLoading] = useState(false);
@@ -297,6 +328,24 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
       ...(selected.name ? {} : { name: product.title }),
       ...(selected.link ? {} : { link: product.url }),
     });
+  };
+
+  /** 상품 사진 직접 올리기 — 정사각으로 잘라 상품 링크 사진과 같은 자리(오른쪽)에. 자르기 0 */
+  const onPickPhoto = async (file: File | undefined) => {
+    if (!file || !selected) return;
+    setUploading("photo");
+    try {
+      const sq = await squareCrop(await fileToDataUrl(file), file.type);
+      if (sq.file.size > 3 * 1024 * 1024) throw new Error("이미지는 3MB 까지");
+      const [url, bg] = await Promise.all([uploadImage(secret, sq.file, sq.dataUrl), sampleCorner(sq.dataUrl)]);
+      updateBanner(selected.id, { photo: { url, width: sq.size, height: sq.size, cropTop: 0 }, ...(bg ? { bg } : {}) });
+      toast.success("정사각으로 잘라 오른쪽에 넣었습니다 — 「저장」해야 반영");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "업로드 실패");
+    } finally {
+      setUploading(null);
+      if (photoFileRef.current) photoFileRef.current.value = "";
+    }
   };
 
   /** AI(Gemini) 로 사진 속 글자를 지운 사본을 만들어 그걸로 바꾼다. 자르기는 0 으로 — 글자가 없어졌으니 */
@@ -521,7 +570,7 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
                 {/* 상품 링크로 — 사진 모드 */}
                 <div className="rounded-lg border p-3 space-y-2 bg-muted/20">
                   <div className="flex items-center justify-between">
-                    <Label className="text-xs font-semibold">상품 링크로 만들기</Label>
+                    <Label className="text-xs font-semibold">상품 사진으로 만들기 (오른쪽 정사각)</Label>
                     {selected.photo && (
                       <button type="button" className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-0.5" onClick={() => updateBanner(selected.id, { photo: null })}>
                         <X className="h-3 w-3" />상품 사진 빼기
@@ -539,6 +588,13 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
                     <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" disabled={productLoading} onClick={loadProduct}>
                       <Search className="h-3.5 w-3.5 mr-1" />{productLoading ? "조회 중…" : "이미지 보기"}
                     </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" disabled={uploading !== null} onClick={() => photoFileRef.current?.click()}>
+                      <ImagePlus className="h-3.5 w-3.5 mr-1" />{uploading === "photo" ? "올리는 중…" : "내 이미지 올리기"}
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground">상품 링크 대신 — 가운데를 정사각으로 잘라 같은 자리에 놓습니다</span>
+                    <input ref={photoFileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => onPickPhoto(e.target.files?.[0])} />
                   </div>
                   {product && product.images.length > 0 && (
                     <div>

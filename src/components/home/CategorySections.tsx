@@ -104,6 +104,7 @@ export function CategorySections() {
             moreLabel="もっと見る"
             moreTo={`/?collection=${encodeURIComponent(collection.handle)}`}
             trackName={collection.handle}
+            trackSource="home_category"
           />
         );
       })}

@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Heart, ShoppingCart } from "lucide-react";
 import { ShopifyProduct, formatPrice, getPreorderDate } from "@/lib/shopify";
 import { useWishlistStore } from "@/stores/wishlistStore";
-import { cn } from "@/lib/utils";
+import { cn, shopifyImageUrl } from "@/lib/utils";
 import { RestockCardButton } from "@/components/product/RestockNotifyButton";
 import { toRestockProduct } from "@/stores/restockStore";
 import { LaunchCardButton } from "@/components/product/LaunchNotifyButton";
@@ -97,11 +97,12 @@ export function ProductCard({
       <div className="aspect-square bg-secondary relative overflow-hidden">
         {image ? (
           <img
-            src={image.url}
+            src={shopifyImageUrl(image.url, 480)}
             alt={image.altText || node.title}
             className={cn(
               "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",
-              !isAvailable && "opacity-50",
+              // 출시 예정도 흐리게 — 발매일 전엔 재고가 있어도(#260) 아직 살 수 없는 상품
+              (!isAvailable || launch) && "opacity-50",
             )}
             loading="lazy"
           />
@@ -201,7 +202,7 @@ export function ProductCard({
           <button
             type="button"
             aria-label="カートに追加"
-            disabled={!isAvailable}
+            disabled={!isAvailable || !!launch}
             onClick={(e) => { e.stopPropagation(); onAddToCart(product); }}
             className="relative z-10 shrink-0 w-7 h-7 rounded-full bg-foreground text-background flex items-center justify-center hover:bg-primary transition-colors disabled:opacity-40 disabled:hover:bg-foreground"
           >
