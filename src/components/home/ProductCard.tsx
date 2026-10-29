@@ -101,7 +101,8 @@ export function ProductCard({
             alt={image.altText || node.title}
             className={cn(
               "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",
-              !isAvailable && "opacity-50",
+              // 출시 예정도 흐리게 — 발매일 전엔 재고가 있어도(#260) 아직 살 수 없는 상품
+              (!isAvailable || launch) && "opacity-50",
             )}
             loading="lazy"
           />
