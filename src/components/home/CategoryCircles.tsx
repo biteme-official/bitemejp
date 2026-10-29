@@ -28,6 +28,8 @@ import { cn } from "@/lib/utils";
  * 모바일(#194)은 4열로 줄바꿈해 전부 보이게 한다 — 가로 스크롤이면 7개 중 4.4개만 보이고 나머지는
  * 스크롤되는 줄 모르면 영영 못 본다. 칸 폭은 (행 폭 − 간격 3개)/4 라 360~430px 어디서나 4개가 꼭 맞고,
  * 마지막 줄(3개)은 가운데 정렬. PC 는 자유 줄바꿈 + 가운데 정렬 그대로.
+ * 모바일 첫 화면에 상품이 안 보여서(2026-10-29) 모바일은 한 줄로 줄였다 — 제목 숨김, 아이콘 44px,
+ * 「すべて」 는 바로 위 CategoryNav 첫 탭과 같아서 모바일에선 빼고 6열. 7개 이상이면 다음 줄로 넘어간다.
  */
 const ICON_RULES: { test: RegExp; icon: LucideIcon }[] = [
   { test: /おもちゃ|toy/i, icon: Bone },
@@ -82,9 +84,9 @@ export function CategoryCircles() {
   if (items.length <= 1) return null;
 
   return (
-    <section className="mt-8 animate-fade-up" style={{ animationDelay: "0.1s" }}>
-      <h2 className="text-lg md:text-xl font-bold text-foreground text-center mb-4">カテゴリー</h2>
-      <div className="flex flex-wrap justify-center gap-x-2 gap-y-4 md:gap-x-5 md:gap-y-6 px-4 pb-1">
+    <section className="mt-3 md:mt-8 animate-fade-up" style={{ animationDelay: "0.1s" }}>
+      <h2 className="sr-only md:not-sr-only md:block text-xl font-bold text-foreground text-center mb-4">カテゴリー</h2>
+      <div className="flex flex-wrap justify-center gap-x-1 gap-y-2 md:gap-x-5 md:gap-y-6 px-4 pb-1">
         {items.map(({ key, title, handle, icon: Icon }, i) => (
           <Link
             key={key}
@@ -92,17 +94,20 @@ export function CategoryCircles() {
             onClick={() => {
               if (handle) track("category_click", { name: title, handle, source: "home_circles" });
             }}
-            className="group flex-shrink-0 flex flex-col items-center gap-2 w-[calc((100%-1.5rem)/4)] md:w-24"
+            className={cn(
+              "group flex-shrink-0 flex-col items-center gap-1 md:gap-2 w-[calc((100%-1.25rem)/6)] md:w-24",
+              handle ? "flex" : "hidden md:flex",
+            )}
           >
             <span
               className={cn(
-                "w-[60px] h-[60px] md:w-[88px] md:h-[88px] rounded-full flex items-center justify-center shadow-sm transition-transform duration-200 group-hover:scale-105 group-hover:shadow-md",
+                "w-11 h-11 md:w-[88px] md:h-[88px] rounded-full flex items-center justify-center shadow-sm transition-transform duration-200 group-hover:scale-105 group-hover:shadow-md",
                 PASTELS[i % PASTELS.length],
               )}
             >
-              <Icon className="h-6 w-6 md:h-8 md:w-8" strokeWidth={1.8} />
+              <Icon className="h-5 w-5 md:h-8 md:w-8" strokeWidth={1.8} />
             </span>
-            <span className="text-xs font-medium text-foreground text-center leading-tight line-clamp-2 break-keep">
+            <span className="text-[11px] md:text-xs font-medium text-foreground text-center leading-tight line-clamp-2 break-keep">
               {title}
             </span>
           </Link>
