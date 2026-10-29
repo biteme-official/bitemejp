@@ -11,6 +11,9 @@
  *  POST action=void_conversion { conversionId, reason }  약관 위반 성과 취소(정산 전 건만)
  *  POST action=create_notice { title, body, effectiveAt, termsVersion? }  규약 개정 통지(시행 14일 전 · LINE + 파트너 배너)
  *  POST action=delete_notice { noticeId }  아직 안 보낸 통지 삭제
+ *  POST action=preview_message { filter }  조건에 맞는 파트너 명단 (보내지 않음)
+ *  POST action=send_message { memo, body, filter, expectedCount }  그 명단에 LINE (야간이면 다음 날 09:05)
+ *  POST action=cancel_message { messageId }  아직 안 나간 메시지 취소
  *  POST /api/affiliate-admin  action=add_partner
  *       { code, name, instagram?, email?, discountCode? }
  *       Phase 2 셀프 가입 전까지 하영이 어드민에서 파트너를 앉힌다.
@@ -37,6 +40,7 @@ import { createCampaign, deleteCampaign, disablePartnerCodes, endCampaign, parse
 import { closeMonth, currentPeriodJst, dueDateOf, markPaid, MIN_PAYOUT, voidConversion } from './_affiliate-payout.js';
 import { createNotice, deleteNotice, parseNoticeInput, NOTICE_MIN_DAYS } from './_affiliate-notice.js';
 import { detectAnomalies } from './_affiliate-anomaly.js';
+import { MESSAGE_CLICK_WINDOW_DAYS, MESSAGE_MAX_LENGTH, cancelMessage, createMessage, listMessages, parseMessageFilter, parseMessageInput, selectRecipients } from './_affiliate-message.js';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 const CODE_RE = /^[A-Z0-9]{4,12}$/;
@@ -171,6 +175,8 @@ async function handleGet(res: VercelResponse) {
     anomalies: detectAnomalies(allRows, partners).map((a) => ({ ...a, partnerCode: codeById.get(a.partnerId) ?? '?' })),
     notices: await listNotices(sb),
     noticeMinDays: NOTICE_MIN_DAYS,
+    messages: await listMessages(sb),
+    messageRules: { clickWindowDays: MESSAGE_CLICK_WINDOW_DAYS, maxLength: MESSAGE_MAX_LENGTH },
   });
 }
 
@@ -250,6 +256,27 @@ async function handleDeleteNotice(body: Record<string, unknown>, res: VercelResp
   const id = Number(body.noticeId);
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'noticeId 필요' });
   const r = await deleteNotice(getSupabase(), id);
+  if (typeof r === 'string') return res.status(409).json({ error: r });
+  return res.status(200).json(r);
+}
+
+async function handlePreviewMessage(body: Record<string, unknown>, res: VercelResponse) {
+  const recipients = await selectRecipients(getSupabase(), parseMessageFilter(body.filter));
+  return res.status(200).json({ ok: true, count: recipients.length, recipients });
+}
+
+async function handleSendMessage(body: Record<string, unknown>, res: VercelResponse) {
+  const input = parseMessageInput(body);
+  if (typeof input === 'string') return res.status(400).json({ error: input });
+  const r = await createMessage(getSupabase(), input);
+  if (typeof r === 'string') return res.status(409).json({ error: r });
+  return res.status(201).json({ ok: true, ...r });
+}
+
+async function handleCancelMessage(body: Record<string, unknown>, res: VercelResponse) {
+  const id = Number(body.messageId);
+  if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'messageId 필요' });
+  const r = await cancelMessage(getSupabase(), id);
   if (typeof r === 'string') return res.status(409).json({ error: r });
   return res.status(200).json(r);
 }
@@ -426,6 +453,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (body.action === 'void_conversion') return await handleVoidConversion(body, res);
       if (body.action === 'create_notice') return await handleCreateNotice(body, res);
       if (body.action === 'delete_notice') return await handleDeleteNotice(body, res);
+      if (body.action === 'preview_message') return await handlePreviewMessage(body, res);
+      if (body.action === 'send_message') return await handleSendMessage(body, res);
+      if (body.action === 'cancel_message') return await handleCancelMessage(body, res);
       return res.status(400).json({ error: `unknown action: ${String(body.action)}` });
     }
     return res.status(405).json({ error: 'Method not allowed' });
