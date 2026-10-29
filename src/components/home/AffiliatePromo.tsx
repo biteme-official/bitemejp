@@ -29,7 +29,7 @@ export function AffiliatePromo() {
               {/* 모바일에서 「コミッショ / ン率 10%」 로 어절 중간이 갈리던 것 — 뒷 어절은 한 덩어리로 */}
               アフィリエイト募集｜<span className="whitespace-nowrap">コミッション率 <span className="text-lg">10%</span></span>
             </p>
-                        <p className="hidden md:block text-xs text-primary-foreground/80 mt-0.5 truncate">
+            <p className="hidden md:block text-xs text-primary-foreground/80 mt-0.5 truncate">
               Instagramで商品を紹介して、一緒に魅力を届けませんか？
             </p>
           </div>
