@@ -1,12 +1,13 @@
 import { Fragment, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import AffiliateMessages, { type MessageKindsData, type PartnerMessage } from "./AffiliateMessages";
 
 /**
  * 어드민 「어필리에이트」 탭 (Issue #178)
  *
  * 장부 + 파트너 현황(성과순) + 캠페인 만들기·종료 + 월 정산 + 이상 감지 + 규약 개정 통지 (Phase 3)
- * + 파트너에게 메시지(조건으로 고른 파트너에게 LINE, #270).
+ * + 파트너 메시지(상황별 LINE — AffiliateMessages.tsx, #270·#272).
  * 데이터는 /api/affiliate-admin (Bearer ADMIN_SECRET) 하나로 온다.
  */
 
@@ -85,13 +86,6 @@ interface Notice {
   id: number; title: string; body: string; terms_version: string | null; effective_at: string;
   notify_status: "none" | "pending" | "sent"; notified_at: string | null;
 }
-interface MessageFilter { noClicks: boolean; noSales: boolean; joinedDaysMin: number; skipMessagedDays: number }
-interface PartnerMessage {
-  id: number; memo: string; body: string; filter: MessageFilter; partner_ids: number[];
-  notify_status: "pending" | "sent" | "failed"; sent_count: number; failed_count: number;
-  notified_at: string | null; created_at: string;
-}
-interface Recipient { id: number; code: string; name: string; instagram: string | null; joined_at: string }
 interface AffiliateData {
   ok: true;
   enabled: boolean;
@@ -107,6 +101,7 @@ interface AffiliateData {
   notices: Notice[];
   noticeMinDays: number;
   messages?: PartnerMessage[];
+  messageKinds?: MessageKindsData;
   messageRules?: { clickWindowDays: number; maxLength: number };
 }
 
@@ -944,175 +939,6 @@ function NoticeCard({ secret, notices, minDays, onDone }: { secret: string; noti
   );
 }
 
-/** 깨우기 메시지 기본 문구 (2026-10-29 하영 확인용 초안) — 그대로 LINE 본문이 된다 */
-const WAKE_UP_DRAFT = `【BITE ME パートナーの皆さまへ】
-ご登録ありがとうございます！
-紹介リンク、もうシェアしましたか？😊
-
-▼かんたん3ステップ
-① パートナーページで紹介リンクをコピー
-② 商品ページの「パートナー：コピー」で、その商品に直接飛ぶリンクも作れます
-③ インスタのストーリーズ・プロフィール・LINEでシェア
-
-リンクからのご購入金額（送料除く）の10%が報酬になります。
-※LINEでログインしたお客さまのご購入が対象です
-
-※投稿には必ず「#PR」の表示をお願いします
-広告表示ガイドライン：https://biteme.co.jp/affiliate/terms#guideline
-
-▼パートナーページ
-https://biteme.co.jp/partner`;
-
-const filterText = (f: MessageFilter, clickDays: number) =>
-  [
-    f.noClicks && `최근 ${clickDays}일 클릭 0`,
-    f.noSales && "판매 0",
-    f.joinedDaysMin > 0 && `가입 ${f.joinedDaysMin}일 지남`,
-    f.skipMessagedDays > 0 && `최근 ${f.skipMessagedDays}일 받은 사람 제외`,
-  ].filter(Boolean).join(" · ") || "활동 파트너 전원";
-
-/** 파트너에게 메시지 — 조건 고르기 → 미리 보기(명단) → 보내기. 미리 보기 없이는 못 보낸다 (#270) */
-function MessageCard({ secret, messages, rules, onDone }: {
-  secret: string; messages: PartnerMessage[]; rules: { clickWindowDays: number; maxLength: number }; onDone: () => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState<MessageFilter>({ noClicks: true, noSales: true, joinedDaysMin: 7, skipMessagedDays: 14 });
-  const [memo, setMemo] = useState("깨우기 — 클릭·판매 0");
-  const [body, setBody] = useState(WAKE_UP_DRAFT);
-  const [preview, setPreview] = useState<Recipient[] | null>(null);
-  const [showList, setShowList] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  // 조건이 바뀌면 미리 보기는 무효 — 다시 봐야 보낼 수 있다
-  const setF = <K extends keyof MessageFilter>(k: K, v: MessageFilter[K]) => { setFilter((f) => ({ ...f, [k]: v })); setPreview(null); };
-
-  async function runPreview() {
-    setBusy(true); setMsg(null);
-    try {
-      const r = await postAdmin<{ recipients: Recipient[] }>(secret, { action: "preview_message", filter });
-      setPreview(r.recipients); setShowList(false);
-    } catch (ex) { setMsg(ex instanceof Error ? ex.message : "실패"); }
-    finally { setBusy(false); }
-  }
-
-  async function send() {
-    if (!preview) return;
-    if (!window.confirm(`${preview.length}명에게 LINE 을 보냅니다 (야간이면 다음 날 09:05).\n보낸 메시지는 취소할 수 없습니다.`)) return;
-    setBusy(true); setMsg(null);
-    try {
-      const r = await postAdmin<{ notified: { sent: number; failed: number }; notifyPending: boolean }>(secret, {
-        action: "send_message", memo, body, filter, expectedCount: preview.length,
-      });
-      setMsg(r.notifyPending ? "저장했습니다. 야간이라 LINE 은 내일 09:05 에 갑니다." : r.notified.failed > 0 && r.notified.sent === 0 ? "저장했지만 발송에 실패했습니다 — 내일 09:05 에 다시 보냅니다." : `LINE 을 보냈습니다 (${r.notified.sent}명).`);
-      setPreview(null); setOpen(false);
-      onDone();
-    } catch (ex) { setMsg(ex instanceof Error ? ex.message : "실패"); }
-    finally { setBusy(false); }
-  }
-
-  const cancel = async (m: PartnerMessage) => {
-    if (!window.confirm(`「${m.memo || "메시지"}」 발송을 취소합니다.`)) return;
-    try { await postAdmin(secret, { action: "cancel_message", messageId: m.id }); onDone(); }
-    catch (e) { alert(e instanceof Error ? e.message : "실패"); }
-  };
-
-  const input = "h-8 rounded border bg-background px-2 text-xs";
-  const check = "flex items-center gap-1.5 text-xs";
-  const tooLong = body.length > rules.maxLength;
-  return (
-    <Card>
-      <CardHeader className="pb-3 flex flex-row items-start justify-between gap-3 space-y-0">
-        <div>
-          <CardTitle className="text-sm">파트너에게 메시지 {messages.length > 0 && <span className="font-normal text-muted-foreground">· {messages.length}건</span>}</CardTitle>
-          <p className="text-xs text-muted-foreground mt-1">
-            조건으로 고른 활동 파트너에게 LINE 을 보낸다. 미리 보기로 명단을 확인해야 보낼 수 있다. 쓴 문구가 그대로 나간다. LINE 친구를 끊은 사람은 LINE 이 건너뛴다.
-          </p>
-        </div>
-        <button className="h-8 shrink-0 rounded border text-xs px-3" onClick={() => setOpen((v) => !v)}>{open ? "닫기" : "메시지 만들기"}</button>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {open && (
-          <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
-            <div className="space-y-2">
-              <p className="text-[11px] text-muted-foreground">받는 사람 조건 (모두 만족)</p>
-              <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-                <label className={check}><input type="checkbox" checked={filter.noClicks} onChange={(e) => setF("noClicks", e.target.checked)} />최근 {rules.clickWindowDays}일 클릭 0</label>
-                <label className={check}><input type="checkbox" checked={filter.noSales} onChange={(e) => setF("noSales", e.target.checked)} />판매 0건</label>
-                <label className={check}>가입
-                  <input type="number" min={0} max={365} className={`${input} w-14`} value={filter.joinedDaysMin} onChange={(e) => setF("joinedDaysMin", Number(e.target.value) || 0)} />일 지남</label>
-                <label className={check}>최근
-                  <input type="number" min={0} max={365} className={`${input} w-14`} value={filter.skipMessagedDays} onChange={(e) => setF("skipMessagedDays", Number(e.target.value) || 0)} />일 안에 메시지 받은 사람 제외</label>
-              </div>
-            </div>
-            <label className="text-[11px] text-muted-foreground space-y-1 block">
-              <span>이름 (어드민에서만 보임)</span>
-              <input className={`${input} w-full`} value={memo} onChange={(e) => setMemo(e.target.value)} maxLength={100} />
-            </label>
-            <label className="text-[11px] text-muted-foreground space-y-1 block">
-              <span>LINE 본문 * (일본어 — 그대로 나감) <span className={tooLong ? "text-red-600" : ""}>{body.length.toLocaleString()} / {rules.maxLength.toLocaleString()}자</span></span>
-              <textarea className="w-full rounded border bg-background px-2 py-1.5 text-xs h-72 font-mono leading-relaxed" value={body} onChange={(e) => setBody(e.target.value)} />
-            </label>
-            {preview && (
-              <div className="rounded border bg-background px-3 py-2 text-xs space-y-2">
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="font-medium">받는 사람 {preview.length}명</span>
-                  <span className="text-muted-foreground">{filterText(filter, rules.clickWindowDays)}</span>
-                  {preview.length > 0 && <button className="underline" onClick={() => setShowList((v) => !v)}>{showList ? "명단 접기" : "명단 보기"}</button>}
-                </div>
-                {showList && (
-                  <div className="max-h-56 overflow-y-auto">
-                    <table className="w-full text-[11px]">
-                      <thead className="text-muted-foreground text-left"><tr><th className="py-1 pr-3 font-normal">코드</th><th className="pr-3 font-normal">이름</th><th className="pr-3 font-normal">인스타</th><th className="font-normal">가입일</th></tr></thead>
-                      <tbody>
-                        {preview.map((r) => (
-                          <tr key={r.id} className="border-t">
-                            <td className="py-1 pr-3 font-mono">{r.code}</td><td className="pr-3">{r.name}</td>
-                            <td className="pr-3 text-muted-foreground">{r.instagram ? `@${r.instagram}` : "—"}</td><td className="tabular-nums">{jstDay(r.joined_at)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-            <div className="flex flex-wrap items-center gap-3">
-              <button type="button" disabled={busy} onClick={runPreview} className="h-8 rounded border text-xs px-4 disabled:opacity-50">{busy && !preview ? "찾는 중…" : preview ? "미리 보기 다시" : "미리 보기"}</button>
-              <button type="button" disabled={busy || !preview || preview.length === 0 || !body.trim() || tooLong} onClick={send} className="h-8 rounded bg-foreground text-background text-xs px-4 disabled:opacity-50">
-                {preview ? `${preview.length}명에게 보내기` : "미리 보기 후 보내기"}
-              </button>
-              {msg && <span className="text-xs text-muted-foreground">{msg}</span>}
-            </div>
-          </div>
-        )}
-        {!open && msg && <p className="text-xs text-muted-foreground">{msg}</p>}
-        {messages.length === 0 ? (
-          <p className="text-xs text-muted-foreground">아직 보낸 메시지가 없습니다.</p>
-        ) : (
-          <ul className="space-y-2 text-xs">
-            {messages.map((m) => (
-              <li key={m.id} className="rounded border px-3 py-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium">{m.memo || "메시지"}</span>
-                  <span className="text-muted-foreground">{jstDay(m.created_at)} · 대상 {m.partner_ids.length}명 · {filterText(m.filter, rules.clickWindowDays)}</span>
-                  {m.notify_status === "sent" && <Pill className="bg-emerald-50 text-emerald-700">{`LINE 보냄 ${m.sent_count}명${m.failed_count > 0 ? ` · 실패 ${m.failed_count}` : ""}`}</Pill>}
-                  {m.notify_status === "pending" && <Pill className="bg-amber-50 text-amber-700">LINE 보류 — 09:05</Pill>}
-                  {m.notify_status === "failed" && <Pill className="bg-red-50 text-red-700">발송 실패</Pill>}
-                  {m.notify_status === "pending" && <button className="underline text-red-600" onClick={() => cancel(m)}>취소</button>}
-                </div>
-                <details className="mt-1">
-                  <summary className="cursor-pointer text-muted-foreground">본문</summary>
-                  <p className="text-muted-foreground mt-1 whitespace-pre-wrap">{m.body}</p>
-                </details>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 export default function AffiliateTab({ secret }: { secret: string }) {
   const qc = useQueryClient();
   const [selected, setSelected] = useState<number[]>([]);
@@ -1176,8 +1002,9 @@ export default function AffiliateTab({ secret }: { secret: string }) {
       {/* 정산 */}
       <SettlementCard secret={secret} settlement={data.settlement} onDone={refresh} />
 
-      {/* 파트너에게 메시지 */}
-      <MessageCard secret={secret} messages={data.messages ?? []} rules={data.messageRules ?? { clickWindowDays: 30, maxLength: 1500 }} onDone={refresh} />
+      {/* 파트너 메시지 (상황별) */}
+      <AffiliateMessages secret={secret} messages={data.messages ?? []} kinds={data.messageKinds}
+        rules={data.messageRules ?? { clickWindowDays: 30, maxLength: 1500 }} partners={data.partners} onDone={refresh} />
 
       {/* 캠페인 */}
       <Card>
