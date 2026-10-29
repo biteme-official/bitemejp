@@ -8,7 +8,8 @@ on:
 
 jobs:
   e2e-test:
-    runs-on: ubuntu-latest
+    # ubuntu-latest 가 26.04 로 바뀌며 Playwright 가 chromium 설치를 거부함(2026-10-26~) — 지원되는 24.04 로 고정
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
