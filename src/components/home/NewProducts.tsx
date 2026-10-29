@@ -29,7 +29,7 @@ export function NewProducts() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="mt-8"><ProductCarouselSkeleton /></div>;
+  if (loading) return <div className="mt-5 md:mt-8"><ProductCarouselSkeleton /></div>;
 
   return (
     <ProductCarousel
@@ -40,7 +40,7 @@ export function NewProducts() {
       moreTo="/?sort=created_at_desc"
       trackName="new"
       trackSource="home_new"
-      className="mt-8"
+      className="mt-5 md:mt-8"
       style={{ animationDelay: "0.2s" }}
     />
   );
