@@ -352,19 +352,19 @@ export function canSendLineHere(): boolean {
   return !!process.env.LINE_MESSAGING_CHANNEL_ACCESS_TOKEN;
 }
 
-export interface RemoteFlushResult { ok: boolean; campaignsSent: number; noticesSent: number; error?: string }
+export interface RemoteFlushResult { ok: boolean; campaignsSent: number; noticesSent: number; messagesSent: number; error?: string }
 
 export async function triggerRemoteNotify(): Promise<RemoteFlushResult> {
   const base = process.env.AFFILIATE_NOTIFY_BASE_URL || 'https://biteme.co.jp';
   const secret = process.env.ADMIN_SECRET;
-  if (!secret) return { ok: false, campaignsSent: 0, noticesSent: 0, error: 'ADMIN_SECRET 미설정' };
+  if (!secret) return { ok: false, campaignsSent: 0, noticesSent: 0, messagesSent: 0, error: 'ADMIN_SECRET 미설정' };
   try {
     const res = await fetch(`${base}/api/affiliate-cron?task=notify`, { headers: { Authorization: `Bearer ${secret}` } });
-    const j = (await res.json().catch(() => ({}))) as { ok?: boolean; campaigns?: { sent?: number }; notices?: { sent?: number } };
-    if (!res.ok || !j.ok) return { ok: false, campaignsSent: 0, noticesSent: 0, error: `발송 서버 ${res.status}` };
-    return { ok: true, campaignsSent: j.campaigns?.sent ?? 0, noticesSent: j.notices?.sent ?? 0 };
+    const j = (await res.json().catch(() => ({}))) as { ok?: boolean; campaigns?: { sent?: number }; notices?: { sent?: number }; messages?: { sent?: number } };
+    if (!res.ok || !j.ok) return { ok: false, campaignsSent: 0, noticesSent: 0, messagesSent: 0, error: `발송 서버 ${res.status}` };
+    return { ok: true, campaignsSent: j.campaigns?.sent ?? 0, noticesSent: j.notices?.sent ?? 0, messagesSent: j.messages?.sent ?? 0 };
   } catch (e) {
-    return { ok: false, campaignsSent: 0, noticesSent: 0, error: e instanceof Error ? e.message : '발송 서버 호출 실패' };
+    return { ok: false, campaignsSent: 0, noticesSent: 0, messagesSent: 0, error: e instanceof Error ? e.message : '발송 서버 호출 실패' };
   }
 }
 
