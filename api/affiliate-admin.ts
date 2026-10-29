@@ -11,9 +11,10 @@
  *  POST action=void_conversion { conversionId, reason }  약관 위반 성과 취소(정산 전 건만)
  *  POST action=create_notice { title, body, effectiveAt, termsVersion? }  규약 개정 통지(시행 14일 전 · LINE + 파트너 배너)
  *  POST action=delete_notice { noticeId }  아직 안 보낸 통지 삭제
- *  POST action=preview_message { filter }  조건에 맞는 파트너 명단 (보내지 않음)
- *  POST action=send_message { memo, body, filter, expectedCount }  그 명단에 LINE (야간이면 다음 날 09:05)
+ *  POST action=preview_message { kind, params, body }  상황 규칙에 맞는 명단 + 사람별 문구 (보내지 않음)
+ *  POST action=send_message { kind, params, body, memo, expectedCount }  그 명단에 LINE (야간이면 다음 날 09:05)
  *  POST action=cancel_message { messageId }  아직 안 나간 메시지 취소
+ *  POST action=save_message_template { kind, body } / reset_message_template { kind }  상황별 문구 저장·기본으로
  *  POST /api/affiliate-admin  action=add_partner
  *       { code, name, instagram?, email?, discountCode? }
  *       Phase 2 셀프 가입 전까지 하영이 어드민에서 파트너를 앉힌다.
@@ -40,7 +41,7 @@ import { createCampaign, deleteCampaign, disablePartnerCodes, endCampaign, parse
 import { closeMonth, currentPeriodJst, dueDateOf, markPaid, MIN_PAYOUT, voidConversion } from './_affiliate-payout.js';
 import { createNotice, deleteNotice, parseNoticeInput, NOTICE_MIN_DAYS } from './_affiliate-notice.js';
 import { detectAnomalies } from './_affiliate-anomaly.js';
-import { MESSAGE_CLICK_WINDOW_DAYS, MESSAGE_MAX_LENGTH, cancelMessage, createMessage, listMessages, parseMessageFilter, parseMessageInput, selectRecipients } from './_affiliate-message.js';
+import { MESSAGE_CLICK_WINDOW_DAYS, MESSAGE_MAX_LENGTH, cancelMessage, createMessage, listMessages, messageKindsView, parseMessageInput, previewMessage, resetTemplate, saveTemplate } from './_affiliate-message.js';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 const CODE_RE = /^[A-Z0-9]{4,12}$/;
@@ -162,6 +163,7 @@ async function handleGet(res: VercelResponse) {
   });
   const unsettled = { conversions: unsettledRows.length, amount: unsettledRows.reduce((a, r) => a + r.commission, 0), partners: new Set(unsettledRows.map((r) => r.partner_id)).size };
 
+  const messages = await listMessages(sb);
   return res.status(200).json({
     ok: true,
     enabled: isAffiliateEnabled(),
@@ -175,7 +177,8 @@ async function handleGet(res: VercelResponse) {
     anomalies: detectAnomalies(allRows, partners).map((a) => ({ ...a, partnerCode: codeById.get(a.partnerId) ?? '?' })),
     notices: await listNotices(sb),
     noticeMinDays: NOTICE_MIN_DAYS,
-    messages: await listMessages(sb),
+    messages,
+    messageKinds: await messageKindsView(sb, messages),
     messageRules: { clickWindowDays: MESSAGE_CLICK_WINDOW_DAYS, maxLength: MESSAGE_MAX_LENGTH },
   });
 }
@@ -261,8 +264,9 @@ async function handleDeleteNotice(body: Record<string, unknown>, res: VercelResp
 }
 
 async function handlePreviewMessage(body: Record<string, unknown>, res: VercelResponse) {
-  const recipients = await selectRecipients(getSupabase(), parseMessageFilter(body.filter));
-  return res.status(200).json({ ok: true, count: recipients.length, recipients });
+  const r = await previewMessage(getSupabase(), String(body.kind ?? 'custom'), body.params ?? (body.filter ? { filter: body.filter } : {}), String(body.body ?? ''));
+  if (typeof r === 'string') return res.status(400).json({ error: r });
+  return res.status(200).json({ ok: true, ...r });
 }
 
 async function handleSendMessage(body: Record<string, unknown>, res: VercelResponse) {
@@ -278,6 +282,18 @@ async function handleCancelMessage(body: Record<string, unknown>, res: VercelRes
   if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'messageId 필요' });
   const r = await cancelMessage(getSupabase(), id);
   if (typeof r === 'string') return res.status(409).json({ error: r });
+  return res.status(200).json(r);
+}
+
+async function handleSaveTemplate(body: Record<string, unknown>, res: VercelResponse) {
+  const r = await saveTemplate(getSupabase(), String(body.kind ?? ''), String(body.body ?? ''));
+  if (typeof r === 'string') return res.status(400).json({ error: r });
+  return res.status(200).json(r);
+}
+
+async function handleResetTemplate(body: Record<string, unknown>, res: VercelResponse) {
+  const r = await resetTemplate(getSupabase(), String(body.kind ?? ''));
+  if (typeof r === 'string') return res.status(400).json({ error: r });
   return res.status(200).json(r);
 }
 
@@ -456,6 +472,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (body.action === 'preview_message') return await handlePreviewMessage(body, res);
       if (body.action === 'send_message') return await handleSendMessage(body, res);
       if (body.action === 'cancel_message') return await handleCancelMessage(body, res);
+      if (body.action === 'save_message_template') return await handleSaveTemplate(body, res);
+      if (body.action === 'reset_message_template') return await handleResetTemplate(body, res);
       return res.status(400).json({ error: `unknown action: ${String(body.action)}` });
     }
     return res.status(405).json({ error: 'Method not allowed' });
