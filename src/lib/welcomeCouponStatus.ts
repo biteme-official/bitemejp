@@ -55,3 +55,18 @@ export function useWelcomeCouponStatus(code: string | null, lineSessionToken: st
 
   return status;
 }
+
+/**
+ * 훅 밖(결제 직전 cartStore)에서 쓰는 판정 — 블프 5% 와 웰컴 중 무엇을 넣을지 고를 때 (#274).
+ * 장바구니에서 이미 물어봤으면 그 캐시를 쓴다. 실패는 "unknown".
+ */
+export async function getWelcomeCouponUsage(code: string, lineSessionToken: string): Promise<CouponUsage> {
+  const key = `${CACHE_PREFIX}${code}:${lineSessionToken.slice(-16)}`;
+  try {
+    const v = sessionStorage.getItem(key);
+    if (v === "used" || v === "unused") return v;
+  } catch { /* 무시 */ }
+  const v = await fetchStatus(code, lineSessionToken).catch(() => "unknown" as const);
+  if (v !== "unknown") { try { sessionStorage.setItem(key, v); } catch { /* 무시 */ } }
+  return v;
+}

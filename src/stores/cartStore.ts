@@ -7,6 +7,8 @@ import {
 } from '@/config/giftConfig';
 import { LINE_WELCOME_DISCOUNT_KEY, LINE_WELCOME_DISCOUNT_PERCENT } from '@/lib/lineWelcomeDiscount';
 import { getAffiliateOffer, orderOfferAndWelcome } from '@/lib/affiliate-offer';
+import { activeBfCode, BF_PERCENT } from '@/lib/bfCoupon';
+import { getWelcomeCouponUsage } from '@/lib/welcomeCouponStatus';
 import { useAuthStore } from '@/stores/authStore';
 import { syncCartSnapshot } from '@/lib/cartSync';
 
@@ -243,12 +245,24 @@ export const useCartStore = create<CartStore>()(
           const affiliateCode = localStorage.getItem('affiliate_discount');
           // 어필리에이트 코드가 있으면 그쪽을 우선한다. 둘 다 넣으면 Shopify 가
           // 하나만 적용해 파트너 성과가 유실될 수 있다.
-          const welcomeCode = affiliateCode ? null : localStorage.getItem(LINE_WELCOME_DISCOUNT_KEY);
+          let welcomeCode = affiliateCode ? null : localStorage.getItem(LINE_WELCOME_DISCOUNT_KEY);
+          let welcomePercent = LINE_WELCOME_DISCOUNT_PERCENT;
+          // 블프 LINE 친구 5% (#274) — 웰컴과는 둘 중 큰 쪽 하나. 웰컴을 아직 안 썼을 때만 웰컴(10%),
+          // 썼거나 확인이 안 되면 블프 5%. 주문 할인끼리는 합산되지 않으니 하나만 넣는다.
+          const bfCode = affiliateCode ? null : activeBfCode();
+          if (bfCode) {
+            const token = useAuthStore.getState().user?.lineSessionToken;
+            const welcomeUsage = welcomeCode && token ? await getWelcomeCouponUsage(welcomeCode, token) : 'used';
+            if (welcomeUsage !== 'unused') {
+              welcomeCode = bfCode;
+              welcomePercent = BF_PERCENT;
+            }
+          }
           // 파트너 링크 자동 할인 (LINE 회원만) — 웰컴과 할인액 큰 쪽을 앞에 둔다. /discount/ 특별 코드가 있으면 그쪽이 우선
           const linkOffer = affiliateCode ? null : orderOfferAndWelcome(
             getAffiliateOffer(),
             useAuthStore.getState().isLoggedIn,
-            welcomeCode ? { code: welcomeCode, percent: LINE_WELCOME_DISCOUNT_PERCENT } : null,
+            welcomeCode ? { code: welcomeCode, percent: welcomePercent } : null,
             items.filter(i => !i.isGift).map(i => ({ productId: i.product.node.id, unitPrice: parseFloat(i.price.amount), quantity: i.quantity })),
           );
           // ⚠️ isGift 플래그만 보고 판단하면 안 된다 — 플래그가 유실된 카트에서
