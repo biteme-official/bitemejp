@@ -11,6 +11,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
+import { alertExhausted, isMonthlyLimitError } from './_line-quota.js';
 import { MANUAL_LINE_ID_PREFIX, campaignPartnerIds, campaignProductGids, type AffCampaign, type AffPartner } from './_affiliate.js';
 
 const SHOP = process.env.VITE_SHOPIFY_STORE_DOMAIN || 'biteme-jp.myshopify.com';
@@ -137,8 +138,9 @@ async function createShopifyCode(
         },
         appliesOncePerCustomer: true,
         usageLimit: args.usageLimit,
-        // 웰컴·증정 코드와 겹치지 않게 — 주문 할인끼리는 합산하지 않는다. 배송 할인과는 합산 허용
-        combinesWith: { orderDiscounts: false, productDiscounts: false, shippingDiscounts: true },
+        // 웰컴 코드와는 겹치지 않게 — 주문 할인끼리는 합산하지 않는다. 배송 할인과는 합산 허용
+        // 상품 할인(블프 전 상품 15% 같은 자동 할인)과는 합산한다 — 하영 결정 2026-11-03 (#276)
+        combinesWith: { orderDiscounts: false, productDiscounts: true, shippingDiscounts: true },
       },
     }
   );
@@ -171,6 +173,7 @@ async function updateShopifyCode(
         endsAt: args.endsAt,
         ...(args.usageLimit !== undefined ? { usageLimit: args.usageLimit } : {}),
         customerGets: { value: { percentage: args.percent / 100 }, ...items },
+        combinesWith: { orderDiscounts: false, productDiscounts: true, shippingDiscounts: true },
       },
     }
   );
@@ -286,7 +289,9 @@ async function pushLine(lineUserId: string, text: string): Promise<'sent' | 'not
   });
   if (res.ok) return 'sent';
   if (res.status === 403) return 'not-friend';
-  console.error('[affiliate-campaign] LINE push', res.status, (await res.text()).slice(0, 200));
+  const body = await res.text();
+  if (isMonthlyLimitError(res.status, body)) await alertExhausted();
+  console.error('[affiliate-campaign] LINE push', res.status, body.slice(0, 200));
   return 'failed';
 }
 
@@ -305,7 +310,12 @@ export async function multicastLine(lineUserIds: string[], text: string): Promis
       body: JSON.stringify({ to: chunk, messages: [{ type: 'text', text }] }),
     });
     if (res.ok) sent += chunk.length;
-    else { failed += chunk.length; console.error('[affiliate-campaign] LINE multicast', res.status, (await res.text()).slice(0, 200)); }
+    else {
+      failed += chunk.length;
+      const body = await res.text();
+      if (isMonthlyLimitError(res.status, body)) await alertExhausted();
+      console.error('[affiliate-campaign] LINE multicast', res.status, body.slice(0, 200));
+    }
   }
   return { sent, failed };
 }

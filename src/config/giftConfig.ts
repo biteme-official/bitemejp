@@ -1,3 +1,8 @@
+/**
+ * 구매 증정 켜기/끄기. 2026-11-03 하영 결정으로 끔 — 우치와 증정 종료(Shopify 코드도 비활성화).
+ * 끄면 카트에 증정품을 넣지 않고, 이미 담겨 있던 증정 라인은 지우며, 결제에도 싣지 않는다.
+ */
+export const GIFT_ENABLED = false;
 export const GIFT_PRODUCT_ID = '10244037017913'; // BITE ME サマーうちわ
 export const GIFT_THRESHOLD = 5000; // JPY
 export const GIFT_DISCOUNT_CODE = 'GIFT-UCHIWA-2026';
@@ -36,5 +41,6 @@ export function qualifyingSubtotal(items: GiftCartLine[]): number {
  * Shopify 는 해당 없는 코드를 무시하므로, 애매하면 보내는 쪽이 안전하다.
  */
 export function shouldSendGiftCode(items: GiftCartLine[]): boolean {
+  if (!GIFT_ENABLED) return false;
   return items.some(isGiftLine) && qualifyingSubtotal(items) >= GIFT_THRESHOLD;
 }
