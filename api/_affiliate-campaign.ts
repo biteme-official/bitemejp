@@ -138,8 +138,9 @@ async function createShopifyCode(
         },
         appliesOncePerCustomer: true,
         usageLimit: args.usageLimit,
-        // 웰컴·증정 코드와 겹치지 않게 — 주문 할인끼리는 합산하지 않는다. 배송 할인과는 합산 허용
-        combinesWith: { orderDiscounts: false, productDiscounts: false, shippingDiscounts: true },
+        // 웰컴 코드와는 겹치지 않게 — 주문 할인끼리는 합산하지 않는다. 배송 할인과는 합산 허용
+        // 상품 할인(블프 전 상품 15% 같은 자동 할인)과는 합산한다 — 하영 결정 2026-11-03 (#276)
+        combinesWith: { orderDiscounts: false, productDiscounts: true, shippingDiscounts: true },
       },
     }
   );
@@ -172,6 +173,7 @@ async function updateShopifyCode(
         endsAt: args.endsAt,
         ...(args.usageLimit !== undefined ? { usageLimit: args.usageLimit } : {}),
         customerGets: { value: { percentage: args.percent / 100 }, ...items },
+        combinesWith: { orderDiscounts: false, productDiscounts: true, shippingDiscounts: true },
       },
     }
   );

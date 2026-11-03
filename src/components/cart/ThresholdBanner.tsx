@@ -3,7 +3,7 @@ import { Gift, Truck } from "lucide-react";
 import { useCartStore } from "@/stores/cartStore";
 import { useTranslation } from "@/hooks/useTranslation";
 import { fetchShippingRates, fetchCartPreview, ShippingRate } from "@/lib/shopify";
-import { GIFT_THRESHOLD } from "@/config/giftConfig";
+import { GIFT_ENABLED, GIFT_THRESHOLD } from "@/config/giftConfig";
 
 export function ThresholdBanner() {
   const items = useCartStore(state => state.items);
@@ -46,8 +46,8 @@ export function ThresholdBanner() {
 
   return (
     <div className="space-y-2 mb-4">
-      {/* Gift threshold banner */}
-      <div className={`border rounded-lg p-3 transition-colors ${giftUnlocked ? 'bg-primary/5 border-primary/30' : 'bg-card border-border'}`}>
+      {/* Gift threshold banner — 증정을 끈 동안엔 숨김 */}
+      {GIFT_ENABLED && <div className={`border rounded-lg p-3 transition-colors ${giftUnlocked ? 'bg-primary/5 border-primary/30' : 'bg-card border-border'}`}>
         <div className="flex items-center gap-2 mb-2">
           <Gift className={`h-4 w-4 flex-shrink-0 ${giftUnlocked ? 'text-primary' : 'text-muted-foreground'}`} />
           <span className="text-sm font-medium">
@@ -62,7 +62,7 @@ export function ThresholdBanner() {
             style={{ width: `${progress}%` }}
           />
         </div>
-      </div>
+      </div>}
 
       {/* Shipping rate */}
       {shippingRate && (
