@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { ShopifyProduct, createStorefrontCheckoutWithDiscount, fetchProductById, fetchCartPreview, fetchProductsByVariantIds } from '@/lib/shopify';
 import {
-  GIFT_THRESHOLD, GIFT_PRODUCT_ID, GIFT_DISCOUNT_CODE,
+  GIFT_ENABLED, GIFT_THRESHOLD, GIFT_PRODUCT_ID, GIFT_DISCOUNT_CODE,
   isGiftLine, shouldSendGiftCode,
 } from '@/config/giftConfig';
 import { LINE_WELCOME_DISCOUNT_KEY, LINE_WELCOME_DISCOUNT_PERCENT } from '@/lib/lineWelcomeDiscount';
@@ -148,6 +148,11 @@ export const useCartStore = create<CartStore>()(
 
         try {
           const { items } = get();
+          // 증정을 끈 동안엔 넣지 않고, 전에 담긴 증정 라인도 지운다(지우지 않으면 정가로 결제된다)
+          if (!GIFT_ENABLED) {
+            if (items.some(isGiftLine)) set({ items: items.filter(i => !isGiftLine(i)) });
+            return;
+          }
           // 플래그가 유실된 증정품 라인도 증정품으로 본다 — 안 그러면 임계값을
           // 넘길 때 증정 라인을 하나 더 붙여 うちわ 가 두 개가 된다 (Issue #126).
           const nonGiftItems = items.filter(i => !isGiftLine(i));
@@ -224,10 +229,13 @@ export const useCartStore = create<CartStore>()(
 
       createCheckout: async (lineItems, email) => {
         const { items, setLoading, setCheckoutUrl } = get();
-        const checkoutItems = lineItems ?? items.map(item => ({
+        // 증정을 끈 동안 남아 있는 증정 라인은 결제에 싣지 않는다(코드가 꺼져 정가가 된다).
+        // Checkout 화면은 lineItems 를 직접 넘기므로 그쪽도 같이 거른다.
+        const giftVariants = GIFT_ENABLED ? new Set<string>() : new Set(items.filter(isGiftLine).map(i => i.variantId));
+        const checkoutItems = (lineItems ?? items.map(item => ({
           variantId: item.variantId,
           quantity: item.quantity,
-        }));
+        }))).filter(li => !giftVariants.has(li.variantId));
         if (checkoutItems.length === 0) return null;
 
         setLoading(true);
