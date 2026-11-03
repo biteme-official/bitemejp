@@ -1,4 +1,5 @@
 import { Phone, Mail } from "lucide-react";
+import { track } from "@/lib/track";
 import { Link } from "react-router-dom";
 
 export function Footer() {
@@ -40,7 +41,7 @@ export function Footer() {
             <Link to="/blog" className="hover:text-primary transition-colors">
               ブログ
             </Link>
-            <Link to="/affiliate" className="hover:text-primary transition-colors">
+            <Link to="/affiliate" onClick={() => track("promo_click", { slot: "affiliate_footer", target: "/affiliate" })} className="hover:text-primary transition-colors">
               アフィリエイト募集
             </Link>
           </div>

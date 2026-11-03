@@ -2,7 +2,11 @@ import { Link } from "react-router-dom";
 import { Heart, ShoppingCart } from "lucide-react";
 import { ShopifyProduct, formatPrice, getPreorderDate } from "@/lib/shopify";
 import { useWishlistStore } from "@/stores/wishlistStore";
-import { cn } from "@/lib/utils";
+import { cn, shopifyImageUrl } from "@/lib/utils";
+import { RestockCardButton } from "@/components/product/RestockNotifyButton";
+import { toRestockProduct } from "@/stores/restockStore";
+import { LaunchCardButton } from "@/components/product/LaunchNotifyButton";
+import { getUpcomingLaunch, launchLabel } from "@/lib/productStock";
 
 /**
  * 메인 섹션(新商品·人気商品·특집)이 공통으로 쓰는 상품 카드 (#185).
@@ -79,6 +83,7 @@ export function ProductCard({
   const productUrl = `/product/${node.id.split("/").pop()}`;
   const isAvailable = node.variants.edges.some(v => v.node.availableForSale);
   const preorderDate = getPreorderDate(node.tags ?? []);
+  const launch = getUpcomingLaunch(node);
   const { pct, final, original } = resolvePrice(product, discountPct, collectionDiscountPct);
   const wishlisted = isWishlisted(node.id);
 
@@ -92,11 +97,12 @@ export function ProductCard({
       <div className="aspect-square bg-secondary relative overflow-hidden">
         {image ? (
           <img
-            src={image.url}
+            src={shopifyImageUrl(image.url, 480)}
             alt={image.altText || node.title}
             className={cn(
               "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",
-              !isAvailable && "opacity-50",
+              // 출시 예정도 흐리게 — 발매일 전엔 재고가 있어도(#260) 아직 살 수 없는 상품
+              (!isAvailable || launch) && "opacity-50",
             )}
             loading="lazy"
           />
@@ -150,11 +156,24 @@ export function ProductCard({
           <Heart className={cn("h-3.5 w-3.5", wishlisted ? "fill-red-500 text-red-500" : "text-muted-foreground")} />
         </button>
 
-        {!isAvailable && (
-          <div className="absolute inset-0 flex items-center justify-center">
+        {launch ? (
+          // 출시 예정 — 품절이 아니라 아직 판매 전 (#248)
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+            <span className="bg-primary text-primary-foreground text-[10px] font-bold px-2 py-0.5 rounded">
+              Coming Soon
+            </span>
+            <span className="bg-background/85 text-foreground text-[10px] font-semibold px-1.5 py-0.5 rounded">
+              {launchLabel(launch)}
+            </span>
+            <LaunchCardButton productId={node.id} size="sm" />
+          </div>
+        ) : !isAvailable && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
             <span className="bg-foreground/80 text-background text-[10px] font-bold px-2 py-0.5 rounded">
               Sold Out
             </span>
+            {/* 목록에서 바로 재입고 알림 신청 (#219) */}
+            <RestockCardButton product={toRestockProduct(node)} size="sm" />
           </div>
         )}
       </div>
@@ -183,7 +202,7 @@ export function ProductCard({
           <button
             type="button"
             aria-label="カートに追加"
-            disabled={!isAvailable}
+            disabled={!isAvailable || !!launch}
             onClick={(e) => { e.stopPropagation(); onAddToCart(product); }}
             className="relative z-10 shrink-0 w-7 h-7 rounded-full bg-foreground text-background flex items-center justify-center hover:bg-primary transition-colors disabled:opacity-40 disabled:hover:bg-foreground"
           >

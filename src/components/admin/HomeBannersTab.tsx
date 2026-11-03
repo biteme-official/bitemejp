@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Copy, ImagePlus, Plus, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Copy, GripVertical, ImagePlus, Plus, Search, Sparkles, Trash2, Upload, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,8 @@ import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BannerSlide } from "@/components/home/BannerSlide";
 import {
+  BADGE_OPTIONS,
+  BannerCopyOption,
   DEFAULT_SETTINGS,
   HomeBanner,
   HomeBannersDoc,
@@ -17,6 +19,7 @@ import {
   ProductForBanner,
   emptyBanner,
   fetchHomeBanners,
+  fetchProductContext,
   fetchProductForBanner,
   importFromShopify,
   isHomeBannerLive,
@@ -39,6 +42,11 @@ import { cn } from "@/lib/utils";
  *
  * 「상품 링크로」: 디자이너 배너 없이 상품 링크만 주면 그 상품 이미지들을 보여주고, 고른 한 장을 오른쪽에 놓는다.
  * 상품 썸네일은 위 25~30% 에 제목이 박혀 있어 「위 자르기」(기본 28%)로 잘라낸다 — 미리보기 보며 조절.
+ *
+ * 「내 이미지 올리기」: 상품 링크 대신 파일을 올리면 가운데를 정사각으로 잘라(상품 썸네일 모양) 같은 자리에 놓는다.
+ *
+ * 「AI 문구 제안」(#215): 메모 한 줄 + 링크 상품 정보 + 배너 사진을 보고 일본어 문구 3안(한국어 뜻 포함)을 받는다.
+ * 고르면 배지·부제·헤드라인·CTA 칸이 채워질 뿐 — 저장 전엔 메인에 안 나간다. 배지는 NEW / SALE / HOT 드롭다운.
  */
 const API = "/api/home-banners";
 
@@ -106,6 +114,34 @@ function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+/**
+ * 직접 올리는 상품 사진 — 가운데를 정사각으로 잘라(긴 변 1200px 까지) 상품 썸네일과 같은 모양으로 만든다.
+ * PNG 는 투명 배경을 지키려고 PNG 로, 나머지는 JPEG 로.
+ */
+function squareCrop(dataUrl: string, type: string): Promise<{ file: File; dataUrl: string; size: number }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const side = Math.min(img.naturalWidth, img.naturalHeight);
+      const size = Math.min(1200, side);
+      const c = document.createElement("canvas");
+      c.width = size;
+      c.height = size;
+      const ctx = c.getContext("2d");
+      if (!ctx) return reject(new Error("이미지를 못 읽었습니다"));
+      ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, size, size);
+      const outType = type === "image/png" ? "image/png" : "image/jpeg";
+      const out = c.toDataURL(outType, 0.9);
+      c.toBlob((blob) => {
+        if (!blob) return reject(new Error("이미지를 못 읽었습니다"));
+        resolve({ file: new File([blob], outType === "image/png" ? "photo.png" : "photo.jpg", { type: outType }), dataUrl: out, size });
+      }, outType, 0.9);
+    };
+    img.onerror = () => reject(new Error("이미지를 못 읽었습니다"));
+    img.src = dataUrl;
+  });
+}
+
 async function uploadImage(secret: string, file: File, dataUrl: string): Promise<string> {
   const res = await fetch(API, {
     method: "POST",
@@ -124,13 +160,20 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [importedFromShopify, setImportedFromShopify] = useState(false);
-  const [uploading, setUploading] = useState<"pc" | "mobile" | null>(null);
+  const [uploading, setUploading] = useState<"pc" | "mobile" | "photo" | null>(null);
   const pcFileRef = useRef<HTMLInputElement>(null);
   const mobileFileRef = useRef<HTMLInputElement>(null);
+  const photoFileRef = useRef<HTMLInputElement>(null);
   const [productInput, setProductInput] = useState("");
   const [product, setProduct] = useState<ProductForBanner | null>(null);
   const [productLoading, setProductLoading] = useState(false);
   const [cleaning, setCleaning] = useState(false);
+  const [aiBrief, setAiBrief] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiOptions, setAiOptions] = useState<BannerCopyOption[]>([]);
+  /** 목록 드래그(#217) — 끄는 배너와, 놓을 자리(어느 카드의 위/아래) */
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [dropAt, setDropAt] = useState<{ id: string; after: boolean } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -168,6 +211,8 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
   useEffect(() => {
     setProduct(null);
     setProductInput("");
+    setAiBrief("");
+    setAiOptions([]);
   }, [selectedId]);
 
   const dirty = doc !== null && JSON.stringify(doc) !== savedJson;
@@ -216,6 +261,24 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
       [next[i], next[j]] = [next[j], next[i]];
       return { ...d, banners: next };
     });
+  };
+  /** 끌어다 놓기 — id 배너를 targetId 카드의 위(after=false)·아래(after=true)로 */
+  const moveTo = (id: string, targetId: string, after: boolean) => {
+    if (id === targetId) return;
+    setDoc((d) => {
+      if (!d) return d;
+      const moving = d.banners.find((b) => b.id === id);
+      if (!moving) return d;
+      const rest = d.banners.filter((b) => b.id !== id);
+      const t = rest.findIndex((b) => b.id === targetId);
+      if (t < 0) return d;
+      rest.splice(after ? t + 1 : t, 0, moving);
+      return { ...d, banners: rest };
+    });
+  };
+  const endDrag = () => {
+    setDragId(null);
+    setDropAt(null);
   };
 
   const onPickImage = async (kind: "pc" | "mobile", file: File | undefined) => {
@@ -267,6 +330,24 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
     });
   };
 
+  /** 상품 사진 직접 올리기 — 정사각으로 잘라 상품 링크 사진과 같은 자리(오른쪽)에. 자르기 0 */
+  const onPickPhoto = async (file: File | undefined) => {
+    if (!file || !selected) return;
+    setUploading("photo");
+    try {
+      const sq = await squareCrop(await fileToDataUrl(file), file.type);
+      if (sq.file.size > 3 * 1024 * 1024) throw new Error("이미지는 3MB 까지");
+      const [url, bg] = await Promise.all([uploadImage(secret, sq.file, sq.dataUrl), sampleCorner(sq.dataUrl)]);
+      updateBanner(selected.id, { photo: { url, width: sq.size, height: sq.size, cropTop: 0 }, ...(bg ? { bg } : {}) });
+      toast.success("정사각으로 잘라 오른쪽에 넣었습니다 — 「저장」해야 반영");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "업로드 실패");
+    } finally {
+      setUploading(null);
+      if (photoFileRef.current) photoFileRef.current.value = "";
+    }
+  };
+
   /** AI(Gemini) 로 사진 속 글자를 지운 사본을 만들어 그걸로 바꾼다. 자르기는 0 으로 — 글자가 없어졌으니 */
   const cleanPhoto = async () => {
     if (!selected?.photo) return;
@@ -288,6 +369,42 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
     } finally {
       setCleaning(false);
     }
+  };
+
+  /** AI 문구 3안 받기 — 메모·링크 상품·배너 사진을 재료로. 고르기 전엔 칸을 안 건드린다 */
+  const suggestCopy = async () => {
+    if (!selected) return;
+    setAiLoading(true);
+    try {
+      const productCtx = (product && { title: product.title, description: "" }) || (await fetchProductContext(selected.link));
+      const res = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+        body: JSON.stringify({
+          action: "copy",
+          brief: aiBrief || selected.name,
+          product: productCtx,
+          link: selected.link,
+          imageUrl: selected.photo?.url ?? selected.pcImage,
+          current: selected.text,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || `실패 (${res.status})`);
+      const options = (json.options ?? []) as BannerCopyOption[];
+      if (options.length === 0) throw new Error("AI 가 문구를 못 만들었습니다 — 메모를 조금 더 적어 주세요");
+      setAiOptions(options);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "AI 문구 제안 실패");
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const applyCopy = (o: BannerCopyOption) => {
+    if (!selected) return;
+    updateText(selected.id, { badge: o.badge, subtext: o.subtext, headline: o.headline, cta: o.cta });
+    toast.success("문구를 채웠습니다 — 미리보기 확인 후 저장");
   };
 
   const save = async () => {
@@ -355,13 +472,39 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
                 tabIndex={0}
                 onClick={() => setSelectedId(b.id)}
                 onKeyDown={(e) => { if (e.key === "Enter") setSelectedId(b.id); }}
+                draggable
+                onDragStart={(e) => {
+                  setDragId(b.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData("text/plain", b.id); // 파이어폭스는 데이터가 없으면 드래그를 시작 안 함
+                }}
+                onDragOver={(e) => {
+                  if (!dragId) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const after = e.clientY > r.top + r.height / 2;
+                  if (dropAt?.id !== b.id || dropAt.after !== after) setDropAt({ id: b.id, after });
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragId && dropAt) moveTo(dragId, dropAt.id, dropAt.after);
+                  endDrag();
+                }}
+                onDragEnd={endDrag}
                 className={cn(
-                  "rounded-lg border p-2 flex gap-2 items-center cursor-pointer text-xs",
+                  "relative rounded-lg border p-2 flex gap-2 items-center cursor-pointer text-xs",
                   b.id === selectedId ? "border-primary bg-primary/5" : "hover:bg-muted/40",
+                  dragId === b.id && "opacity-40",
                 )}
               >
+                {/* 놓을 자리 표시선 */}
+                {dragId && dragId !== b.id && dropAt?.id === b.id && (
+                  <span className={cn("absolute left-0 right-0 h-0.5 rounded bg-primary pointer-events-none", dropAt.after ? "-bottom-[5px]" : "-top-[5px]")} />
+                )}
+                <GripVertical className="h-3.5 w-3.5 -mx-1 text-muted-foreground/60 cursor-grab flex-shrink-0" aria-hidden />
                 <div className="w-16 h-7 rounded bg-muted overflow-hidden flex-shrink-0" style={{ background: b.bg }}>
-                  {b.photo ? <img src={photoUrl(b.photo, 200)} alt="" className="w-full h-full object-contain" /> : b.pcImage && <img src={b.pcImage} alt="" className="w-full h-full object-cover" />}
+                  {b.photo ? <img src={photoUrl(b.photo, 200)} alt="" draggable={false} className="w-full h-full object-contain" /> : b.pcImage && <img src={b.pcImage} alt="" draggable={false} className="w-full h-full object-cover" />}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate font-medium">{b.name || b.text.headline || "(이름 없음)"}</p>
@@ -427,7 +570,7 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
                 {/* 상품 링크로 — 사진 모드 */}
                 <div className="rounded-lg border p-3 space-y-2 bg-muted/20">
                   <div className="flex items-center justify-between">
-                    <Label className="text-xs font-semibold">상품 링크로 만들기</Label>
+                    <Label className="text-xs font-semibold">상품 사진으로 만들기 (오른쪽 정사각)</Label>
                     {selected.photo && (
                       <button type="button" className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-0.5" onClick={() => updateBanner(selected.id, { photo: null })}>
                         <X className="h-3 w-3" />상품 사진 빼기
@@ -445,6 +588,13 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
                     <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" disabled={productLoading} onClick={loadProduct}>
                       <Search className="h-3.5 w-3.5 mr-1" />{productLoading ? "조회 중…" : "이미지 보기"}
                     </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" disabled={uploading !== null} onClick={() => photoFileRef.current?.click()}>
+                      <ImagePlus className="h-3.5 w-3.5 mr-1" />{uploading === "photo" ? "올리는 중…" : "내 이미지 올리기"}
+                    </Button>
+                    <span className="text-[11px] text-muted-foreground">상품 링크 대신 — 가운데를 정사각으로 잘라 같은 자리에 놓습니다</span>
+                    <input ref={photoFileRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={(e) => onPickPhoto(e.target.files?.[0])} />
                   </div>
                   {product && product.images.length > 0 && (
                     <div>
@@ -522,10 +672,65 @@ export default function HomeBannersTab({ secret }: { secret: string }) {
 
               {/* 문구 */}
               <div className="space-y-3">
+                {/* AI 문구 제안 */}
+                <div className="rounded-lg border p-3 space-y-2 bg-violet-50/40">
+                  <Label className="text-xs font-semibold flex items-center gap-1"><Wand2 className="h-3.5 w-3.5 text-violet-600" />AI 문구 제안</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      className="h-8 text-xs"
+                      value={aiBrief}
+                      onChange={(e) => setAiBrief(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !aiLoading) suggestCopy(); }}
+                      placeholder="어떤 배너인지 한 줄 (한국어 OK) — 예: 10월 신작 장난감 4종, 첫 구매 10% 할인"
+                    />
+                    <Button variant="outline" size="sm" className="h-8 text-xs shrink-0" disabled={aiLoading} onClick={suggestCopy}>
+                      <Sparkles className="h-3.5 w-3.5 mr-1" />{aiLoading ? "쓰는 중… (15초쯤)" : aiOptions.length ? "다시 받기" : "제안 받기"}
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">메모가 비면 관리용 이름을 씁니다. 링크가 상품이면 상품 설명과 배너 사진도 함께 보고 일본어로 3안을 씁니다.</p>
+                  {aiOptions.length > 0 && (
+                    <div className="space-y-1.5">
+                      {aiOptions.map((o, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => applyCopy(o)}
+                          className="w-full text-left rounded-md border bg-white p-2 hover:border-violet-400 hover:bg-violet-50/60 group"
+                        >
+                          <div className="flex items-start gap-2">
+                            <div className="min-w-0 flex-1 space-y-0.5">
+                              <p className="text-[11px] text-muted-foreground">
+                                {o.badge && <span className="inline-block mr-1 px-1 rounded bg-neutral-900 text-white text-[9px] font-bold">{o.badge}</span>}
+                                {o.subtext}
+                              </p>
+                              <p className="font-semibold whitespace-pre-line leading-snug">{o.headline}</p>
+                              <p className="text-[11px]">{o.cta} →</p>
+                              {o.ko && <p className="text-[11px] text-muted-foreground pt-0.5">🇰🇷 {o.ko}</p>}
+                            </div>
+                            <span className="text-[11px] text-violet-700 shrink-0 flex items-center gap-0.5 opacity-60 group-hover:opacity-100"><Check className="h-3 w-3" />이 문구 쓰기</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 gap-2">
                   <div>
                     <Label className="text-xs">배지 (맨 위 칩)</Label>
-                    <Input className="h-8 text-xs" value={selected.text.badge} onChange={(e) => updateText(selected.id, { badge: e.target.value })} placeholder="NEW" />
+                    <Select value={selected.text.badge || "none"} onValueChange={(v) => updateText(selected.id, { badge: v === "none" ? "" : v })}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none" className="text-xs">없음</SelectItem>
+                        {BADGE_OPTIONS.map((b) => (
+                          <SelectItem key={b} value={b} className="text-xs">{b}</SelectItem>
+                        ))}
+                        {/* 예전에 자유 입력으로 넣은 값(BEST SELLER 등)은 다른 걸 고를 때까지 그대로 보여 둔다 */}
+                        {selected.text.badge && !(BADGE_OPTIONS as readonly string[]).includes(selected.text.badge) && (
+                          <SelectItem value={selected.text.badge} className="text-xs">{selected.text.badge} (예전 값)</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div>
                     <Label className="text-xs">부제 (작은 글씨)</Label>

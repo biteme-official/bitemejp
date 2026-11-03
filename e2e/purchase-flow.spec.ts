@@ -1,4 +1,37 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+const PURCHASE_BUTTON = /買い物かごに追加|カートに追加|すぐ購入/;
+// 출시 예정 상품은 장바구니 대신 오픈 알림 버튼만 보여준다 (#249)
+const PRELAUNCH_BUTTON = /発売をLINEで受け取る/;
+const MAX_PRODUCTS_TO_TRY = 6;
+
+// 홈 상품 그리드에서 구매 버튼이 있는 첫 상품을 연다. 출시 예정 상품은 건너뛴다.
+async function openPurchasableProduct(page: Page) {
+  const productCards = page.locator('main h3');
+  await expect(productCards.first()).toBeVisible({ timeout: 15_000 });
+  const total = Math.min(await productCards.count(), MAX_PRODUCTS_TO_TRY);
+
+  for (let i = 0; i < total; i++) {
+    const card = productCards.nth(i);
+    console.log(`Clicking product: ${await card.textContent()}`);
+    await card.click();
+    await page.waitForURL(/\/product\//, { timeout: 10_000 });
+
+    const actionButton = page
+      .getByRole('button', { name: new RegExp(`${PURCHASE_BUTTON.source}|${PRELAUNCH_BUTTON.source}`) })
+      .first();
+    await expect(actionButton).toBeVisible({ timeout: 10_000 });
+
+    if (await page.getByRole('button', { name: PURCHASE_BUTTON }).count()) return;
+
+    console.log('Pre-launch product, trying next one');
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await expect(productCards.first()).toBeVisible({ timeout: 15_000 });
+  }
+
+  throw new Error(`No purchasable product in the first ${total} products on homepage`);
+}
 
 test.describe('Purchase Flow E2E', () => {
   test('Home → Product → Cart → Checkout entry', async ({ page }) => {
@@ -7,14 +40,8 @@ test.describe('Purchase Flow E2E', () => {
     await page.waitForLoadState('networkidle');
     await expect(page.locator('img[alt="BITE ME"]').first()).toBeVisible();
 
-    // 2. Click first product in the main product grid (inside <main>)
-    const productCard = page.locator('main h3').first();
-    await expect(productCard).toBeVisible({ timeout: 15_000 });
-    const productName = await productCard.textContent();
-    console.log(`Clicking product: ${productName}`);
-    // Click the parent clickable container
-    await productCard.click();
-    await page.waitForURL(/\/product\//, { timeout: 10_000 });
+    // 2. Open the first purchasable product in the main product grid (skips pre-launch)
+    await openPurchasableProduct(page);
 
     // 3. Product detail page loaded
     const productTitle = page.locator('h1').first();
@@ -107,11 +134,8 @@ test.describe('Purchase Flow E2E', () => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
 
-    // Navigate to first product in main grid
-    const firstProduct = page.locator('main h3').first();
-    await expect(firstProduct).toBeVisible({ timeout: 15_000 });
-    await firstProduct.click();
-    await page.waitForURL(/\/product\//, { timeout: 10_000 });
+    // Navigate to first purchasable product in main grid (skips pre-launch)
+    await openPurchasableProduct(page);
 
     // Title (h1)
     await expect(page.locator('h1').first()).toBeVisible({ timeout: 10_000 });
@@ -123,7 +147,7 @@ test.describe('Purchase Flow E2E', () => {
     await expect(page.locator('img[class*="object"]').first()).toBeVisible();
 
     // Action buttons exist
-    const actionButtons = page.getByRole('button', { name: /買い物かごに追加|カートに追加|すぐ購入/ });
+    const actionButtons = page.getByRole('button', { name: PURCHASE_BUTTON });
     expect(await actionButtons.count()).toBeGreaterThan(0);
   });
 });

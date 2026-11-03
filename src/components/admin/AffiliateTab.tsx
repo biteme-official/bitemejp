@@ -1,11 +1,13 @@
 import { Fragment, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import AffiliateMessages, { type MessageKindsData, type PartnerMessage } from "./AffiliateMessages";
 
 /**
  * 어드민 「어필리에이트」 탭 (Issue #178)
  *
- * 장부 + 파트너 현황(성과순) + 캠페인 만들기·종료 + 월 정산 + 이상 감지 + 규약 개정 통지 (Phase 3).
+ * 장부 + 파트너 현황(성과순) + 캠페인 만들기·종료 + 월 정산 + 이상 감지 + 규약 개정 통지 (Phase 3)
+ * + 파트너 메시지(상황별 LINE — AffiliateMessages.tsx, #270·#272).
  * 데이터는 /api/affiliate-admin (Bearer ADMIN_SECRET) 하나로 온다.
  */
 
@@ -98,6 +100,9 @@ interface AffiliateData {
   anomalies: Anomaly[];
   notices: Notice[];
   noticeMinDays: number;
+  messages?: PartnerMessage[];
+  messageKinds?: MessageKindsData;
+  messageRules?: { clickWindowDays: number; maxLength: number };
 }
 
 async function fetchAffiliate(secret: string): Promise<AffiliateData> {
@@ -996,6 +1001,10 @@ export default function AffiliateTab({ secret }: { secret: string }) {
 
       {/* 정산 */}
       <SettlementCard secret={secret} settlement={data.settlement} onDone={refresh} />
+
+      {/* 파트너 메시지 (상황별) */}
+      <AffiliateMessages secret={secret} messages={data.messages ?? []} kinds={data.messageKinds}
+        rules={data.messageRules ?? { clickWindowDays: 30, maxLength: 1500 }} partners={data.partners} onDone={refresh} />
 
       {/* 캠페인 */}
       <Card>

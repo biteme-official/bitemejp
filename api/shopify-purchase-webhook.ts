@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
+import { createClient } from '@supabase/supabase-js';
 import { applyCancelWebhook, applyRefundWebhook, recordConversionFromOrder, type OrderForAttribution } from './_affiliate.js';
 import { alertExhausted, isMonthlyLimitError } from './_line-quota.js';
 
@@ -83,6 +84,26 @@ function verifyHmac(rawBody: string, signature: string, secrets: string[]): bool
     const computed = createHmac('sha256', secret).update(rawBody, 'utf8').digest();
     return computed.length === received.length && timingSafeEqual(computed, received);
   });
+}
+
+/**
+ * 사이트 세션과 주문 잇기 (#264) — 카트 속성 bm_sid(사이트 자체 세션)가 있으면 events 표에 order_paid 한 줄.
+ * 결제 뒤 사이트로 안 돌아와도 주문이 잡혀, 어드민 「사이트 성과」가 구좌별 주문을 셀 수 있다.
+ * 웹훅 재전송으로 두 번 들어와도 리포트가 order_number 로 한 번만 센다.
+ */
+async function recordSiteOrder(order: ShopifyOrder): Promise<void> {
+  const sid = (order.note_attributes ?? []).find((a) => a.name === 'bm_sid')?.value;
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!sid || !url || !key) return;
+  const { error } = await createClient(url, key).from('events').insert({
+    event_type: 'order_paid',
+    session_id: sid.slice(0, 100),
+    properties: { order_number: order.order_number, order_value: parseFloat(order.total_price), currency: order.currency },
+    page_path: null,
+    referrer: null,
+  });
+  if (error) throw new Error(error.message);
 }
 
 async function sendGA4Purchase(order: ShopifyOrder, apiSecret: string): Promise<void> {
@@ -271,6 +292,35 @@ async function markNotified(customerGid: string, orderId: number): Promise<void>
   if (result?.errors || userErrors.length > 0) {
     // 기록에 실패해도 메시지는 이미 갔다. 재시도 시 중복 발송될 수 있으므로 남긴다.
     console.error('[LINE Notify] 🔴 발송 기록 실패(중복 발송 가능):', JSON.stringify(result?.errors ?? userErrors));
+  }
+}
+
+/**
+ * LINE 로그인 보상 쿠폰(1인 1회)을 쓴 고객에 `coupon_used:<코드>` 태그를 단다 (#242).
+ * 장바구니 「約 -¥」 줄은 이 태그가 없는 사람에게만 보인다(api/customer-orders.ts coupon-status).
+ * 주문 조회는 최근 60일만 보여서, 오래 남는 기준은 이 태그뿐이다.
+ * ⚠️ 코드 목록은 api/customer-orders.ts COUPON_CODES 와 같아야 한다.
+ */
+const COUPON_USED_CODES = ['WELCOME10', 'LINKUP10'];
+
+async function tagCouponUsed(order: ShopifyOrder): Promise<void> {
+  const codes = (order.discount_codes ?? [])
+    .map((d) => d.code.toUpperCase())
+    .filter((c) => COUPON_USED_CODES.includes(c));
+  if (codes.length === 0 || !order.customer?.id) return;
+
+  const adminToken = await getAdminToken();
+  // tagsAdd 는 기존 태그를 건드리지 않는다 (customerUpdate 의 tags 는 전체 교체)
+  const result = await adminGraphQL(adminToken, `
+    mutation TagCouponUsed($id: ID!, $tags: [String!]!) {
+      tagsAdd(id: $id, tags: $tags) { userErrors { field message } }
+    }
+  `, { id: `gid://shopify/Customer/${order.customer.id}`, tags: codes.map((c) => `coupon_used:${c}`) });
+
+  const userErrors = result?.data?.tagsAdd?.userErrors ?? [];
+  if (result?.errors || userErrors.length > 0) {
+    // 실패해도 최근 60일은 주문 조회가 대신 잡는다. 그 뒤엔 줄이 다시 보일 수 있어 남긴다.
+    console.error(`[Coupon Tag] 🔴 태그 실패 order #${order.order_number}:`, JSON.stringify(result?.errors ?? userErrors));
   }
 }
 
@@ -467,6 +517,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error('GA4 purchase webhook error:', err);
   }
 
+  try {
+    await recordSiteOrder(order);
+  } catch (err) {
+    console.error('[Site order] 🔴 events 기록 실패:', err);
+  }
+
   // LINE 알림은 GA4 와 독립적으로 처리한다. 한쪽이 실패해도 다른 쪽은 나가야 한다.
   // lineUserId: null = 조회했더니 LINE 유저 아님, undefined = 조회 자체가 실패 → 어필리에이트가 페이로드로 재판정
   let lineUserId: string | null | undefined;
@@ -474,6 +530,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     lineUserId = (await notifyOrderCreated(order))?.lineUserId ?? null;
   } catch (err) {
     console.error('[LINE Notify] 🔴 주문 알림 처리 중 예외:', err);
+  }
+
+  try {
+    await tagCouponUsed(order);
+  } catch (err) {
+    console.error('[Coupon Tag] 🔴 처리 중 예외:', err);
   }
 
   // 어필리에이트 장부 (#178). AFFILIATE_ENABLED 가 꺼져 있으면 아무것도 하지 않는다.

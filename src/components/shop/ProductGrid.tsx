@@ -12,6 +12,11 @@ import { ProductOptionDialog } from './ProductOptionDialog';
 import { useTranslation } from '@/hooks/useTranslation';
 import { trackViewItemList, shopifyToGA4Item } from '@/lib/ga4-ecommerce';
 import { track } from '@/lib/track';
+import { RestockCardButton } from '@/components/product/RestockNotifyButton';
+import { toRestockProduct } from '@/stores/restockStore';
+import { getUpcomingLaunch, isHiddenSoldOut, launchLabel } from '@/lib/productStock';
+import { LaunchCardButton } from '@/components/product/LaunchNotifyButton';
+import { shopifyImageUrl } from '@/lib/utils';
 
 // Product skeleton component
 const ProductSkeleton = () => (
@@ -124,11 +129,6 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
   const filteredAndSortedProducts = useMemo(() => {
     let result = [...allProducts];
 
-    // 품절 상품 제거
-    result = result.filter(product =>
-      product.node.variants.edges.some(v => v.node.availableForSale)
-    );
-
     // Apply price filter
     result = result.filter(product => {
       const price = parseFloat(product.node.priceRange.minVariantPrice.amount);
@@ -159,6 +159,8 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
         break;
     }
 
+    // 일시품절은 원래 자리에 두고(재입고 알림, #219), 다 팔린 판매 종료 상품만 뺀다 (#223)
+    result = result.filter(product => !isHiddenSoldOut(product));
     return result;
   }, [allProducts, sortOption, filters]);
 
@@ -197,7 +199,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
 
   // 이동은 카드 안의 Link(진짜 <a>)가 한다 — Ctrl+클릭 새 탭이 되도록 (#185). 여기선 트래킹·스크롤 저장만
   const handleProductClick = (numericId: string, title?: string, price?: number) => {
-    track('product_click', { product_id: numericId, product_title: title, price, collection: collectionHandle ?? undefined });
+    track('product_click', { product_id: numericId, product_title: title, price, collection: collectionHandle ?? undefined, source: 'grid' });
     saveScrollPosition(location.pathname);
   };
 
@@ -419,6 +421,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
               const image = product.node.images.edges[0]?.node;
               const price = product.node.priceRange.minVariantPrice;
               const isCompletelyOutOfStock = !product.node.variants.edges.some(v => v.node.availableForSale);
+              const launch = getUpcomingLaunch(product.node);
 
               return (
                 <div
@@ -428,9 +431,9 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                   <div className="aspect-square bg-muted relative overflow-hidden">
                     {image ? (
                       <img
-                        src={image.url}
+                        src={shopifyImageUrl(image.url, 480)}
                         alt={image.altText || product.node.title}
-                        className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${isCompletelyOutOfStock ? 'opacity-50' : ''}`}
+                        className={`w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 ${isCompletelyOutOfStock || launch ? 'opacity-50' : ''}`}
                         loading="lazy"
                       />
                     ) : (
@@ -459,12 +462,26 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                         className={`h-4 w-4 ${isWishlisted(product.node.id) ? 'fill-red-500 text-red-500' : 'text-muted-foreground'}`}
                       />
                     </button>
+                    {/* 출시 예정 — 품절이 아니라 아직 판매 전 (#248) */}
+                    {launch && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/40">
+                        <span className="bg-primary text-primary-foreground px-4 py-2 text-sm font-bold uppercase tracking-wider">
+                          Coming Soon
+                        </span>
+                        <span className="bg-background/85 text-foreground text-xs font-semibold px-2 py-0.5 rounded">
+                          {launchLabel(launch)}
+                        </span>
+                        <LaunchCardButton productId={product.node.id} />
+                      </div>
+                    )}
                     {/* Sold Out Overlay */}
-                    {isCompletelyOutOfStock && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-background/60">
+                    {isCompletelyOutOfStock && !launch && (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/60">
                         <span className="bg-foreground text-background px-4 py-2 text-sm font-bold uppercase tracking-wider">
                           Sold Out
                         </span>
+                        {/* 목록에서 바로 재입고 알림 신청 (#219) */}
+                        <RestockCardButton product={toRestockProduct(product.node)} />
                       </div>
                     )}
                     {/* 割引率バッジ */}
@@ -541,7 +558,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                             );
                           }
                           return (
-                            <span className={`font-bold text-sm ${isCompletelyOutOfStock ? 'text-muted-foreground' : 'text-primary'}`} translate="no">
+                            <span className={`font-bold text-sm ${isCompletelyOutOfStock && !launch ? 'text-muted-foreground' : 'text-primary'}`} translate="no">
                               {formatPrice(price.amount, price.currencyCode)}
                             </span>
                           );
@@ -561,7 +578,7 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
                         aria-label="カートに追加"
                         onClick={(e) => handleAddToCart(e, product)}
                         className="relative z-10 shrink-0 w-8 h-8 rounded-full bg-foreground text-background flex items-center justify-center hover:bg-primary transition-colors disabled:opacity-40 disabled:hover:bg-foreground"
-                        disabled={isCompletelyOutOfStock}
+                        disabled={isCompletelyOutOfStock || !!launch}
                       >
                         <ShoppingCart className="h-4 w-4" />
                       </button>

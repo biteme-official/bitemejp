@@ -7,7 +7,7 @@
  *                         Shopify 는 결제창 이탈만 기록해서 여기가 통째로 사각지대였다.
  *                         2026-09-04 담기 이벤트 때 담기 293→1,341 인데 결제창 이탈은 15→16.
  *                         카트 스냅샷은 `/api/line-cart` 가 남긴다.
- *   3. repeat_purchase_d21 재구매 유도 — 마지막 주문 3주 뒤. 산 사람은 그동안 아무도
+ *   3. repeat_purchase_d21 재구매 유도 — 마지막 주문 출고 3주 뒤. 산 사람은 그동안 아무도
  *                         말을 걸지 않던 구간이었다. 2026-09-08 실측: LINE 연결 구매자
  *                         260명 중 252명(97%)이 1회 구매뿐이고, 전체 재구매 간격 중앙값은 20일.
  *   4. first_purchase_d1  연결 다음날 첫 구매 유도 — 볼륨이 가장 크다(월 약 300통).
@@ -68,7 +68,13 @@ const FIRST_PURCHASE_MIN_H = 24;
 const FIRST_PURCHASE_MAX_H = 48;
 
 /**
- * 재구매를 권하는 시점 — **마지막** 주문으로부터 21~22일.
+ * 재구매를 권하는 시점 — **마지막** 주문이 출고된 날로부터 21~22일.
+ *
+ * 🔴 시계는 주문일이 아니라 **출고일**에서 시작한다. 문안이 "받아 보니 어떠셨나요"라서,
+ *    주문일로 세면 예약배송 주문은 물건을 받기도 전에 감상을 묻게 된다.
+ *    2026-10-15 실측: 일반 주문은 주문→출고 최대 7일(중앙값 1.3일)인데, 예약 주문
+ *    37건이 주문 21일이 지나도록 출고 전이었다. 전부 출고되지 않은 주문(일부만 나간 것 포함)은
+ *    다 나갈 때까지 기다린다.
  *
  * 창을 딱 하루로 잡는 이유가 두 가지다.
  *
@@ -85,7 +91,11 @@ const FIRST_PURCHASE_MAX_H = 48;
 const REPEAT_MIN_H = 21 * 24;
 const REPEAT_MAX_H = 22 * 24;
 
-/** 재구매 저니가 훑는 주문 범위. 창보다 하루 넉넉히 봐야 「그 뒤에 또 샀는가」를 판정할 수 있다. */
+/**
+ * 재구매 저니가 훑는 주문 범위 — **수정일** 기준. 창보다 하루 넉넉히 봐야 「그 뒤에 또 샀는가」를
+ * 판정할 수 있다. 생성일로 자르면 두 달 전에 주문하고 3주 전에 출고된 예약 주문이 빠진다.
+ * 출고되면 주문 수정일이 갱신되므로 수정일로 자르면 함께 잡힌다.
+ */
 const REPEAT_LOOKBACK_DAYS = 23;
 
 const REPEAT_UTM = 'line_repeat_d21';
@@ -99,8 +109,15 @@ const REPEAT_URL = `https://biteme.co.jp/?utm_source=line&utm_medium=line&utm_ca
  * 날짜를 넣으면 성과가 하루 단위로 잘게 쪼개진다.
  */
 const FIRST_PURCHASE_UTM = 'line_firstbuy_d1';
-const FIRST_PURCHASE_URL =
-  `https://biteme.co.jp/discount/WELCOME10?utm_source=line&utm_medium=line&utm_campaign=${FIRST_PURCHASE_UTM}`;
+const firstPurchaseUrl = (code: string) =>
+  `https://biteme.co.jp/discount/${code}?utm_source=line&utm_medium=line&utm_campaign=${FIRST_PURCHASE_UTM}`;
+const FIRST_PURCHASE_URL = firstPurchaseUrl('WELCOME10');
+/**
+ * 연결 유도 발송(`line_src:invite`)으로 연결된 사람은 로그인 때 LINKUP10 을 받았다.
+ * 여기서 WELCOME10 링크를 주면 `/discount/` 코드가 우선이라 LINKUP10 을 덮어써, 이미 WELCOME10 을
+ * 쓴 사람은 할인을 못 받는다. 그래서 같은 코드로 링크한다 (src/lib/lineWelcomeDiscount.ts).
+ */
+const INVITE_FIRST_PURCHASE_URL = firstPurchaseUrl('LINKUP10');
 
 /**
  * 이탈로 인정하는 구간.
@@ -286,23 +303,44 @@ async function fetchRecentBuyers(token: string, now: number): Promise<Set<string
   return set;
 }
 
-/** 이 저니로 이미 보낸 대상(ref) 집합. 체크아웃당·사람당 1회를 이걸로 지킨다. */
+/**
+ * 저니별 중복 확인 기간(일). 없으면 5일 — 발송 창이 하루 이틀이라 그 안에서만 겹친다.
+ *
+ * 🔴 재구매 유도는 **주문 1건당 평생 1통**이라 길게 본다. 발송 시점이 출고일에 묶여 있어서
+ *    출고가 늦어질수록 창이 뒤로 밀린다. 2026-10-16 실측: 주문일 기준(#230 이전)으로 10/10~10/12 에
+ *    이미 받은 주문들이 출고일 기준 창(출고 9/25 + 21일)에서 다시 잡혔는데, 5일만 보면 기록이 창
+ *    밖이라 같은 메시지가 한 번 더 나갈 뻔했다(11건). 예약 주문은 출고까지 두 달도 걸리므로 120일.
+ */
+const HANDLED_LOOKBACK_DAYS: Record<string, number> = {
+  [REPEAT_PURCHASE]: 120,
+};
+
+/** 이 저니로 이미 보낸 대상(ref) 집합. 체크아웃당·사람당·주문당 1회를 이걸로 지킨다. */
 async function alreadyHandled(journey: string): Promise<Set<string>> {
   const db = supabase();
   if (!db) return new Set();
-  const since = new Date(Date.now() - 5 * 86_400_000).toISOString();
-  const { data, error } = await db
-    .from('events')
-    .select('properties')
-    .eq('event_type', SEND_EVENT)
-    .gte('created_at', since);
-  if (error) {
-    // 확인이 안 되면 보내지 않는다. 여기서는 조용히 통과시키면 중복 발송이 된다.
-    throw new Error(`중복 확인 실패: ${error.message}`);
-  }
+  const days = HANDLED_LOOKBACK_DAYS[journey] ?? 5;
+  const since = new Date(Date.now() - days * 86_400_000).toISOString();
   const set = new Set<string>();
-  for (const row of (data ?? []) as { properties: { journey?: string; ref?: string } | null }[]) {
-    if (row.properties?.journey === journey && row.properties.ref) set.add(row.properties.ref);
+  // 🔴 끝까지 읽는다. Supabase 는 한 번에 1,000행까지만 주는데, 예전엔 그걸 넘으면 기록이 조용히
+  //    잘려 중복 발송이 날 수 있었다. 저니 이름으로 서버에서 걸러 읽는 양도 줄인다.
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db
+      .from('events')
+      .select('properties')
+      .eq('event_type', SEND_EVENT)
+      .eq('properties->>journey', journey)
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .range(from, from + 999);
+    if (error) {
+      // 확인이 안 되면 보내지 않는다. 여기서는 조용히 통과시키면 중복 발송이 된다.
+      throw new Error(`중복 확인 실패: ${error.message}`);
+    }
+    for (const row of (data ?? []) as { properties: { journey?: string; ref?: string } | null }[]) {
+      if (row.properties?.journey === journey && row.properties.ref) set.add(row.properties.ref);
+    }
+    if (!data || data.length < 1000) break;
   }
   return set;
 }
@@ -330,7 +368,7 @@ export function trackedUrl(recoveryUrl: string, checkoutId: string): string {
   return `${CLICK_ORIGIN}/api/line-click?t=${signClick(recoveryUrl, ref, secret)}`;
 }
 
-function buildMessage(c: Candidate, url: string): string {
+function buildMessage(c: Pick<Candidate, 'itemTitle' | 'itemCount'>, url: string): string {
   const item = c.itemTitle
     ? `「${c.itemTitle}」${c.itemCount > 1 ? ` ほか${c.itemCount - 1}点` : ''}`
     : 'お選びいただいた商品';
@@ -720,6 +758,17 @@ interface LastOrder {
   customerGid: string;
   orderGid: string;
   at: number;
+  /** 마지막 출고 시각. 아직 전부 출고되지 않았으면 null — 받기 전이라 감상을 물을 수 없다. */
+  shippedAt: number | null;
+  /**
+   * 품목 중 가장 늦은 예약 출고일(상품 태그 `preorder:YYYY-MM-DD`, JST 0시). 예약 품목이 없으면 null.
+   *
+   * 🔴 예약 상품은 **송장을 먼저 발행해 Shopify 출고 처리를 해 두고, 실제 출고는 이 날** 한다.
+   *    그래서 `shippedAt` 만 보면 물건이 나가기도 전에 시계가 돈다. 2026-10-16 실측: #3759 는
+   *    송장 9/25·예약 출고 10/22 였는데 10/14 에 「その後、いかがでしょうか」를 받았다(고객 미수령).
+   *    Shopify 엔 택배 상태(배송중·배달완료)가 전혀 안 들어와서 이 태그가 유일한 단서다.
+   */
+  preorderAt: number | null;
   itemTitle: string | null;
   itemCount: number;
 }
@@ -730,6 +779,27 @@ interface LastOrder {
  * 🔴 「D+21 인 주문」을 바로 찾지 않고 **마지막 주문**을 고르는 게 핵심이다. 주문 단위로
  *    보면 3주 전에 사고 지난주에 또 산 사람에게 "그동안 어떠셨나요"가 나간다.
  */
+/** 상품 태그 `preorder:YYYY-MM-DD` 중 가장 늦은 날(JST 0시). 없으면 null. src/lib/shopify.ts getPreorderDate 와 같은 형식 */
+export function latestPreorder(tags: string[]): number | null {
+  let latest: number | null = null;
+  for (const t of tags) {
+    const m = /^preorder:(\d{4}-\d{2}-\d{2})$/.exec(t.trim());
+    if (!m) continue;
+    const at = Date.parse(`${m[1]}T00:00:00+09:00`);
+    if (Number.isFinite(at) && (latest === null || at > latest)) latest = at;
+  }
+  return latest;
+}
+
+/**
+ * 재구매 시계가 시작되는 때 — 실제로 물건이 나간 날.
+ * 송장 발행(Shopify 출고 처리)과 예약 출고일 중 늦은 쪽이다. 아직 전부 출고 처리 전이면 null.
+ */
+export function readyAtOf(o: Pick<LastOrder, 'shippedAt' | 'preorderAt'>): number | null {
+  if (o.shippedAt === null) return null;
+  return o.preorderAt === null ? o.shippedAt : Math.max(o.shippedAt, o.preorderAt);
+}
+
 async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]> {
   const since = new Date(now - REPEAT_LOOKBACK_DAYS * 86_400_000).toISOString().slice(0, 10);
   const latest = new Map<string, LastOrder>();
@@ -744,6 +814,9 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
             node: {
               id: string;
               createdAt: string;
+              cancelledAt: string | null;
+              displayFulfillmentStatus: string;
+              fulfillments: { createdAt: string }[];
               customer: { id: string } | null;
               lineItems: {
                 edges: {
@@ -751,6 +824,7 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
                     title: string;
                     quantity: number;
                     originalUnitPriceSet: { shopMoney: { amount: string } } | null;
+                    product: { tags: string[] } | null;
                   };
                 }[];
               };
@@ -767,16 +841,20 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
           edges { node {
             id
             createdAt
+            cancelledAt
+            displayFulfillmentStatus
+            fulfillments(first: 10) { createdAt }
             customer { id }
-            lineItems(first: 5) { edges { node {
+            lineItems(first: 20) { edges { node {
               title
               quantity
               originalUnitPriceSet { shopMoney { amount } }
+              product { tags }
             } } }
           } }
         }
       }`,
-      { cursor, q: `created_at:>=${since}` },
+      { cursor, q: `updated_at:>=${since}` },
     );
 
     const conn = res?.data?.orders;
@@ -785,6 +863,8 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
     for (const e of conn.edges) {
       const n = e.node;
       if (!n.customer) continue;
+      // 취소된 주문은 「마지막 주문」으로 치지 않는다. 출고가 안 되니 그 앞의 주문까지 막아 버린다.
+      if (n.cancelledAt) continue;
       const at = new Date(n.createdAt).getTime();
       const prev = latest.get(n.customer.id);
       if (prev && prev.at >= at) continue;
@@ -799,6 +879,12 @@ async function fetchLastOrders(token: string, now: number): Promise<LastOrder[]>
         customerGid: n.customer.id,
         orderGid: n.id,
         at,
+        shippedAt:
+          n.displayFulfillmentStatus === 'FULFILLED' && n.fulfillments.length > 0
+            ? Math.max(...n.fulfillments.map((f) => new Date(f.createdAt).getTime()))
+            : null,
+        // 예약 품목은 증정품 거름망과 무관하게 전부 본다 — 6번째 줄에 있어도 출고를 막는다
+        preorderAt: latestPreorder((n.lineItems?.edges ?? []).flatMap((i) => i.node.product?.tags ?? [])),
         itemTitle: items[0]?.node?.title ?? null,
         itemCount: items.reduce((sum, i) => sum + (i.node.quantity ?? 1), 0),
       });
@@ -856,8 +942,16 @@ async function planRepeatPurchase(
   const lineByGid = new Map<string, string>();
   for (const m of members) if (m.lineUserId) lineByGid.set(m.gid, m.lineUserId);
 
+  // 아직 다 출고되지 않은 주문 — 예약배송이 대부분이다. 다 나가면 그날부터 다시 센다.
+  const notShipped = lastOrders.filter((o) => o.shippedAt === null);
+  // 송장은 나갔지만 예약 출고일이 아직 안 온 주문 — 물건은 창고에 있다
+  const preorderWaiting = lastOrders.filter(
+    (o) => o.shippedAt !== null && o.preorderAt !== null && o.preorderAt > now,
+  );
   const inWindow = lastOrders.filter((o) => {
-    const ageH = (now - o.at) / 3600_000;
+    const readyAt = readyAtOf(o);
+    if (readyAt === null) return false;
+    const ageH = (now - readyAt) / 3600_000;
     return ageH >= REPEAT_MIN_H && ageH < REPEAT_MAX_H;
   });
 
@@ -869,6 +963,9 @@ async function planRepeatPurchase(
     pool: lastOrders.length,
     found: inWindow.length,
     excluded: {
+      // 창 밖 숫자다(오늘 창에 든 사람에서 빠진 게 아니다). 예약 주문이 쌓이면 여기가 커진다.
+      출고전대기: notShipped.length,
+      예약출고대기: preorderWaiting.length,
       // 구매 고객의 대부분은 LINE 을 안 쓴다. 이 값이 크다고 이상한 게 아니다 —
       // 2026-09-08 기준 구매 고객 2,234명 중 LINE 연결은 260명(11.6%)이다.
       라인미연결: inWindow.filter((o) => !lineByGid.has(o.customerGid)).length,
@@ -879,7 +976,9 @@ async function planRepeatPurchase(
       // 주문 id 로 막는다. 사람으로 막으면 다음 주문 뒤에는 영영 못 보낸다.
       ref: o.orderGid,
       text: buildRepeatMessage(o.itemTitle, o.itemCount, REPEAT_URL),
-      note: `마지막 주문 ${new Date(o.at).toISOString()}`,
+      note:
+        `마지막 주문 ${new Date(o.at).toISOString()} · 출고 ${new Date(o.shippedAt as number).toISOString()}` +
+        (o.preorderAt !== null ? ` · 예약 출고 ${new Date(o.preorderAt).toISOString()}` : ''),
     })),
     record: {
       campaignId: `journey_${REPEAT_PURCHASE}`,
@@ -898,7 +997,7 @@ async function planRepeatPurchase(
  *    LINE 으로 만든 고객 레코드에 안 붙어 있어 우리가 알 방법이 없다. 「まだお使いでない方に」와
  *    「お一人さま1回限り」로 조건을 문장 안에 넣어, 이미 쓴 사람이 받아도 거짓이 되지 않게 한다.
  */
-const FIRST_PURCHASE_TEXT = [
+const firstPurchaseText = (url: string) => [
   'こんにちは、BITE ME JAPANです🐾',
   '',
   'ご登録ありがとうございます！',
@@ -910,8 +1009,10 @@ const FIRST_PURCHASE_TEXT = [
   '（お一人さま1回限り）',
   '',
   'いま人気のアイテムを見る👇',
-  FIRST_PURCHASE_URL,
+  url,
 ].join('\n');
+const FIRST_PURCHASE_TEXT = firstPurchaseText(FIRST_PURCHASE_URL);
+const INVITE_FIRST_PURCHASE_TEXT = firstPurchaseText(INVITE_FIRST_PURCHASE_URL);
 
 async function planFirstPurchase(now: number, members: Member[]): Promise<JourneyPlan> {
   const handled = await alreadyHandled(FIRST_PURCHASE);
@@ -933,7 +1034,7 @@ async function planFirstPurchase(now: number, members: Member[]): Promise<Journe
     candidates: eligible.map((m) => ({
       userId: m.lineUserId as string,
       ref: m.gid,
-      text: FIRST_PURCHASE_TEXT,
+      text: m.source === 'invite' ? INVITE_FIRST_PURCHASE_TEXT : FIRST_PURCHASE_TEXT,
     })),
     record: {
       campaignId: `journey_${FIRST_PURCHASE}`,
@@ -1003,6 +1104,39 @@ async function deliver(plan: JourneyPlan, now: number, dryRun: boolean): Promise
     });
   }
   return base;
+}
+
+/**
+ * 대시보드에 보여줄 저니별 문구 — `GET /api/line-campaign` 의 `campaigns[].copy` 로 나간다.
+ *
+ * 문안을 여기서 따로 적지 않고 **실제 발송에 쓰는 함수를 그대로 부른다.** 문구를 고치면
+ * 대시보드도 저절로 바뀌고, 보여주는 문구와 나가는 문구가 어긋날 수가 없다.
+ * 사람마다 달라지는 자리(상품명·개인 링크)만 〔 〕 자리표시자로 채운다.
+ */
+export interface CopyVariant {
+  /** 같은 저니 안에서 문안이 갈리는 조건. 하나뿐이면 null */
+  label: string | null;
+  text: string;
+}
+
+const ITEM = '〔상품명〕';
+
+export function journeyCopy(): Record<string, CopyVariant[]> {
+  return {
+    [CART_RECOVERY]: [
+      { label: null, text: buildMessage({ itemTitle: ITEM, itemCount: 2 }, '〔고객별 장바구니 복구 링크〕') },
+    ],
+    [CART_ADD]: [
+      { label: null, text: buildCartAddMessage([{ productId: '', variantId: '', title: ITEM, quantity: 2 }], '〔고객별 장바구니 복구 링크〕') },
+    ],
+    [REPEAT_PURCHASE]: [
+      { label: null, text: buildRepeatMessage(ITEM, 2, REPEAT_URL) },
+    ],
+    [FIRST_PURCHASE]: [
+      { label: '일반 연결 (WELCOME10)', text: FIRST_PURCHASE_TEXT },
+      { label: '연결 유도 발송으로 연결 (LINKUP10)', text: INVITE_FIRST_PURCHASE_TEXT },
+    ],
+  };
 }
 
 /** `LINE_JOURNEY_ENABLED` 에 적힌 저니만 돈다. `all` 이면 전부. 값이 없으면 아무것도 안 보낸다. */

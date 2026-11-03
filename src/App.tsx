@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
+import { RestockCenter } from "@/components/product/RestockNotifyButton";
+import { LaunchCenter } from "@/components/product/LaunchNotifyButton";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -65,6 +67,7 @@ const App = () => (
         <Sonner closeButton />
         <NoticeBanner />
         <LoginBanner />
+        {/* 🔴 라우트를 추가·변경하면 middleware.ts 의 KNOWN_ROUTES 도 함께 — 없으면 검색로봇에게 404 가 나간다 */}
         <Routes>
           <Route path="/" element={<Index />} />
           <Route path="/product/:id" element={<ProductDetail />} />
@@ -97,6 +100,10 @@ const App = () => (
           <Route path="*" element={<NotFound />} />
         </Routes>
         <LineFloatingButton />
+        {/* 재입고 LINE 알림 — 로그인 후 자동 신청·옵션 선택·친구추가 시트 (#219) */}
+        <RestockCenter />
+        {/* 출시 예정 상품 오픈 LINE 알림 — 로그인 후 자동 신청·친구추가 시트 (#248) */}
+        <LaunchCenter />
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

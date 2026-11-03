@@ -211,6 +211,52 @@ function verifySessionToken(
   }
 }
 
+/**
+ * LINE 로그인 보상 쿠폰(1인 1회) 사용 여부 — 장바구니 「約 -¥」 줄을 미사용자에게만 보이려고 쓴다 (#242).
+ *
+ * ⚠️ 이 앱(REPORT)은 read_all_orders 가 없어 주문 조회가 **최근 60일만** 조용히 돌아온다.
+ *    주문만 보면 오래전에 쓴 사람이 「미사용」으로 나온다. 그래서 기준은 고객 태그
+ *    `coupon_used:<코드>` 다 — 주문 웹훅(api/shopify-purchase-webhook.ts)이 달고,
+ *    그 이전 사용자는 scripts/backfill-coupon-used-tags.mjs 로 일괄로 달았다.
+ *    최근 주문 조회는 웹훅 태그가 실패했을 때의 안전망이다.
+ * ⚠️ 코드 목록은 src/lib/lineWelcomeDiscount.ts 와 웹훅의 COUPON_USED_CODES 와 같아야 한다.
+ */
+const COUPON_CODES = ['WELCOME10', 'LINKUP10'] as const;
+const COUPON_USED_TAG_PREFIX = 'coupon_used:';
+
+async function resolveCouponStatus(
+  customerId: string,
+  lineUserId: string | null,
+): Promise<Record<string, 'used' | 'unused'>> {
+  const customerData = await adminGraphQL(`
+    query CouponTags($id: ID!) { customer(id: $id) { id email tags } }
+  `, { id: customerId });
+  const customer = customerData?.data?.customer;
+  // 판정 근거가 없으면 「미사용」으로 내지 않는다 — 호출부가 500 으로 받아 줄을 숨긴다
+  if (!customer?.id) throw new Error('coupon-status: customer lookup failed');
+
+  const used = new Set<string>(
+    (customer.tags as string[] ?? [])
+      .filter((t) => t.startsWith(COUPON_USED_TAG_PREFIX))
+      .map((t) => t.slice(COUPON_USED_TAG_PREFIX.length).toUpperCase()),
+  );
+
+  // 안전망: 최근 주문(고객 ID · LINE 합성 메일 · 실제 메일의 게스트 주문)
+  const who = [`customer_id:${customerId.split('/').pop()}`];
+  if (lineUserId) who.push(`email:"line_${lineUserId}@line-user.biteme.co.jp"`);
+  if (typeof customer.email === 'string' && customer.email.includes('@')) who.push(`email:"${customer.email}"`);
+  const codes = COUPON_CODES.map((c) => `discount_code:${c}`).join(' OR ');
+  const orderData = await adminGraphQL(`
+    query CouponOrders($query: String!) { orders(first: 20, query: $query) { edges { node { discountCodes } } } }
+  `, { query: `(${who.join(' OR ')}) AND (${codes})` });
+  if (orderData?.errors) throw new Error(`coupon-status: order lookup failed ${JSON.stringify(orderData.errors)}`);
+  for (const e of orderData?.data?.orders?.edges ?? []) {
+    for (const code of e.node.discountCodes ?? []) used.add(String(code).toUpperCase());
+  }
+
+  return Object.fromEntries(COUPON_CODES.map((c) => [c, used.has(c) ? 'used' : 'unused']));
+}
+
 const ALLOWED_ORIGINS = [
   'https://biteme.co.jp',
   'https://www.biteme.co.jp',
@@ -299,6 +345,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const customerId = await resolveCustomerId();
     if (!customerId) {
       return res.status(401).json({ error: 'Could not resolve customer ID' });
+    }
+
+    if (req.body?.action === 'coupon-status') {
+      const coupons = await resolveCouponStatus(customerId, lineUserId);
+      return res.status(200).json({ coupons });
     }
 
     // Admin API で顧客 GID から注文を取得

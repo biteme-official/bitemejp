@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
 import { fetchProducts, ShopifyProduct } from "@/lib/shopify";
-import { cn } from "@/lib/utils";
+import { cn, shopifyImageUrl } from "@/lib/utils";
 
 interface SearchAutocompleteProps {
   onSearch: (query: string) => void;
@@ -287,7 +287,7 @@ export function SearchAutocomplete({ onSearch, autoFocus = false }: SearchAutoco
                 >
                   {suggestion.imageUrl && (
                     <img
-                      src={suggestion.imageUrl}
+                      src={shopifyImageUrl(suggestion.imageUrl, 120)}
                       alt={suggestion.title}
                       className="w-10 h-10 object-cover rounded-md bg-secondary"
                     />

@@ -62,11 +62,16 @@ export interface ShopifyProduct {
 }
 
 // 예약배송 태그 파싱: "preorder:YYYY-MM-DD" 형식 태그에서 날짜 추출
-export function getPreorderDate(tags: string[]): string | null {
+// 🔴 예약일(JST)이 지난 태그는 무시한다. 태그 삭제를 깜빡하면 상세·목록·장바구니·결제 전부에
+//    지난 날짜가 「発送予定」로 뜨고 「まとめて発送」 안내까지 붙는다 (#246).
+//    예약일 당일까지는 보여준다 — 그날 나가는 물건이다.
+export function getPreorderDate(tags: string[], now: number = Date.now()): string | null {
   const tag = tags.find(t => t.startsWith('preorder:'));
   if (!tag) return null;
   const date = tag.split(':')[1];
-  return date || null;
+  if (!date) return null;
+  const todayJst = new Date(now + 9 * 3600_000).toISOString().slice(0, 10);
+  return date < todayJst ? null : date;
 }
 
 // Storefront API helper function - proxied through server for secure token management
@@ -1356,6 +1361,11 @@ export async function createStorefrontCheckout(items: { variantId: string; quant
   const [clientId, sessionId] = await Promise.all([getGA4ClientId(), getGA4SessionId()]);
   if (clientId) trackingAttributes.push({ key: 'ga_client_id', value: clientId });
   if (sessionId) trackingAttributes.push({ key: 'ga_session_id', value: sessionId });
+  // 사이트 자체 세션(track.ts 의 _bm_sid) — 어드민 「사이트 성과」 구좌별 주문 연결용 (#264)
+  try {
+    const bmSid = sessionStorage.getItem('_bm_sid');
+    if (bmSid) trackingAttributes.push({ key: 'bm_sid', value: bmSid });
+  } catch { /* ignore */ }
   // 어필리에이트 링크 귀속 — 보조 경로 (#178 설계 §5). 주 경로는 서버측 회원 터치이고,
   // 이 두 줄은 그 터치가 누락됐을 때 웹훅이 note_attributes 로 읽는 안전망이다.
   // 값 규약: aff_ref = "CODE" 또는 "CODE:clickId", aff_ref_at = 클릭 시각 ISO.

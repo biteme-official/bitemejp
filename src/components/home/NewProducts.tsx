@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ShopifyProduct, fetchNewProducts, fetchProductDiscounts } from "@/lib/shopify";
 import { useDiscountStore } from "@/stores/discountStore";
+import { isHiddenSoldOut } from "@/lib/productStock";
 import { ProductCarousel, ProductCarouselSkeleton } from "./ProductCarousel";
 
 export function NewProducts() {
@@ -11,12 +12,8 @@ export function NewProducts() {
   useEffect(() => {
     fetchNewProducts(12)
       .then((result) => {
-        const available = result.filter(p =>
-          p.node.variants.edges.some(e =>
-            e.node.availableForSale &&
-            (e.node.quantityAvailable === null || e.node.quantityAvailable > 0)
-          )
-        );
+        // 일시품절은 원래 자리에 두고(#219) 다 팔린 판매 종료만 뺀다(#223)
+        const available = result.filter((p) => !isHiddenSoldOut(p));
         setProducts(available);
         const reps: { productId: string; variantId: string }[] = [];
         available.forEach(p => {
@@ -32,7 +29,7 @@ export function NewProducts() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div className="mt-8"><ProductCarouselSkeleton /></div>;
+  if (loading) return <div className="mt-5 md:mt-8"><ProductCarouselSkeleton /></div>;
 
   return (
     <ProductCarousel
@@ -42,7 +39,8 @@ export function NewProducts() {
       discountMap={discountMap}
       moreTo="/?sort=created_at_desc"
       trackName="new"
-      className="mt-8"
+      trackSource="home_new"
+      className="mt-5 md:mt-8"
       style={{ animationDelay: "0.2s" }}
     />
   );

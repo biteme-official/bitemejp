@@ -39,6 +39,7 @@ export function PopularProducts() {
       discountMap={discountMap}
       moreTo="/?collection=%E4%BA%BA%E6%B0%97%E5%95%86%E5%93%81"
       trackName="best_selling"
+      trackSource="popular"
       className="mt-8"
       style={{ animationDelay: "0.3s" }}
     />

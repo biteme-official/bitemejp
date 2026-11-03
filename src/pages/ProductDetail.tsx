@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Share2, Minus, Plus, ShoppingCart, Check, Truck, Shield, Heart } from "lucide-react";
+import { ChevronLeft, ChevronRight, Share2, Minus, Plus, ShoppingCart, Check, Truck, Shield, Heart, Bell } from "lucide-react";
 import DOMPurify from "dompurify";
 
 const sanitizeHtml = (html: string): string =>
@@ -18,6 +18,10 @@ import { useDiscountStore } from "@/stores/discountStore";
 import { ReviewWidget } from "@/components/product/ReviewWidget";
 import { useAuthStore } from "@/stores/authStore";
 import { PartnerProductLink } from "@/components/product/PartnerProductLink";
+import { RestockNotifyButton } from "@/components/product/RestockNotifyButton";
+import { LaunchNotifyButton } from "@/components/product/LaunchNotifyButton";
+import { RESTOCK_PARAM, toRestockProduct } from "@/stores/restockStore";
+import { getLaunchTag, isLaunchHeld, isVariantDiscontinued, launchLabel } from "@/lib/productStock";
 import { AffiliateOfferNote } from "@/components/affiliate/AffiliateOfferNote";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -291,9 +295,12 @@ export default function ProductDetail() {
           });
         }
         if (data?.options) {
-          // 재고 있는 첫 번째 variant의 옵션을 기본값으로, 없으면 첫 번째 옵션값
-          const firstAvailable = data.variants.edges.find(v => isVariantAvailable(v.node))?.node
-            ?? data.variants.edges[0]?.node;
+          // 재고 있는 첫 번째 variant의 옵션을 기본값으로, 없으면 첫 번째 옵션값.
+          // 재입고 알림 신청하러 LINE 로그인 갔다 온 경우(?restock=<옵션id>)엔 그 품절 옵션을 다시 골라 둔다 (#219)
+          const restockId = new URLSearchParams(window.location.search).get(RESTOCK_PARAM);
+          const firstAvailable = (restockId && data.variants.edges.find(v => v.node.id.endsWith(`/${restockId}`))?.node)
+            || data.variants.edges.find(v => isVariantAvailable(v.node))?.node
+            || data.variants.edges[0]?.node;
           const defaults: Record<string, string> = {};
           if (firstAvailable) {
             firstAvailable.selectedOptions.forEach(opt => {
@@ -524,6 +531,9 @@ export default function ProductDetail() {
   const price = selectedVariant?.price || product.priceRange.minVariantPrice;
   const totalPrice = parseFloat(price.amount) * quantity;
   const maxQuantity = selectedVariant?.quantityAvailable ?? 99;
+  // 출시 예정 (#248) — 태그가 있고 살 수 있는 옵션이 하나도 없을 때만. 하나라도 풀리면 보통 상품
+  // (발매일이 아직 안 왔으면 재고가 있어도 출시 예정)
+  const launch = !isLaunchHeld(product.tags) && product.variants.edges.some(v => isVariantAvailable(v.node)) ? null : getLaunchTag(product.tags);
 
   return (
     <div className="bg-background min-h-screen flex flex-col pb-24 overflow-x-hidden w-full max-w-[100vw]">
@@ -797,10 +807,10 @@ export default function ProductDetail() {
                       <button
                         key={value}
                         onClick={() => handleOptionChange(option.name, value)}
-                        disabled={!isAvailable}
+                        // 품절 옵션도 고를 수 있다 — 고르면 하단이 「再入荷をLINEで受け取る」가 된다 (#219)
                         className={cn(
                           "flex flex-col items-center gap-1 transition-all",
-                          !isAvailable && "opacity-40 cursor-not-allowed"
+                          !isAvailable && "opacity-40"
                         )}
                         title={value}
                       >
@@ -839,7 +849,7 @@ export default function ProductDetail() {
               ) : (
                 // Size/other options - text buttons with availability status
                 <div className="space-y-2">
-                  {!product.variants.edges.every(v => isVariantAvailable(v.node)) && (
+                  {!launch && !product.variants.edges.every(v => isVariantAvailable(v.node)) && (
                     <p className="text-xs text-destructive font-medium">
                       {product.variants.edges.some(v => isVariantAvailable(v.node)) ? t('product.someSizesUnavailable') : t('product.soldOut')}
                     </p>
@@ -854,13 +864,13 @@ export default function ProductDetail() {
                         <button
                           key={value}
                           onClick={() => handleOptionChange(option.name, value)}
-                          disabled={!isAvailable}
+                          // 품절 옵션도 고를 수 있다 — 고르면 하단이 「再入荷をLINEで受け取る」가 된다 (#219)
                           className={cn(
                             "min-w-[48px] py-2 px-4 text-sm font-medium transition-all relative",
                             isSelected
                               ? "text-foreground"
                               : "text-muted-foreground hover:text-foreground",
-                            !isAvailable && "line-through opacity-50 cursor-not-allowed"
+                            !isAvailable && "line-through opacity-50"
                           )}
                         >
                           {value}
@@ -906,10 +916,21 @@ export default function ProductDetail() {
           </div>
         </div>
 
+        {/* 출시 예정 안내 (#248) */}
+        {launch && (
+          <div className="flex items-center gap-3 px-4 py-3 mb-4 rounded-lg bg-primary/5 border border-primary/30">
+            <Bell className="h-5 w-5 flex-shrink-0 text-primary" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">COMING SOON · {launchLabel(launch)}</p>
+              <p className="text-xs text-muted-foreground">発売したらLINEでお知らせします（下のボタンから登録）</p>
+            </div>
+          </div>
+        )}
+
         {/* 予約配送バナー */}
         {(() => {
           const preorderDate = getPreorderDate(product.tags ?? []);
-          if (!preorderDate) return null;
+          if (!preorderDate || launch) return null;
           const [y, m, d] = preorderDate.split('-');
           return (
             <div className="space-y-2 mb-4">
@@ -1065,22 +1086,37 @@ export default function ProductDetail() {
               )}
             />
           </button>
-          <Button
-            onClick={handleAddToCart}
-            disabled={!isVariantAvailable(selectedVariant)}
-            variant="outline"
-            className="flex-1 h-12 font-semibold border-primary text-primary hover:bg-primary/10"
-          >
-            <ShoppingCart className="h-5 w-5 mr-2" />
-            {isVariantAvailable(selectedVariant) ? t('product.addToCart') : t('product.outOfStock')}
-          </Button>
-          <Button
-            onClick={handleBuyNow}
-            disabled={!isVariantAvailable(selectedVariant) || isBuyingNow}
-            className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 h-12 font-semibold"
-          >
-            {isBuyingNow ? '処理中...' : 'すぐ購入'}
-          </Button>
+          {launch ? (
+            // 출시 예정 → 담기·바로구매·재입고 대신 오픈 LINE 알림 신청 (#248)
+            <LaunchNotifyButton productId={product.id} />
+          ) : selectedVariant && !isVariantAvailable(selectedVariant) && isVariantDiscontinued(product.tags, selectedVariant.title) ? (
+            // 판매 종료 옵션 → 다시 들어오지 않으니 알림도 받지 않는다 (#223)
+            <Button disabled variant="outline" className="flex-1 h-12 font-semibold">
+              販売終了
+            </Button>
+          ) : selectedVariant && !isVariantAvailable(selectedVariant) ? (
+            // 일시품절 옵션 → 담기·바로구매 대신 재입고 LINE 알림 신청 (#219)
+            <RestockNotifyButton product={toRestockProduct(product)} variantId={selectedVariant.id} />
+          ) : (
+            <>
+            <Button
+              onClick={handleAddToCart}
+              disabled={!isVariantAvailable(selectedVariant)}
+              variant="outline"
+              className="flex-1 h-12 font-semibold border-primary text-primary hover:bg-primary/10"
+            >
+              <ShoppingCart className="h-5 w-5 mr-2" />
+              {isVariantAvailable(selectedVariant) ? t('product.addToCart') : t('product.outOfStock')}
+            </Button>
+            <Button
+              onClick={handleBuyNow}
+              disabled={!isVariantAvailable(selectedVariant) || isBuyingNow}
+              className="flex-1 bg-primary text-primary-foreground hover:bg-primary/90 h-12 font-semibold"
+            >
+              {isBuyingNow ? '処理中...' : 'すぐ購入'}
+            </Button>
+            </>
+          )}
         </div>
       </div>
       </div>

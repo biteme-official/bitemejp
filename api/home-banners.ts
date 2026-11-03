@@ -7,6 +7,9 @@
  *  POST /api/home-banners  action=upload      { name, type, data(base64) }     이미지 업로드 → { url }
  *  POST /api/home-banners  action=clean       { url }                          AI 로 이미지 속 글자를 지운 사본 → { url, width, height }
  *                                             Gemini 이미지 편집(GEMINI_API_KEY). 결과는 images/clean-… 에 저장
+ *  POST /api/home-banners  action=copy        { brief, product?, link?, imageUrl?, current? }
+ *                                             AI 문구 후보 3안 → { options: [{ badge, subtext, headline, cta, ko }] }
+ *                                             Gemini 텍스트(GEMINI_API_KEY). 저장은 안 한다 — 고른 걸 어드민이 칸에 채울 뿐
  *
  * 저장소: Supabase Storage 공개 버킷 `home-banners`
  *   banners.json            현재 문서
@@ -32,6 +35,10 @@ const CLEAN_PROMPT =
   'Remove ALL text, letters, logos, captions and speech-bubble labels from this product photo. ' +
   'Fill the removed areas naturally so they match the surrounding background. ' +
   'Keep everything else — the product, the pet, colors, lighting and framing — exactly the same. Output only the edited image.';
+
+const COPY_MODEL = process.env.GEMINI_TEXT_MODEL || 'gemini-3.8-flash';
+/** 배지는 이 셋 중 하나(또는 없음) — 어드민 드롭다운과 같은 목록 */
+const BADGES = ['NEW', 'SALE', 'HOT'] as const;
 
 const ALLOWED_TYPES: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -204,6 +211,74 @@ async function cleanTextWithGemini(src: Buffer, mime: string): Promise<{ data: B
   return { data: Buffer.from(part.inlineData.data, 'base64'), mime: part.inlineData.mimeType || 'image/png' };
 }
 
+// ── AI 문구 제안 ───────────────────────────────────────────────────────────
+interface CopyOption { badge: string; subtext: string; headline: string; cta: string; ko: string }
+
+const COPY_PROMPT = `あなたは日本のペット用品ECサイト「BITE ME」(biteme.co.jp、韓国発の犬・猫グッズ)のコピーライターです。
+トップページのメインバナーに載せる文言を3案つくってください。
+
+各案のフィールド:
+- badge: "NEW" / "SALE" / "HOT" / "" のどれか。新商品・新作なら NEW、割引・セール・クーポンなら SALE、人気・売れ筋・話題なら HOT、どれでもなければ ""
+- subtext: 見出しの上の小さな一言。全角12文字以内(例: 本日発売 / 期間限定 / 好評発売中)
+- headline: 見出し。1行あたり全角13文字以内で最大2行、改行は \\n。具体的でワクワクする言葉、誇張や根拠のない数字(No.1・〇〇%など)は入力にない限り使わない
+- cta: ボタンの文言。全角8文字以内(例: 新作を見る / 今すぐチェック)
+- ko: その案の見出し・サブ・CTAの韓国語訳(管理者確認用、1行)
+
+ルール:
+- 3案はトーンを変える(①ストレート ②楽しい・かわいい ③お得感や限定感)
+- 担当者メモの内容を最優先で正しく伝える(何の商品か・何のキャンペーンか)
+- 入力にない事実を作らない: 割引率・価格・期間、「人気」「売れ筋」「話題」、素材・機能など。HOT はメモに人気の根拠があるときだけ
+- 絵文字は使っても1つまで
+- 自然な日本語。韓国語の直訳っぽい言い回しは避ける`;
+
+async function suggestCopyWithGemini(context: string, image: { data: Buffer; mime: string } | null): Promise<CopyOption[]> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error('GEMINI_API_KEY 미설정 — Vercel 환경변수에 넣어야 AI 문구 제안이 됩니다');
+  const parts: Record<string, unknown>[] = [{ text: `${COPY_PROMPT}\n\n# このバナーについて\n${context}` }];
+  if (image) parts.push({ inline_data: { mime_type: image.mime, data: image.data.toString('base64') } });
+  const stringType = { type: 'STRING' };
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${COPY_MODEL}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({
+      contents: [{ parts }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'ARRAY',
+          items: {
+            type: 'OBJECT',
+            properties: { badge: stringType, subtext: stringType, headline: stringType, cta: stringType, ko: stringType },
+            required: ['badge', 'subtext', 'headline', 'cta', 'ko'],
+          },
+        },
+        temperature: 0.9,
+      },
+    }),
+  });
+  const json = (await res.json()) as { error?: { message?: string }; candidates?: { content?: { parts?: { text?: string }[] } }[] };
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${json.error?.message ?? 'unknown'}`);
+  const text = json.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new Error('AI 응답을 읽지 못했습니다 — 다시 눌러 주세요');
+  }
+  if (!Array.isArray(raw)) throw new Error('AI 응답 형식이 다릅니다 — 다시 눌러 주세요');
+  return raw.slice(0, 3).map((o) => {
+    const r = (o ?? {}) as Record<string, unknown>;
+    const badge = str(r.badge, 10).toUpperCase();
+    return {
+      badge: (BADGES as readonly string[]).includes(badge) ? badge : '',
+      subtext: str(r.subtext, 120).trim(),
+      headline: str(r.headline, 120).replace(/\\n/g, '\n').trim(),
+      cta: str(r.cta, 40).trim(),
+      ko: str(r.ko, 300).trim(),
+    };
+  });
+}
+
 // ── 핸들러 ────────────────────────────────────────────────────────────────
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'GET') {
@@ -276,6 +351,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data: pub } = sb.storage.from(BUCKET).getPublicUrl(path);
       const size = imageSize(out.data) ?? { width: 1024, height: 1024 };
       return res.status(200).json({ ok: true, url: pub.publicUrl, ...size });
+    }
+
+    if (action === 'copy') {
+      const lines: string[] = [];
+      const brief = str(body.brief, 500).trim();
+      if (brief) lines.push(`- 担当者メモ(韓国語のこともある・最優先): ${brief}`);
+      const product = (body.product ?? null) as Record<string, unknown> | null;
+      if (product && typeof product === 'object') {
+        const title = str(product.title, 200).trim();
+        const desc = str(product.description, 800).replace(/\s+/g, ' ').trim();
+        if (title) lines.push(`- 商品名: ${title}`);
+        if (desc) lines.push(`- 商品説明: ${desc}`);
+      }
+      const link = urlOrNull(body.link);
+      if (link) lines.push(`- リンク先: ${decodeURIComponent(link)}`);
+      const cur = (body.current ?? {}) as Record<string, unknown>;
+      const curText = ['badge', 'subtext', 'headline', 'cta'].map((k) => `${k}=${str(cur[k], 120).replace(/\n/g, ' / ')}`).join(', ');
+      if (['badge', 'subtext', 'headline', 'cta'].some((k) => str(cur[k], 1).length > 0)) lines.push(`- いまの文言(参考・改善してよい): ${curText}`);
+      if (lines.length === 0) return res.status(400).json({ error: '메모를 적거나 링크·상품 사진을 먼저 넣어 주세요' });
+
+      // 배너 사진(상품 사진·PC 이미지)도 보여 준다 — 같은 출처 제한(Shopify CDN·우리 버킷). 못 받으면 글만으로
+      let image: { data: Buffer; mime: string } | null = null;
+      const imageUrl = urlOrNull(body.imageUrl);
+      if (imageUrl) {
+        const host = new URL(imageUrl).hostname;
+        const ownBucket = (process.env.SUPABASE_URL || '').includes(host);
+        if (CLEAN_SOURCE_HOSTS.includes(host) || ownBucket) {
+          try {
+            const r = await fetch(host === 'cdn.shopify.com' ? `${imageUrl}${imageUrl.includes('?') ? '&' : '?'}width=512` : imageUrl);
+            const mime = r.headers.get('content-type')?.split(';')[0] || '';
+            if (r.ok && ALLOWED_TYPES[mime]) image = { data: Buffer.from(await r.arrayBuffer()), mime };
+          } catch {
+            image = null;
+          }
+        }
+      }
+      const options = await suggestCopyWithGemini(lines.join('\n'), image);
+      return res.status(200).json({ ok: true, options });
     }
 
     return res.status(400).json({ error: `알 수 없는 action: ${String(action)}` });
