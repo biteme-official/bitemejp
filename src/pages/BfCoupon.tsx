@@ -119,7 +119,7 @@ export default function BfCoupon() {
               <p className="text-xs text-muted-foreground">
                 {active
                   ? `お支払い時に${BF_PERCENT}%OFFが自動で適用されます。`
-                  : `11/9(月) 0:00からのお支払い時に${BF_PERCENT}%OFFが自動で適用されます。`}
+                  : `11/9(月) 10:00からのお支払い時に${BF_PERCENT}%OFFが自動で適用されます。`}
               </p>
               <button
                 onClick={() => navigate("/")}
