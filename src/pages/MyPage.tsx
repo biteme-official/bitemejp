@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { LineLoginButton } from '@/components/auth/LineLoginButton';
 import { EmailSettingsCard } from '@/components/auth/EmailSettingsCard';
+import { MyCouponsCard } from '@/components/auth/MyCouponsCard';
 import { fetchCustomerOrdersViaAdmin, ShopifyOrder, formatPrice } from '@/lib/shopify';
 import { useWishlistStore } from '@/stores/wishlistStore';
 
@@ -223,6 +224,9 @@ export default function MyPage() {
 
         {/* Email */}
         <EmailSettingsCard />
+
+        {/* Coupons */}
+        <MyCouponsCard />
 
         {/* Menu */}
         <div className="bg-card rounded-xl border border-border divide-y divide-border px-4">

@@ -59,14 +59,21 @@ async function findCustomerGid(token: string, lineUserId: string): Promise<strin
   return null;
 }
 
-async function codeExists(token: string, code: string): Promise<boolean> {
-  const r = await adminGraphQL<{ data?: { codeDiscountNodeByCode: { id: string } | null }; errors?: unknown }>(
+/** 코드가 없으면 null. used 는 Shopify 사용 횟수 기준이라 주문 직후엔 잠깐 늦을 수 있다 */
+async function findCode(token: string, code: string): Promise<{ used: boolean } | null> {
+  const r = await adminGraphQL<{
+    data?: { codeDiscountNodeByCode: { codeDiscount?: { asyncUsageCount?: number } } | null };
+    errors?: unknown;
+  }>(
     token,
-    `query($code: String!) { codeDiscountNodeByCode(code: $code) { id } }`,
+    `query($code: String!) {
+      codeDiscountNodeByCode(code: $code) { codeDiscount { ... on DiscountCodeBasic { asyncUsageCount } } }
+    }`,
     { code },
   );
   if (r.errors) throw new Error(`code lookup: ${JSON.stringify(r.errors).slice(0, 200)}`);
-  return !!r.data?.codeDiscountNodeByCode;
+  const node = r.data?.codeDiscountNodeByCode;
+  return node ? { used: (node.codeDiscount?.asyncUsageCount ?? 0) > 0 } : null;
 }
 
 async function createCode(token: string, code: string, customerGid: string, lineUserId: string): Promise<'created' | 'taken'> {
@@ -122,8 +129,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'lookup') {
     try {
       const code = bfCodeFor(session.lineUserId, secret);
-      const exists = await codeExists(await getAdminToken(), code);
-      return res.status(200).json(exists ? { status: 'ok', code } : { status: 'none' });
+      const found = await findCode(await getAdminToken(), code);
+      return res.status(200).json(found ? { status: 'ok', code, used: found.used } : { status: 'none' });
     } catch (e) {
       console.error('[BF coupon] 🔴 조회 실패:', e);
       return res.status(500).json({ error: 'failed' });
@@ -138,7 +145,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = await getAdminToken();
     const code = bfCodeFor(session.lineUserId, secret);
 
-    if (!(await codeExists(token, code))) {
+    if (!(await findCode(token, code))) {
       const customerGid = await findCustomerGid(token, session.lineUserId);
       if (!customerGid) {
         console.warn(`[BF coupon] 고객 없음 …${session.lineUserId.slice(-6)}`);

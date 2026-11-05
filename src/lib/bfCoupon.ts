@@ -36,13 +36,8 @@ export function activeBfCode(now = Date.now()): string | null {
 /** 서버 조회가 늦어도 결제를 막지 않게 이 시간만 기다린다 */
 const LOOKUP_TIMEOUT_MS = 3000;
 
-/**
- * 결제에 쓸 코드 — 이 브라우저에 있으면 그것, 없으면 계정으로 받은 코드를 찾는다.
- * 조회 실패·시간 초과·미수령은 전부 null(쿠폰 없이 결제 진행).
- */
-export async function resolveBfCode(lineSessionToken: string | undefined): Promise<string | null> {
-  const local = activeBfCode();
-  if (local || !lineSessionToken || !isBfActive()) return local;
+/** 계정으로 받은 코드 조회 — 못 받았으면 'none', 조회 실패·시간 초과는 null */
+async function lookupBfCode(lineSessionToken: string): Promise<{ code: string; used: boolean } | 'none' | null> {
   try {
     const res = await fetch('/api/line-bf-coupon', {
       method: 'POST',
@@ -51,13 +46,36 @@ export async function resolveBfCode(lineSessionToken: string | undefined): Promi
       signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
     });
     if (!res.ok) return null;
-    const body = (await res.json().catch(() => ({}))) as { status?: string; code?: string };
+    const body = (await res.json().catch(() => ({}))) as { status?: string; code?: string; used?: boolean };
+    if (body.status === 'none') return 'none';
     if (body.status !== 'ok' || typeof body.code !== 'string') return null;
-    try { localStorage.setItem(BF_COUPON_KEY, body.code); } catch { /* 이번 결제에는 그대로 쓴다 */ }
-    return body.code;
+    return { code: body.code, used: body.used === true };
   } catch {
     return null;
   }
+}
+
+/**
+ * 결제에 쓸 코드 — 이 브라우저에 있으면 그것, 없으면 계정으로 받은 코드를 찾는다.
+ * 조회 실패·시간 초과·미수령·이미 사용은 전부 null(쿠폰 없이 결제 진행).
+ */
+export async function resolveBfCode(lineSessionToken: string | undefined): Promise<string | null> {
+  const local = activeBfCode();
+  if (local || !lineSessionToken || !isBfActive()) return local;
+  const found = await lookupBfCode(lineSessionToken);
+  if (!found || found === 'none' || found.used) return null;
+  try { localStorage.setItem(BF_COUPON_KEY, found.code); } catch { /* 이번 결제에는 그대로 쓴다 */ }
+  return found.code;
+}
+
+export type BfCouponStatus = 'unclaimed' | 'available' | 'used' | 'unknown';
+
+/** 마이페이지 표시용 상태 — 조회 실패는 'unknown' */
+export async function getBfCouponStatus(lineSessionToken: string): Promise<BfCouponStatus> {
+  const found = await lookupBfCode(lineSessionToken);
+  if (!found) return 'unknown';
+  if (found === 'none') return 'unclaimed';
+  return found.used ? 'used' : 'available';
 }
 
 export type BfClaimResult =
