@@ -3,6 +3,7 @@
  *
  * /bf 화면에서 받으면(서버가 친구 여부를 확인한 뒤 발급) 코드를 여기 저장해 두고,
  * 블프 기간 안이면 결제(cartStore.createCheckout) 때 자동으로 붙인다.
+ * 이 브라우저에 코드가 없으면 결제 때 LINE 계정으로 서버에 물어본다 — 다른 기기에서 받은 쿠폰도 붙는다.
  *
  * 결제 규칙 (11/3 하영 결정)
  *  - 어필리에이트 특별 코드(/discount/)가 있으면 그쪽 우선 — 블프 5% 는 넣지 않는다 (지금 웰컴과 같은 규칙)
@@ -27,6 +28,33 @@ export function activeBfCode(now = Date.now()): string | null {
   try {
     const v = localStorage.getItem(BF_COUPON_KEY);
     return v && /^BF5-[0-9A-F]{10}$/.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 서버 조회가 늦어도 결제를 막지 않게 이 시간만 기다린다 */
+const LOOKUP_TIMEOUT_MS = 3000;
+
+/**
+ * 결제에 쓸 코드 — 이 브라우저에 있으면 그것, 없으면 계정으로 받은 코드를 찾는다.
+ * 조회 실패·시간 초과·미수령은 전부 null(쿠폰 없이 결제 진행).
+ */
+export async function resolveBfCode(lineSessionToken: string | undefined): Promise<string | null> {
+  const local = activeBfCode();
+  if (local || !lineSessionToken || !isBfActive()) return local;
+  try {
+    const res = await fetch('/api/line-bf-coupon', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lineSessionToken, action: 'lookup' }),
+      signal: AbortSignal.timeout(LOOKUP_TIMEOUT_MS),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json().catch(() => ({}))) as { status?: string; code?: string };
+    if (body.status !== 'ok' || typeof body.code !== 'string') return null;
+    try { localStorage.setItem(BF_COUPON_KEY, body.code); } catch { /* 이번 결제에는 그대로 쓴다 */ }
+    return body.code;
   } catch {
     return null;
   }

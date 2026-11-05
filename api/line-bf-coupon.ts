@@ -15,6 +15,8 @@
  *  - 그 고객만 쓸 수 있다(context.customers) + 1회(usageLimit 1). 코드가 밖으로 새도 다른 사람은 못 쓴다.
  *  - 상품 할인(전 상품 15% 자동 할인)과는 합산, 다른 주문 할인(WELCOME10 등)과는 합산하지 않는다.
  *    「WELCOME10 과 둘 중 큰 쪽 하나」(11/3 결정)는 결제 때 cartStore 가 코드를 하나만 넣어 지킨다.
+ *  - action: 'lookup' 은 이미 받은 코드만 찾아 준다(새로 발급·친구 확인 없음). 쿠폰을 받은 기기와 다른
+ *    기기·브라우저에서 결제할 때 cartStore 가 부른다. 코드는 userId 로 정해지므로 서버에 따로 저장하지 않는다.
  *  - 코드 유효기간은 연장 최대치(11/22)까지 잡아 둔다. 실제로 결제에 자동으로 붙는 기간은
  *    src/lib/bfCoupon.ts 의 BF_APPLY_END 가 정한다 — 연장이 정해지면 그 한 줄만 바꾼다.
  *
@@ -111,11 +113,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const secret = process.env.LINE_CHANNEL_SECRET;
   if (!secret) return res.status(500).json({ error: 'server_config' });
 
-  const { lineSessionToken } = (req.body ?? {}) as Record<string, unknown>;
+  const { lineSessionToken, action } = (req.body ?? {}) as Record<string, unknown>;
   const session = verifySessionToken(lineSessionToken, secret);
   if (!session) return res.status(401).json({ error: 'unauthorized' });
 
   if (Date.now() > CLAIM_ENDS_AT) return res.status(410).json({ error: 'ended' });
+
+  if (action === 'lookup') {
+    try {
+      const code = bfCodeFor(session.lineUserId, secret);
+      const exists = await codeExists(await getAdminToken(), code);
+      return res.status(200).json(exists ? { status: 'ok', code } : { status: 'none' });
+    } catch (e) {
+      console.error('[BF coupon] 🔴 조회 실패:', e);
+      return res.status(500).json({ error: 'failed' });
+    }
+  }
 
   const friend = await isFriend(session.lineUserId);
   if (friend === null) return res.status(503).json({ error: 'friend_check_failed' });

@@ -7,7 +7,7 @@ import {
 } from '@/config/giftConfig';
 import { LINE_WELCOME_DISCOUNT_KEY, LINE_WELCOME_DISCOUNT_PERCENT } from '@/lib/lineWelcomeDiscount';
 import { getAffiliateOffer, orderOfferAndWelcome } from '@/lib/affiliate-offer';
-import { activeBfCode, BF_PERCENT } from '@/lib/bfCoupon';
+import { resolveBfCode, BF_PERCENT } from '@/lib/bfCoupon';
 import { getWelcomeCouponUsage } from '@/lib/welcomeCouponStatus';
 import { useAuthStore } from '@/stores/authStore';
 import { syncCartSnapshot } from '@/lib/cartSync';
@@ -249,9 +249,9 @@ export const useCartStore = create<CartStore>()(
           let welcomePercent = LINE_WELCOME_DISCOUNT_PERCENT;
           // 블프 LINE 친구 5% (#274) — 웰컴과는 둘 중 큰 쪽 하나. 웰컴을 아직 안 썼을 때만 웰컴(10%),
           // 썼거나 확인이 안 되면 블프 5%. 주문 할인끼리는 합산되지 않으니 하나만 넣는다.
-          const bfCode = affiliateCode ? null : activeBfCode();
+          const token = useAuthStore.getState().user?.lineSessionToken;
+          const bfCode = affiliateCode ? null : await resolveBfCode(token);
           if (bfCode) {
-            const token = useAuthStore.getState().user?.lineSessionToken;
             const welcomeUsage = welcomeCode && token ? await getWelcomeCouponUsage(welcomeCode, token) : 'used';
             if (welcomeUsage !== 'unused') {
               welcomeCode = bfCode;
