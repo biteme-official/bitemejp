@@ -9,13 +9,13 @@
  *  - WELCOME10/LINKUP10 과는 「둘 중 큰 쪽 하나」 — 웰컴을 아직 안 썼으면 웰컴(10%), 썼으면 블프 5%
  *  - 웰컴 사용 여부 확인이 실패하면 블프 5% 를 넣는다(이미 쓴 웰컴을 넣으면 할인이 통째로 빠지므로 안전한 쪽)
  *
- * ⚠️ 기간을 늘리면(2주 연장 → 11/22) BF_APPLY_END 한 줄만 바꾼다. 코드 자체는 11/22 까지 살아 있다
+ * 운영 기간 11/9~11/22 (11/5 2주 확정). 기간을 바꾸면 BF_APPLY_END 와 Shopify 코드 유효기간을 같이 바꾼다
  *    (api/line-bf-coupon.ts 의 CODE_ENDS_AT).
  */
 export const BF_COUPON_KEY = 'line_bf_discount';
 export const BF_PERCENT = 5;
 export const BF_APPLY_START = Date.parse('2026-11-09T00:00:00+09:00');
-export const BF_APPLY_END = Date.parse('2026-11-15T23:59:59+09:00');
+export const BF_APPLY_END = Date.parse('2026-11-22T23:59:59+09:00');
 
 export function isBfActive(now = Date.now()): boolean {
   return now >= BF_APPLY_START && now <= BF_APPLY_END;

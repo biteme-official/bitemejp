@@ -73,7 +73,7 @@ export default function BfCoupon() {
 
       <main className="max-w-md mx-auto w-full px-5 py-10 flex-1 flex flex-col items-center text-center gap-6">
         <div className="space-y-2">
-          <p className="text-xs font-semibold tracking-widest text-red-600">BLACK FRIDAY 11/9〜11/15</p>
+          <p className="text-xs font-semibold tracking-widest text-red-600">BLACK FRIDAY 11/9〜11/22</p>
           <h1 className="text-2xl font-bold leading-snug">
             全品15%OFF に<br />LINE友だちは <span className="text-[#06C755]">さらに{BF_PERCENT}%OFF</span>
           </h1>
