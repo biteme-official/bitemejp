@@ -28,7 +28,7 @@ import { adminGraphQL, getAdminToken } from './line-campaign.js';
 import { getCorsOrigin, isFriend, verifySessionToken } from './line-restock.js';
 
 /** 코드가 쓰이기 시작하는 때 = 블프 오픈 (JST) */
-const CODE_STARTS_AT = '2026-11-09T00:00:00+09:00';
+const CODE_STARTS_AT = '2026-11-09T10:00:00+09:00';
 /** 코드 만료 = 연장 최대치. 결제 자동 적용 기간은 src/lib/bfCoupon.ts 가 따로 정한다 */
 const CODE_ENDS_AT = '2026-11-22T23:59:59+09:00';
 /** 이때가 지나면 새로 받지 못한다 */

@@ -63,7 +63,7 @@ export function MyCouponsCard() {
   if (welcome === 'unknown' && bf === 'unknown') return null;
 
   const bfTitle = `ブラックフライデー LINE友だち ${BF_PERCENT}%OFF`;
-  const bfPeriod = '有効期間 11/9(月)〜11/22(日)';
+  const bfPeriod = '有効期間 11/9(月)10:00〜11/22(日)';
 
   return (
     <div className="bg-card rounded-xl border border-border p-5">
