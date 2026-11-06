@@ -4,8 +4,8 @@
  * 혜택·기간·유의사항을 한 화면에 모은다. 메인 배너·LINE 발송·인스타 링크의 도착지.
  *
  * - 기간은 lib/bfCoupon 값을 그대로 쓴다. 연장하면 거기(와 Shopify 할인 종료일)만 바꾼다.
- * - 한정 세트는 Shopify 컬렉션 BF_SET_COLLECTION 을 읽는다. 컬렉션이 없거나 공개된 상품이
- *   없으면 그 구역만 숨기므로, 세트가 늦어도 페이지는 먼저 열 수 있다.
+ * - 한정 세트는 BF_SET_HANDLES 의 상품을 읽는다. 초안(DRAFT)·미공개 상품은 Storefront 가
+ *   돌려주지 않으므로 빠지고, 공개되는 순간 자동으로 나온다. 하나도 없으면 구역만 숨긴다.
  * - 15% 대상 외인 SSFW 는 인기 상품에서 뺀다(할인 페이지에 정가 상품이 섞이지 않도록).
  */
 import { useEffect, useState } from "react";
@@ -14,7 +14,7 @@ import { ChevronRight } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ProductCarousel, ProductCarouselSkeleton } from "@/components/home/ProductCarousel";
-import { fetchBestSellingProducts, fetchCollectionProducts, fetchProductDiscounts, ShopifyProduct } from "@/lib/shopify";
+import { fetchBestSellingProducts, fetchProductByHandle, fetchProductDiscounts, ShopifyProduct } from "@/lib/shopify";
 import { BF_APPLY_END, BF_APPLY_START, BF_PERCENT } from "@/lib/bfCoupon";
 import { FREE_SHIP_THRESHOLD } from "@/config/freeShipConfig";
 import { isHiddenSoldOut } from "@/lib/productStock";
@@ -23,8 +23,17 @@ import { track } from "@/lib/track";
 import bfTitle from "@/assets/bf-title.png";
 import bfPaper from "@/assets/bf-paper.jpg";
 
-/** 한정 세트 컬렉션 핸들 — Shopify 에서 이 핸들로 만들면 자동으로 나온다 */
-const BF_SET_COLLECTION = "bf-sets";
+/** 한정 세트 상품 핸들 — 이 순서대로 보여 준다 */
+const BF_SET_HANDLES = [
+  "コンプリートトイレセット-ゼロガードマット-ノンスリップ排便マット-1",
+  "コンプリートトイレセット-ゼロガードマット-ノンスリップ排便マット-標準",
+  "コンフォートハーネス-リードセット",
+  "三角スリッカー-ジェリーベアーフェイスコームセット",
+  "バースデーギフトセット-ケーキハット-ノーズワークプレイブック",
+  "お散歩セット-ジェリーベアledライト-メッセージワッペン",
+  "ミニスナックボトル-折りたたみボウルセット",
+  "ひと口でくわえやすいラテックストイ3点セット",
+];
 const ALL_PRODUCTS_LINK = "/?sort=best_selling";
 const LIME = "#ACEB2A";
 
@@ -68,12 +77,14 @@ export default function BlackFriday() {
   useEffect(() => {
     let alive = true;
     Promise.all([
-      fetchCollectionProducts(BF_SET_COLLECTION, 12).then((r) => r.products).catch(() => [] as ShopifyProduct[]),
+      Promise.all(BF_SET_HANDLES.map((handle) => fetchProductByHandle(handle).catch(() => null))),
       fetchBestSellingProducts(16).catch(() => [] as ShopifyProduct[]),
     ])
       .then(([setResult, popularResult]) => {
         if (!alive) return;
-        const setList = setResult.filter((p) => !isHiddenSoldOut(p));
+        const setList = setResult
+          .flatMap((node): ShopifyProduct[] => (node ? [{ node }] : []))
+          .filter((p) => !isHiddenSoldOut(p));
         const setIds = new Set(setList.map((p) => p.node.id));
         const popularList = popularResult
           .filter((p) => !isHiddenSoldOut(p) && !isSsfw(p) && !setIds.has(p.node.id))
