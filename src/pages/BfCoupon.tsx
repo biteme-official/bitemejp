@@ -75,7 +75,7 @@ export default function BfCoupon() {
         <div className="space-y-2">
           <p className="text-xs font-semibold tracking-widest text-red-600">BLACK FRIDAY 11/9〜11/22</p>
           <h1 className="text-2xl font-bold leading-snug">
-            全品15%OFF に<br />LINE友だちは <span className="text-[#06C755]">さらに{BF_PERCENT}%OFF</span>
+            対象商品15%OFF に<br />LINE友だちは <span className="text-[#06C755]">さらに{BF_PERCENT}%OFF</span>
           </h1>
           <p className="text-sm text-muted-foreground">
             BITE ME 公式LINEの友だち限定クーポン。受け取っておくと、セール期間中のお支払い時に自動で適用されます。
@@ -143,6 +143,7 @@ export default function BfCoupon() {
         </div>
 
         <ul className="text-[11px] text-muted-foreground text-left space-y-1 w-full">
+          <li>※SSFW商品は15%OFFの対象外です。</li>
           <li>※お一人さま1回限り。ご本人のアカウントでのみご利用いただけます。</li>
           <li>※初回クーポン(10%OFF)が未使用の方は、割引が大きい初回クーポンが優先して適用されます。</li>
           <li>※パートナー(アフィリエイト)の割引コードをお持ちの場合は、そちらが優先されます。</li>
