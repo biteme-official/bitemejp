@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { ShopifyProduct, CollectionImage, fetchProducts, fetchCollectionProducts, fetchBestSellingProducts, fetchNewProducts, formatPrice, getPreorderDate, fetchProductDiscounts } from '@/lib/shopify';
+import { ShopifyProduct, CollectionImage, fetchProducts, fetchCollectionProducts, fetchNewProducts, fetchRecentBestSellers, formatPrice, getPreorderDate, fetchProductDiscounts, POPULAR_COLLECTION_HANDLE } from '@/lib/shopify';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ShoppingCart, Loader2, Heart } from 'lucide-react';
@@ -231,12 +231,24 @@ export const ProductGrid = ({ searchQuery = "", collectionHandle = null, initial
 
       try {
         let response;
-        if (collectionHandle) {
+        if (collectionHandle === POPULAR_COLLECTION_HANDLE) {
+          // 제목·이미지는 컬렉션에서, 상품은 최근 30일 판매순으로
+          const [collection, products] = await Promise.all([
+            fetchCollectionProducts(collectionHandle, 1),
+            fetchRecentBestSellers(50),
+          ]);
+          setCollectionTitle(collection.collectionTitle);
+          setCollectionImage(collection.collectionImage);
+          setAllProducts(products);
+          setHasNextPage(false);
+          setEndCursor(null);
+          return;
+        } else if (collectionHandle) {
           response = await fetchCollectionProducts(collectionHandle, PRODUCTS_PER_PAGE);
           setCollectionTitle(response.collectionTitle);
           setCollectionImage(response.collectionImage);
         } else if (initialSort === 'best_selling') {
-          const products = await fetchBestSellingProducts(50);
+          const products = await fetchRecentBestSellers(50);
           setAllProducts(products);
           setHasNextPage(false);
           setEndCursor(null);

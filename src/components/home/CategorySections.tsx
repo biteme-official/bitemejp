@@ -4,6 +4,8 @@ import {
   ShopifyProduct,
   fetchCollectionProducts,
   fetchProductDiscounts,
+  fetchRecentBestSellers,
+  POPULAR_COLLECTION_HANDLE,
 } from "@/lib/shopify";
 import { ProductBadge } from "./ProductCard";
 import { ProductCarousel, ProductCarouselSkeleton } from "./ProductCarousel";
@@ -16,7 +18,7 @@ const CATEGORY_WHITELIST: { handle: string; title: string; badge: ProductBadge }
     title: "小さなお口にもぴったり！ミニおもちゃ特集",
     badge: { label: "PICK", className: "bg-sky-500 text-white" },
   },
-  { handle: "人気商品", title: "人気商品", badge: { label: "BEST" } },
+  { handle: POPULAR_COLLECTION_HANDLE, title: "人気商品", badge: { label: "BEST" } },
   {
     handle: "bite-me-choigosim",
     title: "BITE ME×チェゴシム",
@@ -40,9 +42,13 @@ export function CategorySections() {
       try {
         const results = await Promise.all(
           CATEGORY_WHITELIST.map(async ({ handle, title, badge }) => {
-            const res = await fetchCollectionProducts(handle, 8);
+            // 人気商品은 최근 30일 판매순. 판매 종료를 빼도 8개가 남도록 넉넉히 읽는다
+            const products =
+              handle === POPULAR_COLLECTION_HANDLE
+                ? await fetchRecentBestSellers(12)
+                : (await fetchCollectionProducts(handle, 8)).products;
             const collection: ShopifyCollection = { id: handle, title, handle, description: "", image: null };
-            return { collection, products: res.products, badge };
+            return { collection, products, badge };
           })
         );
 
@@ -51,7 +57,7 @@ export function CategorySections() {
             collection,
             badge,
             // 일시품절은 원래 자리에 두고(#219) 다 팔린 판매 종료만 뺀다(#223). 섹션을 띄울지는 판매 중인 상품 수로 정한다
-            products: products.filter((p) => !isHiddenSoldOut(p)),
+            products: products.filter((p) => !isHiddenSoldOut(p)).slice(0, 8),
           }))
           .filter((r) => r.products.filter(isProductAvailable).length >= 4);
         setSections(validSections);
