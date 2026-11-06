@@ -5,11 +5,13 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { fetchShippingRates, fetchCartPreview, ShippingRate } from "@/lib/shopify";
 import { GIFT_ENABLED, GIFT_THRESHOLD } from "@/config/giftConfig";
 import { FREE_SHIP_THRESHOLD, isFreeShipActive } from "@/config/freeShipConfig";
+import { estimateCheckoutCouponDiscount } from "@/lib/checkoutCouponEstimate";
 
 export function ThresholdBanner() {
   const items = useCartStore(state => state.items);
   const [shippingRate, setShippingRate] = useState<ShippingRate | null>(null);
   const [discountedTotal, setDiscountedTotal] = useState<number | null>(null);
+  const [couponDiscount, setCouponDiscount] = useState(0);
   const { formatPrice } = useTranslation();
 
   const nonGiftItems = items.filter(i => !i.isGift);
@@ -33,6 +35,18 @@ export function ThresholdBanner() {
       .catch(() => setDiscountedTotal(null));
   }, [items]);
 
+  // 무료배송 기준은 쿠폰까지 뺀 금액이다 — 결제에서 붙을 쿠폰을 미리 뺀다
+  useEffect(() => {
+    if (!isFreeShipActive() || nonGiftItems.length === 0) { setCouponDiscount(0); return; }
+    const lines = nonGiftItems.map(i => ({ productId: i.product.node.id, unitPrice: parseFloat(i.price.amount), quantity: i.quantity }));
+    const base = discountedTotal ?? lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
+    let alive = true;
+    estimateCheckoutCouponDiscount(base, lines)
+      .then(amount => { if (alive) setCouponDiscount(amount); })
+      .catch(console.error);
+    return () => { alive = false; };
+  }, [items, discountedTotal]);
+
   if (items.length === 0) return null;
 
   const currencyCode = items[0]?.price.currencyCode || "JPY";
@@ -45,11 +59,12 @@ export function ThresholdBanner() {
   const remaining = Math.max(0, GIFT_THRESHOLD - effectiveTotal);
   const progress = Math.min(100, (effectiveTotal / GIFT_THRESHOLD) * 100);
 
-  // 블프 무료배송(¥6,000 이상) 안내 — 할인 후 금액 기준. 실제 적용은 Shopify 자동 할인이 결제 때 한다
+  // 블프 무료배송(¥6,000 이상) 안내 — 쿠폰까지 뺀 금액 기준. 실제 적용은 Shopify 자동 할인이 결제 때 한다
   const freeShipActive = isFreeShipActive();
-  const freeShipUnlocked = freeShipActive && effectiveTotal >= FREE_SHIP_THRESHOLD;
-  const freeShipRemaining = Math.max(0, FREE_SHIP_THRESHOLD - effectiveTotal);
-  const freeShipProgress = Math.min(100, (effectiveTotal / FREE_SHIP_THRESHOLD) * 100);
+  const freeShipTotal = effectiveTotal - couponDiscount;
+  const freeShipUnlocked = freeShipActive && freeShipTotal >= FREE_SHIP_THRESHOLD;
+  const freeShipRemaining = Math.max(0, FREE_SHIP_THRESHOLD - freeShipTotal);
+  const freeShipProgress = Math.min(100, (freeShipTotal / FREE_SHIP_THRESHOLD) * 100);
 
   return (
     <div className="space-y-2 mb-4">
@@ -66,6 +81,7 @@ export function ThresholdBanner() {
           <div className="w-full bg-muted rounded-full h-1.5">
             <div className="bg-primary h-1.5 rounded-full transition-all duration-500" style={{ width: `${freeShipProgress}%` }} />
           </div>
+          <p className="mt-1.5 text-[10px] text-muted-foreground">※クーポン適用後の金額で判定します</p>
         </div>
       )}
 
