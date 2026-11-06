@@ -34,7 +34,7 @@ function Benefit({ no, title, big, unit, children }: {
   no: string;
   title: string;
   big: string;
-  unit: string;
+  unit?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -42,8 +42,8 @@ function Benefit({ no, title, big, unit, children }: {
       <p className="text-xs font-bold tracking-widest" style={{ color: LIME }}>BENEFIT {no}</p>
       <p className="mt-2 text-sm font-bold text-white">{title}</p>
       <p className="mt-1 font-black leading-none" style={{ color: LIME }}>
-        <span className="text-5xl md:text-6xl">{big}</span>
-        <span className="ml-1 text-2xl md:text-3xl">{unit}</span>
+        <span className="text-[2.75rem] md:text-5xl">{big}</span>
+        {unit && <span className="ml-1 text-2xl md:text-3xl">{unit}</span>}
       </p>
       <div className="mt-3 flex-1 flex flex-col text-sm leading-relaxed text-white/75">{children}</div>
     </li>
@@ -128,10 +128,10 @@ export default function BlackFriday() {
         {!ended && (
           <section className="max-w-5xl mx-auto px-5 pb-10 md:pb-14">
             <ul className="grid gap-3 md:grid-cols-3 md:gap-4">
-              <Benefit no="01" title="対象商品が全員" big="15" unit="%OFF">
+              <Benefit no="01" title="どなたでも対象商品が" big="15" unit="%OFF">
                 <p>カートで自動的に割引されます。クーポンの入力は不要です。</p>
               </Benefit>
-              <Benefit no="02" title="LINE友だちは" big={`さらに${BF_PERCENT}`} unit="%OFF">
+              <Benefit no="02" title="LINE友だちは さらに" big={String(BF_PERCENT)} unit="%OFF">
                 <p>事前にクーポンを受け取ると、お支払い時に自動で適用されます。</p>
                 <Link
                   to="/bf"
@@ -143,7 +143,7 @@ export default function BlackFriday() {
                   <ChevronRight className="h-4 w-4" />
                 </Link>
               </Benefit>
-              <Benefit no="03" title={`¥${FREE_SHIP_THRESHOLD.toLocaleString()}以上のお買い上げで`} big="送料" unit="無料">
+              <Benefit no="03" title={`¥${FREE_SHIP_THRESHOLD.toLocaleString()}以上のお買い上げで`} big="送料無料">
                 <p>条件を満たすと、お支払い時に送料が無料になります。</p>
               </Benefit>
             </ul>
@@ -171,7 +171,6 @@ export default function BlackFriday() {
                 title="人気商品"
                 products={popular}
                 discountMap={discountMap}
-                moreTo={ALL_PRODUCTS_LINK}
                 trackName="bf_popular"
                 trackSource="bf_popular"
               />
@@ -179,7 +178,7 @@ export default function BlackFriday() {
           </>
         )}
 
-        <div className="mt-4 px-5 text-center">
+        <div className={`mt-4 px-5 text-center ${ended ? "mb-12" : ""}`}>
           <Link
             to={ALL_PRODUCTS_LINK}
             onClick={() => track("bf_page_all_click")}
