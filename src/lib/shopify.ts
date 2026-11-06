@@ -1016,6 +1016,61 @@ export async function fetchProductByHandle(handle: string): Promise<ShopifyProdu
   return data.data?.productByHandle || null;
 }
 
+/** 「人気商品」 컬렉션 — Shopify 정렬은 누적 판매순뿐이라 상품은 fetchRecentBestSellers 로 읽는다 */
+export const POPULAR_COLLECTION_HANDLE = "人気商品";
+
+const GET_PRODUCTS_BY_IDS_QUERY = `
+  query GetProductsByIds($ids: [ID!]!) {
+    nodes(ids: $ids) {
+      ... on Product {
+        id
+        title
+        handle
+        priceRange {
+          minVariantPrice {
+            amount
+            currencyCode
+          }
+        }
+        images(first: 1) {
+          edges {
+            node {
+              url
+              altText
+            }
+          }
+        }
+        variants(first: 10) {
+          edges {
+            node {
+              id
+              title
+              price {
+                amount
+                currencyCode
+              }
+              compareAtPrice {
+                amount
+                currencyCode
+              }
+              availableForSale
+              selectedOptions {
+                name
+                value
+              }
+            }
+          }
+        }
+        tags
+        options {
+          name
+          values
+        }
+      }
+    }
+  }
+`;
+
 /**
  * 최근 30일 판매순 상품 (`/api/popular-products`). 공개되지 않은 상품은 빠진다.
  * 불러오지 못하면 BEST_SELLING(누적)으로 돌아간다.
@@ -1024,11 +1079,10 @@ export async function fetchRecentBestSellers(first: number = 20): Promise<Shopif
   try {
     const res = await fetch('/api/popular-products');
     if (!res.ok) throw new Error(`popular-products ${res.status}`);
-    const { handles } = (await res.json()) as { handles: string[] };
-    const nodes = await Promise.all(
-      handles.slice(0, first).map((handle) => fetchProductByHandle(handle).catch(() => null)),
-    );
-    const products = nodes.flatMap((node): ShopifyProduct[] => (node ? [{ node }] : []));
+    const { ids } = (await res.json()) as { ids: string[] };
+    const data = await storefrontApiRequest(GET_PRODUCTS_BY_IDS_QUERY, { ids: ids.slice(0, first) });
+    const nodes: (ShopifyProduct['node'] | null)[] = data?.data?.nodes ?? [];
+    const products = nodes.flatMap((node): ShopifyProduct[] => (node?.id ? [{ node }] : []));
     if (products.length > 0) return products;
   } catch (error) {
     console.error(error);

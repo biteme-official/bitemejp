@@ -2,20 +2,20 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { SHOPIFY_API_VERSION } from './_shopify-api-version.js';
 
 /**
- * 최근 30일 인기 상품 — 주문을 직접 세어 판매 수량순 상품 핸들을 돌려준다.
+ * 최근 30일 인기 상품 — 주문을 직접 세어 판매 수량순 상품 id 를 돌려준다.
  *
  * Storefront 의 BEST_SELLING 은 기간을 정할 수 없고 누적에 가까워, 11월에도 여름 상품이
  * 위에 남는다. 그래서 Admin 주문을 읽어 센다. 취소·테스트 주문은 빼고, 환불·수량 변경은
  * currentQuantity 로 반영한다.
  *
- * 판매 수량은 공개하지 않고 순서(핸들)만 내보낸다. 결과는 CDN 에 1시간 캐시한다.
+ * 판매 수량은 공개하지 않고 순서(상품 id)만 내보낸다. 결과는 CDN 에 1시간 캐시한다.
  * 실패하면 502 를 돌려주고, 프론트는 BEST_SELLING 으로 돌아간다.
  *
  * ⚠️ 필요 스코프: REPORT 앱에 `read_orders`. 60일이 넘는 기간은 `read_all_orders` 도 필요하다.
  */
 
 const DAYS = 30;
-const LIMIT = 30;
+const LIMIT = 250;
 /** 100건씩 최근 주문부터 읽는 상한 — 넘치면 오래된 주문만 빠진다 */
 const MAX_PAGES = 30;
 
@@ -27,7 +27,7 @@ const ORDERS_QUERY = `
         cancelledAt
         test
         lineItems(first: 50) {
-          nodes { currentQuantity product { handle } }
+          nodes { currentQuantity product { id } }
         }
       }
     }
@@ -39,7 +39,7 @@ interface OrdersPage {
   nodes: {
     cancelledAt: string | null;
     test: boolean;
-    lineItems: { nodes: { currentQuantity: number; product: { handle: string } | null }[] };
+    lineItems: { nodes: { currentQuantity: number; product: { id: string } | null }[] };
   }[];
 }
 
@@ -101,21 +101,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (order.cancelledAt || order.test) continue;
         for (const line of order.lineItems.nodes) {
           if (!line.product) continue;
-          sold.set(line.product.handle, (sold.get(line.product.handle) ?? 0) + line.currentQuantity);
+          sold.set(line.product.id, (sold.get(line.product.id) ?? 0) + line.currentQuantity);
         }
       }
       if (!orders.pageInfo.hasNextPage) break;
       after = orders.pageInfo.endCursor;
     }
 
-    const handles = [...sold.entries()]
+    const ids = [...sold.entries()]
       .filter(([, quantity]) => quantity > 0)
       .sort((a, b) => b[1] - a[1])
       .slice(0, LIMIT)
-      .map(([handle]) => handle);
+      .map(([id]) => id);
 
     res.setHeader('Cache-Control', 'public, s-maxage=3600, stale-while-revalidate=86400');
-    return res.status(200).json({ days: DAYS, handles });
+    return res.status(200).json({ days: DAYS, ids });
   } catch (error) {
     console.error('popular-products failed:', error);
     res.setHeader('Cache-Control', 'no-store');
