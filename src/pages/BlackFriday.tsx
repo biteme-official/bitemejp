@@ -6,6 +6,7 @@
  * - 기간은 lib/bfCoupon 값을 그대로 쓴다. 연장하면 거기(와 Shopify 할인 종료일)만 바꾼다.
  * - 한정 세트는 BF_SET_HANDLES 의 상품을 읽는다. 초안(DRAFT)·미공개 상품은 Storefront 가
  *   돌려주지 않으므로 빠지고, 공개되는 순간 자동으로 나온다. 하나도 없으면 구역만 숨긴다.
+ * - 인기 상품은 최근 30일 판매 수량순이다(/api/popular-products, 1시간 캐시).
  * - 15% 대상 외인 SSFW 는 인기 상품에서 뺀다(할인 페이지에 정가 상품이 섞이지 않도록).
  */
 import { useEffect, useState } from "react";
@@ -14,7 +15,7 @@ import { ChevronRight } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ProductCarousel, ProductCarouselSkeleton } from "@/components/home/ProductCarousel";
-import { fetchBestSellingProducts, fetchProductByHandle, fetchProductDiscounts, ShopifyProduct } from "@/lib/shopify";
+import { fetchProductByHandle, fetchProductDiscounts, fetchRecentBestSellers, ShopifyProduct } from "@/lib/shopify";
 import { BF_APPLY_END, BF_APPLY_START, BF_PERCENT } from "@/lib/bfCoupon";
 import { FREE_SHIP_THRESHOLD } from "@/config/freeShipConfig";
 import { isHiddenSoldOut } from "@/lib/productStock";
@@ -78,7 +79,7 @@ export default function BlackFriday() {
     let alive = true;
     Promise.all([
       Promise.all(BF_SET_HANDLES.map((handle) => fetchProductByHandle(handle).catch(() => null))),
-      fetchBestSellingProducts(16).catch(() => [] as ShopifyProduct[]),
+      fetchRecentBestSellers(20).catch(() => [] as ShopifyProduct[]),
     ])
       .then(([setResult, popularResult]) => {
         if (!alive) return;

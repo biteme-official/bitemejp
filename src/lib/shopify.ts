@@ -1016,6 +1016,26 @@ export async function fetchProductByHandle(handle: string): Promise<ShopifyProdu
   return data.data?.productByHandle || null;
 }
 
+/**
+ * 최근 30일 판매순 상품 (`/api/popular-products`). 공개되지 않은 상품은 빠진다.
+ * 불러오지 못하면 BEST_SELLING(누적)으로 돌아간다.
+ */
+export async function fetchRecentBestSellers(first: number = 20): Promise<ShopifyProduct[]> {
+  try {
+    const res = await fetch('/api/popular-products');
+    if (!res.ok) throw new Error(`popular-products ${res.status}`);
+    const { handles } = (await res.json()) as { handles: string[] };
+    const nodes = await Promise.all(
+      handles.slice(0, first).map((handle) => fetchProductByHandle(handle).catch(() => null)),
+    );
+    const products = nodes.flatMap((node): ShopifyProduct[] => (node ? [{ node }] : []));
+    if (products.length > 0) return products;
+  } catch (error) {
+    console.error(error);
+  }
+  return fetchBestSellingProducts(first);
+}
+
 const PRODUCT_FIELDS = `
   fragment ProductFields on Product {
           id
