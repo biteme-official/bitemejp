@@ -24,6 +24,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import TokushoHo from "./pages/TokushoHo";
 import About from "./pages/About";
 import BfCoupon from "./pages/BfCoupon";
+import BlackFriday from "./pages/BlackFriday";
 import DiscountRedirect from "./pages/DiscountRedirect";
 import AffiliateLink from "./pages/AffiliateLink";
 import AffiliateTerms from "./pages/AffiliateTerms";
@@ -90,6 +91,7 @@ const App = () => (
           <Route path="/tokusho" element={<TokushoHo />} />
           <Route path="/about" element={<About />} />
           <Route path="/bf" element={<BfCoupon />} />
+          <Route path="/black-friday" element={<BlackFriday />} />
           <Route path="/discount/:code" element={<DiscountRedirect />} />
           <Route path="/a/:code" element={<AffiliateLink />} />
           <Route path="/blog" element={<BlogList />} />
