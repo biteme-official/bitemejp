@@ -8,11 +8,14 @@ import { AffiliatePromo } from "@/components/home/AffiliatePromo";
 import { NewProducts } from "@/components/home/NewProducts";
 import { CategoryCircles } from "@/components/home/CategoryCircles";
 import { CategorySections } from "@/components/home/CategorySections";
+import { FeaturedProducts } from "@/components/home/FeaturedProducts";
 import { InstagramReels } from "@/components/home/InstagramReels";
 import { ProductGrid } from "@/components/shop/ProductGrid";
 import { CategoryNav } from "@/components/shop/CategoryNav";
 import { SortOption } from "@/components/shop/ProductFilters";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { BF_APPLY_END } from "@/lib/bfCoupon";
+import { BF_SET_HANDLES, WINTER_COLLECTION_HANDLE, WINTER_HANDLES } from "@/config/homeFeatures";
 
 // 구 핸들(일본어 포함) → 신 핸들(ASCII) 매핑
 const HANDLE_ALIASES: Record<string, string> = {
@@ -67,7 +70,26 @@ const Index = () => {
           <HeroBanner />
           <CategoryCircles />
           <AffiliatePromo />
+          {Date.now() <= BF_APPLY_END && (
+            <FeaturedProducts
+              title="BLACK FRIDAY 限定セット"
+              handles={BF_SET_HANDLES}
+              badge={{ label: "SALE" }}
+              moreLabel="セール詳細"
+              moreTo="/black-friday"
+              trackName="bf_sets_home"
+            />
+          )}
           <NewProducts />
+          <FeaturedProducts
+            title="冬・クリスマス特集"
+            handles={WINTER_HANDLES}
+            badge={{ label: "WINTER", className: "bg-sky-500 text-white" }}
+            availableOnly
+            moreLabel="もっと見る"
+            moreTo={`/?collection=${encodeURIComponent(WINTER_COLLECTION_HANDLE)}`}
+            trackName="winter_home"
+          />
           <CategorySections />
           <InstagramReels />
         </div>

@@ -18,23 +18,13 @@ import { ProductCarousel, ProductCarouselSkeleton } from "@/components/home/Prod
 import { fetchProductByHandle, fetchProductDiscounts, fetchRecentBestSellers, ShopifyProduct } from "@/lib/shopify";
 import { BF_APPLY_END, BF_APPLY_START, BF_PERCENT } from "@/lib/bfCoupon";
 import { FREE_SHIP_THRESHOLD } from "@/config/freeShipConfig";
+import { BF_SET_HANDLES } from "@/config/homeFeatures";
 import { isHiddenSoldOut } from "@/lib/productStock";
 import { useDiscountStore } from "@/stores/discountStore";
 import { track } from "@/lib/track";
 import bfTitle from "@/assets/bf-title.png";
 import bfPaper from "@/assets/bf-paper.jpg";
 
-/** 한정 세트 상품 핸들 — 이 순서대로 보여 준다 */
-const BF_SET_HANDLES = [
-  "コンプリートトイレセット-ゼロガードマット-ノンスリップ排便マット-1",
-  "コンプリートトイレセット-ゼロガードマット-ノンスリップ排便マット-標準",
-  "コンフォートハーネス-リードセット",
-  "三角スリッカー-ジェリーベアーフェイスコームセット",
-  "バースデーギフトセット-ケーキハット-ノーズワークプレイブック",
-  "お散歩セット-ジェリーベアledライト-メッセージワッペン",
-  "ミニスナックボトル-折りたたみボウルセット",
-  "ひと口でくわえやすいラテックストイ3点セット",
-];
 const ALL_PRODUCTS_LINK = "/?sort=best_selling";
 const LIME = "#ACEB2A";
 
