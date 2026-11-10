@@ -12,6 +12,8 @@ import { getGA4LinkerParam } from '@/lib/ga4-ecommerce';
 import { toast } from 'sonner';
 import { AffiliateOfferNote } from '@/components/affiliate/AffiliateOfferNote';
 import { WelcomeCouponNote } from '@/components/cart/WelcomeCouponNote';
+import { FREE_SHIP_THRESHOLD, isFreeShipActive } from '@/config/freeShipConfig';
+import { estimateCheckoutCouponDiscount, CheckoutCouponEstimate } from '@/lib/checkoutCouponEstimate';
 
 interface ShippingForm {
   email: string;
@@ -44,6 +46,7 @@ export default function Checkout() {
   const [discountInfo, setDiscountInfo] = useState<CartDiscountInfo | null>(null);
   const [discountLoading, setDiscountLoading] = useState(true);
   const [showErrors, setShowErrors] = useState(false);
+  const [couponEstimate, setCouponEstimate] = useState<CheckoutCouponEstimate | null>(null);
 
   // Load saved shipping address
   const [form, setForm] = useState<ShippingForm>(() => {
@@ -86,6 +89,19 @@ export default function Checkout() {
       .catch(() => setDiscountInfo(null))
       .finally(() => setDiscountLoading(false));
   }, []);
+
+  // 블프 무료배송(¥6,000 이상) — 장바구니 안내줄(ThresholdBanner)과 같은 기준: 자동 할인 뒤 금액에서 쿠폰까지 뺀 금액
+  useEffect(() => {
+    setCouponEstimate(null);
+    const regularItems = items.filter(i => !i.isGift);
+    if (!isFreeShipActive() || discountLoading || !discountInfo || regularItems.length === 0) return;
+    const lines = regularItems.map(i => ({ productId: i.product.node.id, unitPrice: parseFloat(i.price.amount), quantity: i.quantity }));
+    let alive = true;
+    estimateCheckoutCouponDiscount(discountInfo.discountedTotal, lines)
+      .then(estimate => { if (alive) setCouponEstimate(estimate); })
+      .catch(console.error);
+    return () => { alive = false; };
+  }, [items, discountInfo, discountLoading]);
 
   // Pre-fill from Shopify customer data if available
   useEffect(() => {
@@ -135,7 +151,11 @@ export default function Checkout() {
   };
 
   const subtotal = items.reduce((sum, item) => sum + parseFloat(item.price.amount) * item.quantity, 0);
-  const shipping = shippingRate ? parseFloat(shippingRate.amount) : 0;
+  const shippingFee = shippingRate ? parseFloat(shippingRate.amount) : 0;
+  // 금액이 확정되기 전·할인율 모르는 코드가 붙을 때는 무료배송을 단정하지 않는다 (실제 적용은 Shopify 자동 할인)
+  const freeShip = !!discountInfo && !!couponEstimate && !couponEstimate.hasUnknownCode
+    && discountInfo.discountedTotal - couponEstimate.amount >= FREE_SHIP_THRESHOLD;
+  const shipping = freeShip ? 0 : shippingFee;
   const total = subtotal + shipping;
   const currencyCode = items[0]?.price.currencyCode || 'JPY';
 
@@ -323,7 +343,14 @@ export default function Checkout() {
               <span className="text-muted-foreground flex items-center gap-1">
                 <Truck className="h-3.5 w-3.5" />送料
               </span>
-              <span translate="no">{!shippingRate ? '計算中' : formatPrice(shipping.toString(), currencyCode)}</span>
+              {freeShip ? (
+                <span translate="no" className="flex items-center gap-1.5">
+                  {shippingRate && <span className="text-xs text-muted-foreground line-through">{formatPrice(shippingFee.toString(), currencyCode)}</span>}
+                  <span className="font-medium text-primary">無料</span>
+                </span>
+              ) : (
+                <span translate="no">{!shippingRate ? '計算中' : formatPrice(shipping.toString(), currencyCode)}</span>
+              )}
             </div>
             <div className="flex justify-between text-base font-bold pt-1 border-t border-border">
               <span>合計</span>
