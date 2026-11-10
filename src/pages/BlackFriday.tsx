@@ -8,6 +8,8 @@
  *   돌려주지 않으므로 빠지고, 공개되는 순간 자동으로 나온다. 하나도 없으면 구역만 숨긴다.
  * - 인기 상품은 최근 30일 판매 수량순이다(/api/popular-products, 1시간 캐시).
  * - 15% 대상 외인 SSFW 는 인기 상품에서 뺀다(할인 페이지에 정가 상품이 섞이지 않도록).
+ * - 진열된 상품만 행사 대상으로 오해하지 않도록 카테고리별 줄(BF_CATEGORIES)을 더 깐다.
+ *   핸들은 메뉴(customer-account-main-menu)에서 제목으로 찾는다 — 메뉴 핸들이 「…사본」 처럼 제목과 달라서.
  */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -15,11 +17,19 @@ import { ChevronRight } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ProductCarousel, ProductCarouselSkeleton } from "@/components/home/ProductCarousel";
-import { fetchProductByHandle, fetchProductDiscounts, fetchRecentBestSellers, ShopifyProduct } from "@/lib/shopify";
+import {
+  extractHandleFromUrl,
+  fetchCollectionProducts,
+  fetchMenu,
+  fetchProductByHandle,
+  fetchProductDiscounts,
+  fetchRecentBestSellers,
+  ShopifyProduct,
+} from "@/lib/shopify";
 import { BF_APPLY_END, BF_APPLY_START, BF_PERCENT } from "@/lib/bfCoupon";
 import { FREE_SHIP_THRESHOLD } from "@/config/freeShipConfig";
 import { BF_SET_HANDLES } from "@/config/homeFeatures";
-import { isHiddenSoldOut } from "@/lib/productStock";
+import { isHiddenSoldOut, isProductAvailable } from "@/lib/productStock";
 import { useDiscountStore } from "@/stores/discountStore";
 import { track } from "@/lib/track";
 import bfTitle from "@/assets/bf-title.png";
@@ -29,6 +39,31 @@ const ALL_PRODUCTS_LINK = "/?sort=best_selling";
 const LIME = "#ACEB2A";
 
 const isSsfw = (p: ShopifyProduct) => /SSFW/i.test(p.node.title);
+
+/** 카테고리별 진열 — 메뉴 제목 그대로. 메뉴에 없거나 판매 중 상품이 4개 미만이면 그 줄만 숨긴다 */
+const BF_CATEGORIES = ["おもちゃ", "散歩用品", "衛生用品", "リビング", "食器", "衣類"];
+const CATEGORY_MENU = "customer-account-main-menu";
+
+interface CategoryRow {
+  title: string;
+  handle: string;
+  products: ShopifyProduct[];
+}
+
+async function fetchBfCategories(): Promise<CategoryRow[]> {
+  const menu = await fetchMenu(CATEGORY_MENU).catch(() => null);
+  const items = menu?.items ?? [];
+  const rows = await Promise.all(
+    BF_CATEGORIES.map(async (title): Promise<CategoryRow | null> => {
+      const item = items.find((i) => i.title === title);
+      const handle = item ? extractHandleFromUrl(item.url) : null;
+      if (!handle) return null;
+      const { products } = await fetchCollectionProducts(handle, 16).catch(() => ({ products: [] as ShopifyProduct[] }));
+      return { title, handle, products };
+    }),
+  );
+  return rows.flatMap((r) => (r ? [r] : []));
+}
 
 function Benefit({ no, title, big, unit, children }: {
   no: string;
@@ -53,6 +88,7 @@ function Benefit({ no, title, big, unit, children }: {
 export default function BlackFriday() {
   const [sets, setSets] = useState<ShopifyProduct[]>([]);
   const [popular, setPopular] = useState<ShopifyProduct[]>([]);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const { productDiscounts: discountMap, setProductDiscounts } = useDiscountStore();
 
@@ -70,8 +106,9 @@ export default function BlackFriday() {
     Promise.all([
       Promise.all(BF_SET_HANDLES.map((handle) => fetchProductByHandle(handle).catch(() => null))),
       fetchRecentBestSellers(20).catch(() => [] as ShopifyProduct[]),
+      fetchBfCategories().catch(() => [] as CategoryRow[]),
     ])
-      .then(([setResult, popularResult]) => {
+      .then(([setResult, popularResult, categoryResult]) => {
         if (!alive) return;
         const setList = setResult
           .flatMap((node): ShopifyProduct[] => (node ? [{ node }] : []))
@@ -80,11 +117,18 @@ export default function BlackFriday() {
         const popularList = popularResult
           .filter((p) => !isHiddenSoldOut(p) && !isSsfw(p) && !setIds.has(p.node.id))
           .slice(0, 8);
+        const categoryList = categoryResult
+          .map((row) => ({ ...row, products: row.products.filter((p) => !isHiddenSoldOut(p) && !isSsfw(p)).slice(0, 12) }))
+          .filter((row) => row.products.filter(isProductAvailable).length >= 4);
         setSets(setList);
         setPopular(popularList);
+        setCategories(categoryList);
 
         const reps: { productId: string; variantId: string }[] = [];
-        [...setList, ...popularList].forEach((p) => {
+        const seen = new Set<string>();
+        [...setList, ...popularList, ...categoryList.flatMap((row) => row.products)].forEach((p) => {
+          if (seen.has(p.node.id)) return;
+          seen.add(p.node.id);
           const v = (p.node.variants.edges.find((e) => e.node.availableForSale) ?? p.node.variants.edges[0])?.node;
           if (v) reps.push({ productId: p.node.id, variantId: v.id });
         });
@@ -154,6 +198,12 @@ export default function BlackFriday() {
       </div>
 
       <main className="max-w-7xl mx-auto pt-8 md:pt-10">
+        {!ended && (
+          <div className="mx-5 mb-8 rounded-2xl bg-[#0E0E0E] px-5 py-4 text-center">
+            <p className="text-base md:text-lg font-black" style={{ color: LIME }}>SSFW以外の全商品が15%OFF</p>
+            <p className="mt-1 text-xs text-white/75">下に並んでいない商品も対象です。カテゴリーごとにご覧ください。</p>
+          </div>
+        )}
         {loading ? (
           <ProductCarouselSkeleton />
         ) : (
@@ -175,8 +225,22 @@ export default function BlackFriday() {
                 discountMap={discountMap}
                 trackName="bf_popular"
                 trackSource="bf_popular"
+                className="mb-6"
               />
             )}
+            {categories.map((row) => (
+              <ProductCarousel
+                key={row.handle}
+                title={row.title}
+                products={row.products}
+                discountMap={discountMap}
+                moreLabel="もっと見る"
+                moreTo={`/?collection=${encodeURIComponent(row.handle)}`}
+                trackName={`bf_cat_${row.title}`}
+                trackSource="bf_category"
+                className="mb-6"
+              />
+            ))}
           </>
         )}
 
