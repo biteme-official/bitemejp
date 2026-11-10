@@ -21,6 +21,10 @@
  *    src/lib/bfCoupon.ts 의 BF_APPLY_END 가 정한다 — 연장이 정해지면 그 한 줄만 바꾼다.
  *
  * 🔴 userId 는 서명된 lineSessionToken 에서만 꺼낸다(재입고·오픈 알림과 같은 검증).
+ *
+ *   GET (Authorization: Bearer ADMIN_SECRET) — 블프 회고 대시보드(japan-mall-retro /roi)용 발급 현황
+ *     → 200 { issued, used, byDay: [{ date, issued }], holders: [{ customerId, issuedAt, used }] }
+ *     발급 내역은 이 앱(REPORT, read_discounts)만 읽을 수 있어 여기서 내보낸다. 고객은 숫자 ID 만 싣는다.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createHmac } from 'crypto';
@@ -110,7 +114,68 @@ async function createCode(token: string, code: string, customerGid: string, line
   throw new Error(`code create: ${errs.map((e) => e.message).join(' / ') || 'unknown'}`);
 }
 
+interface IssuedNode {
+  codeDiscount: {
+    title?: string;
+    createdAt?: string;
+    asyncUsageCount?: number;
+    customerSelection?: { customers?: { id: string }[] };
+  } | null;
+}
+
+/** 발급된 BF5 코드 전체 — 제목 `[BF2026]` 으로 찾는다 */
+async function issuedStats(token: string) {
+  const holders: { customerId: string; issuedAt: string; used: boolean }[] = [];
+  let after: string | null = null;
+  for (let guard = 0; guard < 40; guard++) {
+    const r: {
+      data?: { codeDiscountNodes: { pageInfo: { hasNextPage: boolean; endCursor: string | null }; nodes: IssuedNode[] } };
+      errors?: unknown;
+    } = await adminGraphQL(
+      token,
+      `query($a: String) {
+        codeDiscountNodes(first: 250, after: $a, query: "title:'[BF2026]*'") {
+          pageInfo { hasNextPage endCursor }
+          nodes { codeDiscount { ... on DiscountCodeBasic {
+            title createdAt asyncUsageCount
+            customerSelection { ... on DiscountCustomers { customers { id } } }
+          } } }
+        }
+      }`,
+      { a: after },
+    );
+    if (r.errors || !r.data) throw new Error(`issued list: ${JSON.stringify(r.errors).slice(0, 200)}`);
+    for (const n of r.data.codeDiscountNodes.nodes) {
+      const d = n.codeDiscount;
+      if (!d?.title?.startsWith('[BF2026]') || !d.createdAt) continue;
+      const gid = d.customerSelection?.customers?.[0]?.id ?? '';
+      holders.push({ customerId: gid.split('/').pop() ?? '', issuedAt: d.createdAt, used: (d.asyncUsageCount ?? 0) > 0 });
+    }
+    const p = r.data.codeDiscountNodes.pageInfo;
+    if (!p.hasNextPage) break;
+    after = p.endCursor;
+  }
+  const byDayMap = new Map<string, number>();
+  for (const h of holders) {
+    const date = new Date(Date.parse(h.issuedAt) + 9 * 3600_000).toISOString().slice(0, 10);
+    byDayMap.set(date, (byDayMap.get(date) ?? 0) + 1);
+  }
+  const byDay = [...byDayMap].sort(([a], [b]) => a.localeCompare(b)).map(([date, issued]) => ({ date, issued }));
+  return { issued: holders.length, used: holders.filter((h) => h.used).length, byDay, holders };
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'GET') {
+    const admin = process.env.ADMIN_SECRET;
+    if (!admin || req.headers.authorization !== `Bearer ${admin}`) return res.status(401).json({ error: 'Unauthorized' });
+    try {
+      return res.status(200).json(await issuedStats(await getAdminToken()));
+    } catch (e) {
+      console.error('[BF coupon] 발급 현황 조회 실패:', e);
+      return res.status(500).json({ error: 'failed' });
+    }
+  }
+
   res.setHeader('Access-Control-Allow-Origin', getCorsOrigin(req));
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
