@@ -12,12 +12,14 @@
 
 export interface SetUpsellDef {
   handle: string;
+  /** 카드에 쓸 짧은 이름 — 없으면 세트 상품명. 상품명이 길어 모바일에서 4줄이 되는 세트만 */
+  label?: string;
   /** 구성품 정가 합계(엔) */
   listPrice: number;
 }
 
-const TOILET_L: SetUpsellDef = { handle: "コンプリートトイレセット-ゼロガードマット-ノンスリップ排便マット-1", listPrice: 8980 };
-const TOILET_S: SetUpsellDef = { handle: "コンプリートトイレセット-ゼロガードマット-ノンスリップ排便マット-標準", listPrice: 7279 };
+const TOILET_L: SetUpsellDef = { handle: "コンプリートトイレセット-ゼロガードマット-ノンスリップ排便マット-1", label: "コンプリートトイレセット（大型）", listPrice: 8980 };
+const TOILET_S: SetUpsellDef = { handle: "コンプリートトイレセット-ゼロガードマット-ノンスリップ排便マット-標準", label: "コンプリートトイレセット（標準）", listPrice: 7279 };
 const HARNESS: SetUpsellDef = { handle: "コンフォートハーネス-リードセット", listPrice: 6960 };
 const SLICKER: SetUpsellDef = { handle: "三角スリッカー-ジェリーベアーフェイスコームセット", listPrice: 2770 };
 const BIRTHDAY: SetUpsellDef = { handle: "バースデーギフトセット-ケーキハット-ノーズワークプレイブック", listPrice: 4194 };

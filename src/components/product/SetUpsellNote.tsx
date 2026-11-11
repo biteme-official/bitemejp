@@ -93,7 +93,7 @@ export function SetUpsellNote({ productId }: { productId: string }) {
               <p className="text-xs font-semibold text-amber-700">
                 {c.savings > 0 ? `セットなら¥${c.savings.toLocaleString("ja-JP")}お得` : "セットもあります"}
               </p>
-              <p className="text-sm font-medium text-foreground leading-snug">{c.product.title}</p>
+              <p className="text-sm font-medium text-foreground leading-snug">{c.def.label ?? c.product.title}</p>
               <p className="text-sm" translate="no">
                 {c.salePrice < c.price ? (
                   <>
