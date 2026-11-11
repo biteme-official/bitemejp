@@ -67,7 +67,7 @@ export function SetUpsellNote({ productId }: { productId: string }) {
   if (!cards.length) return null;
 
   return (
-    <div className="mt-4 space-y-2">
+    <div className="mt-4 mb-4 space-y-2">
       {cards.map((c) => {
         const setId = c.product.id.split("/").pop();
         const img = c.product.images.edges[0]?.node;
@@ -93,7 +93,7 @@ export function SetUpsellNote({ productId }: { productId: string }) {
               <p className="text-xs font-semibold text-amber-700">
                 {c.savings > 0 ? `セットなら¥${c.savings.toLocaleString("ja-JP")}お得` : "セットもあります"}
               </p>
-              <p className="text-sm font-medium text-foreground line-clamp-2">{c.product.title}</p>
+              <p className="text-sm font-medium text-foreground leading-snug">{c.product.title}</p>
               <p className="text-sm" translate="no">
                 {c.salePrice < c.price ? (
                   <>
@@ -106,7 +106,7 @@ export function SetUpsellNote({ productId }: { productId: string }) {
               </p>
             </div>
             <span className="shrink-0 inline-flex items-center text-xs font-medium text-amber-700">
-              セットを見る
+              <span className="hidden sm:inline">セットを見る</span>
               <ChevronRight className="h-4 w-4" />
             </span>
           </button>
