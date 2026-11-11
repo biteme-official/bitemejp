@@ -23,6 +23,7 @@ import { LaunchNotifyButton } from "@/components/product/LaunchNotifyButton";
 import { RESTOCK_PARAM, toRestockProduct } from "@/stores/restockStore";
 import { getLaunchTag, isLaunchHeld, isVariantDiscontinued, launchLabel } from "@/lib/productStock";
 import { AffiliateOfferNote } from "@/components/affiliate/AffiliateOfferNote";
+import { SetUpsellNote } from "@/components/product/SetUpsellNote";
 import { toast } from "sonner";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CartDrawer } from "@/components/cart/CartDrawer";
@@ -729,6 +730,8 @@ export default function ProductDetail() {
         </div>
         {/* 파트너 링크로 들어온 고객: 紹介リンク限定 n%OFF (#178) */}
         <AffiliateOfferNote variant="product" productId={product.id} unitPrice={parseFloat(price.amount)} currencyCode={price.currencyCode} />
+        {/* 구성품 상세 → 세트 안내 (#306) */}
+        <SetUpsellNote productId={product.id} />
 
         {/* Options Selectors */}
         {product.options.map((option) => {
