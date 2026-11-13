@@ -24,7 +24,7 @@ export default function AffiliateTerms() {
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-4 py-8 flex-1">
+      <main className="w-full min-w-0 max-w-2xl mx-auto px-4 py-8 flex-1 break-words">
         <h1 className="text-2xl font-bold mb-2">アフィリエイトプログラム利用規約</h1>
         <p className="text-sm text-muted-foreground mb-6">
           制定：{AFFILIATE_TERMS_ENACTED}（版 {AFFILIATE_TERMS_VERSION}）
