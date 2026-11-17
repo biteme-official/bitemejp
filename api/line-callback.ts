@@ -257,10 +257,13 @@ async function syncLineUserToShopify(
   //    2026-04-28 커밋 b0f0dc2 가 `|| firstName` 폴백을 지우면서 생긴 회귀 — 그 이후
   //    가입 성공자 65명은 전원 공백이 있는 이름이었다(공백 없는 이름 0명, #108).
   //    전각 공백(U+3000)도 구분자로 인정한다 — 일본어 이름에서 흔하다.
+  //    공백이 없으면 성에만 넣고 이름은 비운다 — 둘 다 같은 값을 넣으면 관리자·결제 폼에
+  //    「かずのりかずのり」처럼 두 번 찍힌다 (#310). 이름은 Shopify 에서 선택 항목이다.
   const displayName = profile.displayName?.trim() || 'LINEユーザー';
   const nameParts = displayName.split(/\s+/);
-  const firstName = nameParts[0];
-  const lastName = nameParts.slice(1).join(' ') || firstName;
+  const hasSpace = nameParts.length > 1;
+  const firstName = hasSpace ? nameParts[0] : undefined;
+  const lastName = hasSpace ? nameParts.slice(1).join(' ') : displayName;
   const password = generatePassword(profile.userId);
 
   // Admin 토큰은 기존 고객 조회에도 쓰이므로 먼저 확보한다 (실패해도 로그인은 계속).

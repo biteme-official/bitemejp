@@ -14,6 +14,7 @@ import { AffiliateOfferNote } from '@/components/affiliate/AffiliateOfferNote';
 import { WelcomeCouponNote } from '@/components/cart/WelcomeCouponNote';
 import { FREE_SHIP_THRESHOLD, isFreeShipActive } from '@/config/freeShipConfig';
 import { estimateCheckoutCouponDiscount, CheckoutCouponEstimate } from '@/lib/checkoutCouponEstimate';
+import { normalizeJpPhone } from '@/lib/phone';
 
 interface ShippingForm {
   email: string;
@@ -109,10 +110,13 @@ export default function Checkout() {
     fetchCustomerData(user.shopifyCustomerToken).then((data) => {
       if (!data) return;
       const addr = data.defaultAddress;
+      // LINE 가입 고객은 표시이름에 공백이 없으면 성·이름에 같은 값이 들어가 있다(「かずのり かずのり」, #310).
+      // 이 기기에 저장된 지난 배송 이름을 먼저 쓰고, 고객 이름이 성=이름 중복이면 이름 칸은 비운다.
+      const dupName = !!data.firstName && data.firstName === data.lastName;
       setForm((prev) => ({
         email: data.email || prev.email || '',
-        lastName: data.lastName || prev.lastName || '',
-        firstName: data.firstName || prev.firstName || '',
+        lastName: prev.lastName || data.lastName || '',
+        firstName: prev.lastName ? prev.firstName : (dupName ? '' : data.firstName || prev.firstName || ''),
         zip: addr?.zip || prev.zip || '',
         prefecture: addr?.province || prev.prefecture || '',
         city: addr?.city || prev.city || '',
@@ -160,6 +164,7 @@ export default function Checkout() {
   const currencyCode = items[0]?.price.currencyCode || 'JPY';
 
   const isFormValid = form.email && form.lastName && form.zip && form.prefecture && form.city && form.address1;
+  const phone = normalizeJpPhone(form.phone);
 
   const handleSubmit = async () => {
     if (isSubmitting) return;
@@ -168,6 +173,13 @@ export default function Checkout() {
       const firstEmpty = !form.email ? 'email' : !form.lastName ? 'lastName' : !form.zip ? 'zip' : !form.prefecture ? 'prefecture' : !form.city ? 'city' : 'address1';
       document.getElementById(firstEmpty)?.focus();
       toast.error('必須項目をすべて入力してください。', { position: 'top-center' });
+      return;
+    }
+    // 형식이 틀린 번호를 넘기면 Shopify 결제 화면에서 막히므로 여기서 먼저 알려준다 (#310)
+    if (!phone.valid) {
+      setShowErrors(true);
+      document.getElementById('phone')?.focus();
+      toast.error('電話番号の形式をご確認ください。', { position: 'top-center' });
       return;
     }
     setIsSubmitting(true);
@@ -200,7 +212,7 @@ export default function Checkout() {
       url.searchParams.set('checkout[shipping_address][city]', form.city);
       url.searchParams.set('checkout[shipping_address][address1]', form.address1);
       url.searchParams.set('checkout[shipping_address][address2]', form.address2);
-      url.searchParams.set('checkout[shipping_address][phone]', form.phone);
+      url.searchParams.set('checkout[shipping_address][phone]', phone.value);
       url.searchParams.set('checkout[shipping_address][country]', 'JP');
       if (glParam) url.searchParams.set('_gl', glParam);
 
@@ -458,7 +470,8 @@ export default function Checkout() {
 
             <div>
               <Label htmlFor="phone">電話番号</Label>
-              <Input id="phone" name="tel" type="tel" value={form.phone} onChange={(e) => updateField('phone', e.target.value)} placeholder="09012345678" autoComplete="tel" />
+              <Input id="phone" name="tel" type="tel" value={form.phone} onChange={(e) => updateField('phone', e.target.value)} placeholder="09012345678" autoComplete="tel" className={showErrors && !phone.valid ? 'border-destructive' : ''} />
+              {showErrors && !phone.valid && <p className="text-xs text-destructive mt-1">電話番号の形式をご確認ください（例：09012345678）</p>}
             </div>
           </div>
         </form>
