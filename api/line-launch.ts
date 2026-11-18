@@ -11,6 +11,7 @@
  * 「오픈」 = 상품이 판매 중(ACTIVE)이고 옵션이 하나라도 구매 가능. 태그를 떼지 않아도 오픈으로 본다.
  *   단 `発売予定:YYYY-MM-DD` 의 발매일(JST)이 아직 안 왔으면 재고가 있어도 오픈 전이다(사이트도 「COMING SOON」).
  *   `発売予定:YYYY-MM-DD HH:MM` 이면 그 시각(JST)까지 오픈 전.
+ * 발매일(시각)이 지나면 출시 예정 기간 끝 — 태그가 남아 있어도 출시 예정이 아니다(품절이면 재입고 알림, #312).
  *
  * 🔴 자동 발송은 하지 않는다 — 재입고 알림(#227)과 같은 이유. 재고 수정 실수에도 바로 나가 버린다.
  *
@@ -53,14 +54,18 @@ const PRODUCT_GID = /^gid:\/\/shopify\/Product\/\d+$/;
 
 const LAUNCH_TAGS = ['発売予定', 'coming_soon', '출시예정'];
 
-/** 태그가 없으면 null. 날짜가 없거나 형식이 틀리면 date null */
-function launchTag(tags: string[]): { date: string | null } | null {
+/** 태그가 없거나 발매일(시각)이 이미 지났으면 null. 날짜가 없거나 형식이 틀리면 date null
+ *  🔑 발매일이 지나면 출시 예정 기간 끝 — 태그가 남아 있어도 출시 예정으로 보지 않는다 (#312).
+ *     출시 후 품절은 오픈 알림이 아니라 재입고 알림으로 받는다. 이미 받은 오픈 알림 신청은 그대로 보낼 수 있다. */
+function launchTag(tags: string[], now: number = Date.now()): { date: string | null } | null {
   for (const raw of tags) {
     const t = raw.trim().toLowerCase();
     for (const key of LAUNCH_TAGS.map((k) => k.toLowerCase())) {
       if (t === key) return { date: null };
       if (!t.startsWith(`${key}:`)) continue;
-      return { date: parseLaunchDate(t.slice(key.length + 1).trim()) };
+      const date = parseLaunchDate(t.slice(key.length + 1).trim());
+      if (date && !launchHeld(date, now)) return null;
+      return { date };
     }
   }
   return null;
