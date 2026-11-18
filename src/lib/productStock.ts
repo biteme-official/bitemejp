@@ -51,8 +51,10 @@ export function isHiddenSoldOut(p: ShopifyProduct): boolean {
  *
  * Shopify 상품 태그로 정한다.
  *   - `発売予定`              발매일 미정 → 「近日発売」
- *   - `発売予定:2026-11-01`   발매일 표시 → 「11月1日発売予定」 (날짜가 지났으면 「近日発売」)
- *   - `発売予定:2026-11-01 20:00`  발매 시각까지 → 「11月1日 20時発売予定」 (시각이 지났으면 「近日発売」)
+ *   - `発売予定:2026-11-01`   발매일 표시 → 「11月1日発売予定」
+ *   - `発売予定:2026-11-01 20:00`  발매 시각까지 → 「11月1日 20時発売予定」
+ *   🔑 발매일(시각)이 지나면 출시 예정 기간 끝 — 태그를 안 떼도 보통 상품. 품절이면 재입고 알림 (#312)
+ *      날짜 없는 `発売予定` 은 끝을 모르므로 태그를 뗄 때까지 출시 예정
  * `coming_soon`·`출시예정` 도 같은 뜻으로 받는다.
  *
  * 🔑 옵션이 하나라도 살 수 있게 되면 태그가 남아 있어도 보통 상품으로 보인다 — 오픈 때 태그 떼기를
@@ -92,10 +94,11 @@ export function getLaunchTag(tags: string[] | undefined, now: number = Date.now(
       if (!t.toLowerCase().startsWith(`${key.toLowerCase()}:`)) continue;
       const date = parseLaunchDate(t.slice(key.length + 1).trim());
       if (!date) return { date: null };
-      const cur = nowJst(now);
-      // 날짜만이면 그날 하루는 표시, 시각이 있으면 그 시각까지만
-      const passed = date.length > 10 ? date <= cur : date < cur.slice(0, 10);
-      return { date: passed ? null : date };
+      // 발매일(시각)이 지났으면 출시 예정 기간이 끝난 것 — 태그가 남아 있어도 보통 상품으로 본다 (#312).
+      // 그래야 출시 후 품절이 「COMING SOON · 오픈 알림」이 아니라 「SOLD OUT · 재입고 알림」으로 간다.
+      // (날짜만이면 그날 0시, 시각이 있으면 그 시각에 판매가 열리므로 그때부터 끝으로 본다)
+      if (date <= nowJst(now)) return null;
+      return { date };
     }
   }
   return null;
