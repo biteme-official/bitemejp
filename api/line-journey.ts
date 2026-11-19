@@ -38,6 +38,7 @@ import {
 import { allowedTarget, signClick } from './line-click.js';
 import { CART_EVENT, type CartLine } from './line-cart.js';
 import { alertExhausted, alertQuota, fetchQuotaStatus, isMonthlyLimitError } from './_line-quota.js';
+import { applyRichMenuSchedule } from './_line-richmenu-schedule.js';
 
 const CART_RECOVERY = 'cart_recovery';
 const CART_ADD = 'cart_add';
@@ -1179,6 +1180,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const now = Date.now();
   const enabled = enabledJourneys();
 
+  // 리치메뉴 예약 전환 — 저니와 무관하게 매시간 확인한다. 실패해도 저니는 그대로 돈다.
+  const richMenu = await (async () => applyRichMenuSchedule(lineToken(), now, dryRun))().catch((e: unknown) => ({
+    action: 'failed' as const,
+    detail: String(e),
+  }));
+  if (dryRun || richMenu.action !== 'none') console.log('[LINE RichMenu]', JSON.stringify(richMenu));
+
   try {
     if (!dryRun && enabled.length === 0) {
       return res.status(200).json({ ok: true, skipped: 'LINE_JOURNEY_ENABLED 미설정' });
@@ -1194,7 +1202,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!dryRun && inQuietHours(new Date(now))) {
       // 버리지 않는다. 창이 열리는 다음 실행에서 같은 사람이 다시 잡힌다.
-      return res.status(200).json({ ok: true, skipped: '조용한 시간 (JST 21~09시)' });
+      return res.status(200).json({ ok: true, skipped: '조용한 시간 (JST 21~09시)', richMenu });
     }
 
     // 🔴 중복 방지와 빈도 제한이 전부 이 기록 위에 선다. 기록이 없으면 매시간 같은 사람에게
@@ -1269,6 +1277,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({
       ok: true,
+      richMenu,
       dryRun,
       enabled,
       quietHours: inQuietHours(new Date(now)),
