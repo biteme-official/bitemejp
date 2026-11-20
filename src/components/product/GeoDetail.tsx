@@ -1,55 +1,46 @@
 import { useEffect, useRef, useState } from "react";
 
-// GEO 상세페이지(업체 변환본: 이미지 + 글자 겹침). 원본 HTML은 public/geo/ja/{상품 숫자 ID}.html 에 그대로 둔다.
+// GEO 상세페이지(업체 변환본: 이미지 + 글자 겹침, 글자 크기는 CSS cqw 로 고정). 원본 HTML은 public/geo/ja/{상품 숫자 ID}.html 에 둔다.
+// 업체 파일의 한국 자사몰 링크는 넣을 때 사이트 상대 주소(/product/...)로 바꾼다.
 // 목록에 없는 상품은 기존 Shopify 설명을 쓴다. (없는 파일도 SPA 폴백으로 200이 오므로 목록으로 판단)
 export const GEO_DETAIL_IDS = new Set([
+  "10346561569081", // おしっこ足跡防止 ゼロガードマット
+  "10150719291705", // ジャンピングブギ ーノーズワーク プレイボール自動おもちゃ
   "10150718865721", // コンフォートハーネスv2
   "10150718800185", // コンフォートリード v2
-  "10201780683065", // ジェリーベアLEDライト
-  "10150719291705", // ジャンピングブギ
   "15407342420281", // ポイントケア 三角スリッカー
-  "10346561569081", // ゼロガードマット
+  "10201780683065", // ジェリーベアLEDライト (3カラー)
+  "10150721585465", // ヘイトミーバンド
+  "10150721454393", // ベーキングデイ ノーズワークプレイブック
+  "10213336547641", // リトルオーシャンフレンズトイ
+  "10150722142521", // ブレイングトイ スピンアンドスナック リス
+  "10150720307513", // イージーバイトグリップ
+  "10150724534585", // 農場ノーズワークおもちゃ
+  "10213414437177", // カラフル ミニトマト ラテックストイ
+  "10150720635193", // 総合フルーツセット ノーズワークトイ
+  "10202476052793", // ノーズワークプレイブック マイバースデー
+  "10150719029561", // ブレイニングトイ スピンアンドスナック バニー
+  "10276698849593", // ミニスナックボトル（4カラー）
+  "10276704944441", // 携帯用折りたたみボウル　パステル（4カラー）
+  "10150722961721", // ピーナッツ ラテックストイ(4個入り)
+  "10150724239673", // ジェリーベアー ラウンド フェイスコーム
+  "10150723649849", // ミニシリコンポット
+  "10346592436537", // ノーズワーク プレイボール 自動おもちゃ カニカバー（※カバーのみ。自動プレイボール付属なし）
+  "10202477592889", // ノーズワークプレイブック 洗濯の日
+  "10202475561273", // ノーズワークプレイブック ランチボックス
+  "10150723846457", // 農場のお友だちボールおもちゃ
+  "10150721487161", // ヘイトミーパッチ（8シール×3枚＝24シール入り）
+  "10150723911993", // グッドナイト ノーズワークプレイブック
+  "10150723551545", // ゾウのくつ下おもちゃ
+  "10150721880377", // 野菜畑ボールおもちゃ(2個セット)
+  "10319794503993", // 靴下 おもちゃセット(3枚セット)
 ]);
 
-type Roles = Record<string, [number, number]>;
-
-// 원본 HTML의 글자 크기 맞춤 스크립트(fit/settle)를 그대로 옮긴 것.
-// CSP(unsafe-eval 없음) 때문에 원본 스크립트를 실행하지 않고, 역할별 크기표(ROLES)만 읽어 쓴다.
-function fit(el: HTMLElement, max: number): number {
-  const span = el.firstElementChild as HTMLElement, W = el.clientWidth;
-  const V = el.classList.contains("vert"), Hh = el.clientHeight;
-  const ok = (s: number) => { el.style.fontSize = s + "px"; return V ? span.scrollHeight <= Hh + .5 : span.scrollWidth <= W + .5; };
-  if (ok(max)) return max;
-  let lo = 3, hi = max;
-  for (let i = 0; i < 18; i++) { const m = (lo + hi) / 2; if (ok(m)) lo = m; else hi = m; }
-  return lo;
-}
-
-function applySizes(main: HTMLElement, roles: Roles) {
-  const k = Math.min(800, main.clientWidth) / 800;
-  if (!k) return;
-  const by: Record<string, HTMLElement[]> = {};
-  for (const el of main.querySelectorAll<HTMLElement>(".text-overlay")) (by[el.dataset.r!] ??= []).push(el);
-  for (const [r, els] of Object.entries(by)) {
-    if (!roles[r]) continue;
-    const [base, lh] = roles[r];
-    const own: Record<string, number> = {};
-    for (const e of els) own[e.id] = fit(e, base * k);
-    // 역할 크기 = 구성원 맞춤 크기의 중앙값, 같은 섹션의 같은 역할은 가장 작은 크기로 통일
-    const sv = Object.values(own).sort((a, b) => a - b), size = sv[Math.floor((sv.length - 1) / 2)];
-    const grp: Record<string, number> = {};
-    for (const e of els) { const sid = e.closest("section")!.id; grp[sid] = Math.min(grp[sid] ?? 1e9, own[e.id]); }
-    for (const e of els) {
-      const sz = Math.min(size, grp[e.closest("section")!.id]);
-      e.style.fontSize = sz + "px";
-      e.style.lineHeight = (Number(e.dataset.lh || lh) * sz) + "px";
-    }
-  }
-}
+type JsonLdProduct = Record<string, unknown>;
 
 export interface GeoDetailProps {
   productId: string;
-  onJsonLd?: (product: Record<string, unknown>) => void;
+  onJsonLd?: (product: JsonLdProduct) => void;
   fallback: React.ReactNode;
 }
 
@@ -62,18 +53,15 @@ export function GeoDetail({ productId, onJsonLd, fallback }: GeoDetailProps) {
     if (!host) return;
     let cancelled = false;
     let fontStyle: HTMLStyleElement | null = null;
-    let observer: ResizeObserver | null = null;
 
     (async () => {
       try {
         const res = await fetch(`/geo/ja/${productId}.html`);
         if (!res.ok) throw new Error(String(res.status));
         const doc = new DOMParser().parseFromString(await res.text(), "text/html");
-        const srcMain = doc.querySelector("main");
-        const rolesMatch = doc.body.innerHTML.match(/const ROLES\s*=\s*(\{[\s\S]*?\});/);
-        if (!srcMain || !rolesMatch) throw new Error("bad geo html");
+        const src = doc.getElementById("bm-detail");
+        if (!src) throw new Error("bad geo html");
         if (cancelled) return;
-        const roles: Roles = JSON.parse(rolesMatch[1]);
 
         // 글꼴: 이 상품 전용 이름으로 바꿔 문서에 등록(Shadow DOM 안의 @font-face 는 적용 안 됨)
         let css = [...doc.querySelectorAll("style")].map(s => s.textContent || "").join("\n");
@@ -86,15 +74,13 @@ export function GeoDetail({ productId, onJsonLd, fallback }: GeoDetailProps) {
         document.head.appendChild(fontStyle);
 
         // 나머지 CSS + 본문은 Shadow DOM 에 넣어 사이트 스타일과 섞이지 않게
-        const shadowCss = css.replace(/@font-face\s*\{[^}]*\}/g, "")
-          .replace(/\bbody\s*\{/, ":host{display:block;")
-          .replace(/\bhtml\s*\{/, ":host{");
         const root = host.shadowRoot ?? host.attachShadow({ mode: "open" });
         root.innerHTML = "";
         const style = document.createElement("style");
-        style.textContent = shadowCss;
-        const main = document.importNode(srcMain, true) as HTMLElement;
-        root.append(style, main);
+        style.textContent = css.replace(/@font-face\s*\{[^}]*\}/g, "");
+        const detail = document.importNode(src, true) as HTMLElement;
+        detail.querySelectorAll("style").forEach(s => s.remove());
+        root.append(style, detail);
 
         const ld = doc.querySelector('script[type="application/ld+json"]')?.textContent;
         if (ld && onJsonLd) {
@@ -102,19 +88,6 @@ export function GeoDetail({ productId, onJsonLd, fallback }: GeoDetailProps) {
           const product = (parsed["@graph"] || [parsed]).find((n: { "@type"?: string }) => n["@type"] === "Product");
           if (product) onJsonLd(product);
         }
-
-        const faces = fontFaces.map(f => [f.match(/font-family:\s*'([^']+)'/)?.[1], f.match(/font-weight:\s*(\d+)/)?.[1] || "400"]);
-        await Promise.all(faces.map(([fam, w]) => fam ? document.fonts.load(`${w} 16px '${fam}'`, main.textContent || undefined).catch(() => []) : []));
-        await Promise.all([...main.querySelectorAll("img")].map(i => i.decode().catch(() => {})));
-        if (cancelled) return;
-        applySizes(main, roles);
-        let lastWidth = main.clientWidth;
-        observer = new ResizeObserver(() => {
-          if (main.clientWidth === lastWidth) return;
-          lastWidth = main.clientWidth;
-          applySizes(main, roles);
-        });
-        observer.observe(host);
       } catch (e) {
         console.error("[GeoDetail]", productId, e);
         if (!cancelled) setFailed(true);
@@ -123,7 +96,6 @@ export function GeoDetail({ productId, onJsonLd, fallback }: GeoDetailProps) {
 
     return () => {
       cancelled = true;
-      observer?.disconnect();
       fontStyle?.remove();
     };
   }, [productId, onJsonLd]);
