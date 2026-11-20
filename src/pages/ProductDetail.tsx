@@ -16,6 +16,7 @@ import { useCartStore } from "@/stores/cartStore";
 import { useWishlistStore } from "@/stores/wishlistStore";
 import { useDiscountStore } from "@/stores/discountStore";
 import { ReviewWidget } from "@/components/product/ReviewWidget";
+import { GeoDetail, GEO_DETAIL_IDS } from "@/components/product/GeoDetail";
 import { useAuthStore } from "@/stores/authStore";
 import { PartnerProductLink } from "@/components/product/PartnerProductLink";
 import { RestockNotifyButton } from "@/components/product/RestockNotifyButton";
@@ -58,6 +59,14 @@ function setJsonLd(id: string, data: object) {
     document.head.appendChild(el);
   }
   el.textContent = JSON.stringify(data);
+}
+
+// GEO 상세페이지 상품: 업체 원본의 상품 정보(설명·색상·소재·사이즈·스펙)를 Product JSON-LD에 덧붙인다. 이름·이미지·가격은 기존 값 유지
+function mergeGeoJsonLd(geo: Record<string, unknown>) {
+  const el = document.querySelector('script[data-ld="product"]');
+  if (!el?.textContent) return;
+  const { '@type': _t, '@context': _c, name: _n, brand: _b, image: _i, offers: _o, ...extra } = geo;
+  el.textContent = JSON.stringify({ ...JSON.parse(el.textContent), ...extra });
 }
 
 function removeJsonLd(id: string) {
@@ -991,7 +1000,12 @@ export default function ProductDetail() {
               )}
             </button>
           </div>
-          {activeTab === 'detail' && (product.descriptionHtml || product.description) && (
+          {activeTab === 'detail' && GEO_DETAIL_IDS.has(product.id.split('/').pop()!) ? (
+            <GeoDetail productId={product.id.split('/').pop()!} onJsonLd={mergeGeoJsonLd} fallback={product.descriptionHtml ? (
+              <div className="prose prose-sm max-w-none text-muted-foreground overflow-x-hidden [&_img]:max-w-full [&_img]:h-auto [&_img]:block"
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(product.descriptionHtml) }} />
+            ) : null} />
+          ) : activeTab === 'detail' && (product.descriptionHtml || product.description) && (
             <div>
               {product.descriptionHtml ? (
                 <div
