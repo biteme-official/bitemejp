@@ -384,6 +384,32 @@ export function supabase() {
  *    예외를 삼키되 반드시 로그를 남긴다 — 기록이 비면 그 사람은 오늘 안 받은 것으로
  *    취급돼 한도를 넘겨 또 받을 수 있다.
  */
+export type Db = NonNullable<ReturnType<typeof supabase>>;
+
+/**
+ * PostgREST 는 한 번에 1,000행까지만 준다 — 조용히 잘리지 않게 끝까지 읽는다.
+ * 정렬은 created_at 으로 고정한다(페이지 사이에 행이 밀리지 않도록).
+ *
+ * 🔴 2026-11-24: 성과 집계·빈도 제한이 이걸 안 써서 30일 기록 중 1,000행만 보고 있었다
+ *    (화면엔 최근 8일치만, 월 6통 상한은 덜 세어짐).
+ */
+export async function readAll<T>(db: Db, eventType: string, columns: string, since: string): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; from < 100_000; from += 1000) {
+    const { data, error } = await db
+      .from('events')
+      .select(columns)
+      .eq('event_type', eventType)
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .range(from, from + 999);
+    if (error) throw new Error(`${eventType} 조회 실패: ${error.message}`);
+    out.push(...((data ?? []) as T[]));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
 export async function recordSends(
   userIds: string[],
   meta: {
@@ -439,7 +465,7 @@ interface CapResult {
  * 최근 30일 마케팅 발송 기록을 읽어 한도를 넘는 사람을 걸러낸다.
  *
  * 대상 목록으로 `in` 필터를 걸지 않는다 — 수백 명이면 쿼리 문자열이 터진다.
- * 기간으로만 긁어서(월 1천 행 남짓) 메모리에서 센다.
+ * 기간으로만 긁어서(월 수천 행) 메모리에서 센다. 1,000행을 넘으므로 반드시 `readAll` 로.
  */
 export async function applyFrequencyCap(userIds: string[], now = Date.now()): Promise<CapResult> {
   const empty: CapResult = { allowed: userIds, capped: [], reasons: {} };
@@ -450,23 +476,14 @@ export async function applyFrequencyCap(userIds: string[], now = Date.now()): Pr
   }
 
   const monthAgo = new Date(now - 30 * 86_400_000).toISOString();
-  const { data, error } = await db
-    .from('events')
-    .select('session_id, created_at, properties')
-    .eq('event_type', SEND_EVENT)
-    .gte('created_at', monthAgo);
-
-  if (error) {
+  let rows: { session_id: string; created_at: string; properties: { kind?: string } | null }[];
+  try {
+    rows = await readAll(db, SEND_EVENT, 'session_id, created_at, properties', monthAgo);
+  } catch (err) {
     // 확인이 안 되는 것과 한도를 넘긴 것은 다르다. 여기서 전부 막으면 이력 장애가 발송을 멈춘다.
-    console.error('[LINE Send] 🔴 빈도 제한 조회 실패, 제한 없이 진행합니다:', error.message);
+    console.error('[LINE Send] 🔴 빈도 제한 조회 실패, 제한 없이 진행합니다:', err instanceof Error ? err.message : err);
     return empty;
   }
-
-  const rows = (data ?? []) as {
-    session_id: string;
-    created_at: string;
-    properties: { kind?: string } | null;
-  }[];
 
   const counts = new Map<string, { day: number; week: number; month: number }>();
   for (const row of rows) {
@@ -611,7 +628,23 @@ interface CampaignStat {
    * 매니저 브로드캐스트와 원문 기록 이전의 직접 발송은 null 이다.
    */
   copy?: CampaignCopy | null;
+  /**
+   * 이 캠페인이 만든 주문에 담긴 상품 (주문 수 많은 순, 최대 `PRODUCT_TOP`개).
+   * 저니 = 회수 주문(발송 후 72시간), 직접 발송·매니저 브로드캐스트 = UTM 주문.
+   * 금액은 그 상품 줄의 할인 뒤 금액이라 합이 주문 총액(배송비 포함)과 다르다.
+   */
+  products?: CampaignProduct[];
 }
+
+interface CampaignProduct {
+  title: string;
+  /** 이 상품이 담긴 주문 수 */
+  orders: number;
+  qty: number;
+  amount: number;
+}
+
+const PRODUCT_TOP = 15;
 
 interface CampaignCopy {
   source: 'template' | 'sent';
@@ -640,6 +673,7 @@ interface CampaignDay {
 const BROADCAST_UTM = /^\d{6}_line_/;
 
 interface OrderRow {
+  id: string;
   at: number;
   total: number;
   customerGid: string | null;
@@ -659,6 +693,7 @@ async function fetchOrders(sinceMs: number): Promise<OrderRow[]> {
           pageInfo: { hasNextPage: boolean; endCursor: string };
           edges: {
             node: {
+              id: string;
               createdAt: string;
               customer: { id: string } | null;
               currentTotalPriceSet: { shopMoney: { amount: string } } | null;
@@ -673,6 +708,7 @@ async function fetchOrders(sinceMs: number): Promise<OrderRow[]> {
         orders(first: 250, after: $cursor, query: $q, sortKey: CREATED_AT, reverse: true) {
           pageInfo { hasNextPage endCursor }
           edges { node {
+            id
             createdAt
             customer { id }
             currentTotalPriceSet { shopMoney { amount } }
@@ -687,6 +723,7 @@ async function fetchOrders(sinceMs: number): Promise<OrderRow[]> {
     for (const e of conn.edges) {
       const utm = (e.node.customAttributes ?? []).find((a) => a.key === 'utm_campaign')?.value ?? null;
       out.push({
+        id: e.node.id,
         at: new Date(e.node.createdAt).getTime(),
         total: Number(e.node.currentTotalPriceSet?.shopMoney?.amount ?? 0),
         customerGid: e.node.customer?.id ?? null,
@@ -700,18 +737,87 @@ async function fetchOrders(sinceMs: number): Promise<OrderRow[]> {
   return out;
 }
 
+/**
+ * 주문 id → 상품 줄. 성과에 잡힌 주문만 따로 읽는다 — 기간 전체 주문에 상품 줄까지 붙이면
+ * 쿼리 비용 한도(1,000)에 걸려 페이지를 잘게 쪼개야 하고 느려진다.
+ */
+async function fetchOrderItems(ids: string[]): Promise<Map<string, { title: string; qty: number; amount: number }[]>> {
+  const out = new Map<string, { title: string; qty: number; amount: number }[]>();
+  if (ids.length === 0) return out;
+  const token = await getAdminToken();
+  const CHUNK = 40;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const res = await adminGraphQL<{
+      data?: {
+        nodes: ({
+          id: string;
+          lineItems?: {
+            nodes: { title: string; quantity: number; discountedTotalSet: { shopMoney: { amount: string } } | null }[];
+          };
+        } | null)[];
+      };
+    }>(
+      token,
+      `query CampaignOrderItems($ids: [ID!]!) {
+        nodes(ids: $ids) { ... on Order {
+          id
+          lineItems(first: 20) { nodes { title quantity discountedTotalSet { shopMoney { amount } } } }
+        } }
+      }`,
+      { ids: ids.slice(i, i + CHUNK) },
+    );
+    for (const n of res?.data?.nodes ?? []) {
+      if (!n?.lineItems) continue;
+      out.set(
+        n.id,
+        n.lineItems.nodes.map((li) => ({
+          title: li.title,
+          qty: li.quantity,
+          amount: Number(li.discountedTotalSet?.shopMoney?.amount ?? 0),
+        })),
+      );
+    }
+  }
+  return out;
+}
+
+async function attachProducts(stats: CampaignStat[], orderIds: Map<string, Set<string>>): Promise<CampaignStat[]> {
+  const all = new Set<string>();
+  for (const set of orderIds.values()) for (const id of set) all.add(id);
+  const items = await fetchOrderItems([...all]);
+  return stats.map((c) => {
+    const ids = orderIds.get(c.key);
+    if (!ids || ids.size === 0) return { ...c, products: [] };
+    const byTitle = new Map<string, CampaignProduct>();
+    for (const id of ids) {
+      const seen = new Set<string>();
+      for (const li of items.get(id) ?? []) {
+        const p = byTitle.get(li.title) ?? { title: li.title, orders: 0, qty: 0, amount: 0 };
+        if (!seen.has(li.title)) p.orders++;
+        seen.add(li.title);
+        p.qty += li.qty;
+        p.amount += li.amount;
+        byTitle.set(li.title, p);
+      }
+    }
+    const products = [...byTitle.values()]
+      .sort((a, b) => b.orders - a.orders || b.amount - a.amount)
+      .slice(0, PRODUCT_TOP)
+      .map((p) => ({ ...p, amount: Math.round(p.amount) }));
+    return { ...c, products };
+  });
+}
+
 async function campaignStats(members: Member[], days = 30): Promise<CampaignStat[]> {
   const db = supabase();
   if (!db) return [];
 
   const since = Date.now() - days * 86_400_000;
-  const { data, error } = await db
-    .from('events')
-    .select('session_id, created_at, properties')
-    .eq('event_type', SEND_EVENT)
-    .gte('created_at', new Date(since).toISOString());
-  if (error) {
-    console.error('[LINE Campaign] 발송 성과 조회 실패:', error.message);
+  let data: { session_id: string; created_at: string; properties: unknown }[];
+  try {
+    data = await readAll(db, SEND_EVENT, 'session_id, created_at, properties', new Date(since).toISOString());
+  } catch (err) {
+    console.error('[LINE Campaign] 발송 성과 조회 실패:', err instanceof Error ? err.message : err);
     return [];
   }
 
@@ -726,7 +832,7 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     clickTracked?: boolean;
   }
 
-  const sends = ((data ?? []) as {
+  const sends = (data as {
     session_id: string;
     created_at: string;
     properties: SendRow | null;
@@ -758,12 +864,13 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
    */
   const clicksByRef = new Map<string, number[]>();
   {
-    const { data: clicks } = await db
-      .from('events')
-      .select('session_id, created_at, properties')
-      .eq('event_type', CLICK_EVENT)
-      .gte('created_at', new Date(since).toISOString());
-    for (const c of (clicks ?? []) as { session_id: string; created_at: string; properties: { bot?: boolean } | null }[]) {
+    const clicks = await readAll(db, CLICK_EVENT, 'session_id, created_at, properties', new Date(since).toISOString()).catch(
+      (err) => {
+        console.error('[LINE Campaign] 클릭 기록 조회 실패:', err instanceof Error ? err.message : err);
+        return [];
+      },
+    );
+    for (const c of clicks as { session_id: string; created_at: string; properties: { bot?: boolean } | null }[]) {
       if (c.properties?.bot) continue;
       const ref = c.session_id.startsWith('checkout:') ? c.session_id.slice('checkout:'.length) : c.session_id;
       const list = clicksByRef.get(ref) ?? [];
@@ -776,7 +883,7 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
 
   const orders = await fetchOrders(since);
   const ordersByCustomer = new Map<string, OrderRow[]>();
-  const ordersByUtm = new Map<string, { count: number; revenue: number }>();
+  const ordersByUtm = new Map<string, { count: number; revenue: number; ids: string[] }>();
   for (const o of orders) {
     if (o.customerGid) {
       const list = ordersByCustomer.get(o.customerGid) ?? [];
@@ -784,7 +891,8 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
       ordersByCustomer.set(o.customerGid, list);
     }
     if (o.utm) {
-      const agg = ordersByUtm.get(o.utm) ?? { count: 0, revenue: 0 };
+      const agg = ordersByUtm.get(o.utm) ?? { count: 0, revenue: 0, ids: [] };
+      agg.ids.push(o.id);
       agg.count++;
       agg.revenue += o.total;
       ordersByUtm.set(o.utm, agg);
@@ -808,6 +916,13 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     daily: Map<string, { sent: number; recovered: number; revenue: number; clicks: number; clickOrders: number; clickRevenue: number }>;
   }
   const byCampaign = new Map<string, Agg>();
+  /** 캠페인 → 그 캠페인이 만든 주문 id (상품 집계용) */
+  const orderIds = new Map<string, Set<string>>();
+  const addOrder = (key: string, id: string) => {
+    const set = orderIds.get(key) ?? new Set<string>();
+    set.add(id);
+    orderIds.set(key, set);
+  };
   const emptyDay = () => ({ sent: 0, recovered: 0, revenue: 0, clicks: 0, clickOrders: 0, clickRevenue: 0 });
 
   for (const s of sends) {
@@ -842,6 +957,7 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
         )
       : undefined;
     if (hit) {
+      addOrder(key, hit.id);
       agg.recovered++;
       agg.revenue += hit.total;
       d.recovered++;
@@ -880,6 +996,7 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
   const broadcasts: CampaignStat[] = [];
   for (const [utm, agg] of ordersByUtm) {
     if (ownUtms.has(utm) || !BROADCAST_UTM.test(utm)) continue;
+    for (const id of agg.ids) addOrder(utm, id);
     broadcasts.push({
       key: utm,
       kind: 'broadcast',
@@ -899,7 +1016,7 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     });
   }
 
-  return [...byCampaign.entries()]
+  const stats = [...byCampaign.entries()]
     .map(([key, v]): CampaignStat => {
       // 링크를 심지 않은 발송은 클릭 기여를 셀 방법이 없다. 0 이 아니라 null 이어야
       // 화면에서 "0건"과 "셀 수 없음"이 구분된다.
@@ -952,6 +1069,48 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
     })
     .concat(broadcasts)
     .sort((a, b) => b.firstSentAt.localeCompare(a.firstSentAt));
+
+  // 회수가 아니라 UTM 으로만 기여가 잡히는 발송(직접 발송 등)은 UTM 주문으로 상품을 본다
+  for (const [key, v] of byCampaign) {
+    if (orderIds.has(key)) continue;
+    for (const u of v.utms) for (const id of ordersByUtm.get(u)?.ids ?? []) addOrder(key, id);
+  }
+  // 상품은 덤이다 — 못 붙여도 성과 표는 그대로 나가야 한다
+  return attachProducts(stats, orderIds).catch((err) => {
+    console.error('[LINE Campaign] 상품 집계 실패:', err);
+    return stats;
+  });
+}
+
+/**
+ * 이번 달 발송 한도를 누가 썼나.
+ *
+ * LINE 한도는 달력 달(JST) 단위로 push·multicast·narrowcast·broadcast 를 모두 센다.
+ * 우리가 보낸 것(저니·알림·직접 발송)은 수신자 기록으로 셀 수 있고, 나머지(공식계정 매니저
+ * 발송·주문/배송 알림·연결 유도 narrowcast 등)는 「LINE 이 센 사용량 − 우리 기록」으로만 안다.
+ * 친구가 아니어서 안 닿은 발송(`delivery: 'not-friend'`)은 한도를 쓰지 않으니 뺀다.
+ */
+async function quotaUsage(used: number | null, limit: number | null) {
+  const db = supabase();
+  if (!db) return null;
+  const month = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 7);
+  const since = new Date(`${month}-01T00:00:00+09:00`).toISOString();
+  const rows = await readAll<{
+    properties: { journey?: string; kind?: string; campaignId?: string; delivery?: string } | null;
+  }>(db, SEND_EVENT, 'properties', since);
+  const counts = new Map<string, { key: string; kind: 'journey' | 'transactional' | 'manual'; count: number }>();
+  for (const r of rows) {
+    const p = r.properties;
+    if (!p || p.delivery === 'not-friend' || p.campaignId?.endsWith('_test')) continue;
+    const key = p.journey ?? 'manual';
+    const kind = p.journey ? (p.kind === 'transactional' ? 'transactional' : 'journey') : 'manual';
+    const c = counts.get(key) ?? { key, kind, count: 0 };
+    c.count++;
+    counts.set(key, c);
+  }
+  const items = [...counts.values()].sort((a, b) => b.count - a.count);
+  const ours = items.reduce((n, i) => n + i.count, 0);
+  return { month, limit, used, ours, other: used === null ? null : Math.max(0, used - ours), items };
 }
 
 /**
@@ -976,13 +1135,13 @@ async function attachCopy(campaigns: CampaignStat[]): Promise<CampaignStat[]> {
   const sentByUtm = new Map<string, string>();
   const db = supabase();
   if (db) {
-    const { data, error } = await db
-      .from('events')
-      .select('properties')
-      .eq('event_type', CAMPAIGN_EVENT)
-      .gte('created_at', new Date(Date.now() - 60 * 86_400_000).toISOString());
-    if (error) console.error('[LINE Campaign] 문구 이력 조회 실패:', error.message);
-    for (const row of (data ?? []) as { properties: { campaignId?: string; campaign?: string; text?: string } | null }[]) {
+    const data = await readAll(db, CAMPAIGN_EVENT, 'properties', new Date(Date.now() - 60 * 86_400_000).toISOString()).catch(
+      (err) => {
+        console.error('[LINE Campaign] 문구 이력 조회 실패:', err instanceof Error ? err.message : err);
+        return [];
+      },
+    );
+    for (const row of data as { properties: { campaignId?: string; campaign?: string; text?: string } | null }[]) {
       const p = row.properties;
       if (!p?.text) continue;
       if (p.campaignId) sentById.set(p.campaignId, p.text);
@@ -1068,7 +1227,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         recentCampaigns(),
       ]);
       const audience = await fetchAudience();
-      const stats = await campaignStats(audience).catch((err) => {
+      // 기간: 기본 30일, 대시보드 월별 보기용으로 최대 120일
+      const rawDays = Number(Array.isArray(req.query.days) ? req.query.days[0] : req.query.days);
+      const days = Number.isFinite(rawDays) && rawDays >= 1 ? Math.min(120, Math.floor(rawDays)) : 30;
+      const stats = await campaignStats(audience, days).catch((err) => {
         console.error('[LINE Campaign] 발송 성과 계산 실패:', err);
         return [];
       });
@@ -1093,6 +1255,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         audience: summarize(audience),
         campaigns,
         attributionHours: ATTRIBUTION_HOURS,
+        days,
+        quotaUsage: await quotaUsage(quota.used, quota.limit).catch((err) => {
+          console.error('[LINE Campaign] 한도 사용 내역 실패:', err);
+          return null;
+        }),
         journeyEnabled: !!process.env.LINE_JOURNEY_ENABLED,
         history,
       });
