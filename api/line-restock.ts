@@ -32,8 +32,10 @@ import {
   getAdminToken,
   inQuietHours,
   lineToken,
+  readAll,
   recordSends,
   supabase,
+  type Db,
 } from './line-campaign.js';
 
 export const RESTOCK_SUB_EVENT = 'line_restock_sub';
@@ -226,28 +228,10 @@ function subRef(variantId: string, createdAt: string): string {
   return `${variantId.split('/').pop()}@${createdAt}`;
 }
 
-export type Db = NonNullable<ReturnType<typeof supabase>>;
-
-/**
- * PostgREST 는 한 번에 1,000행까지만 준다 — 조용히 잘리지 않게 끝까지 읽는다.
- * 정렬은 created_at 으로 고정한다(페이지 사이에 행이 밀리지 않도록).
- */
-export async function readAll<T>(db: Db, eventType: string, columns: string, since: string): Promise<T[]> {
-  const out: T[] = [];
-  for (let from = 0; from < 100_000; from += 1000) {
-    const { data, error } = await db
-      .from('events')
-      .select(columns)
-      .eq('event_type', eventType)
-      .gte('created_at', since)
-      .order('created_at', { ascending: true })
-      .range(from, from + 999);
-    if (error) throw new Error(`${eventType} 조회 실패: ${error.message}`);
-    out.push(...((data ?? []) as T[]));
-    if (!data || data.length < 1000) break;
-  }
-  return out;
-}
+// readAll·Db 는 line-campaign.ts 로 옮겼다(그쪽 성과·빈도 제한 조회도 같은 함수를 쓴다).
+// line-launch 등 기존 import 경로를 깨지 않으려고 여기서 다시 내보낸다.
+export { readAll };
+export type { Db };
 
 /** 아직 알림이 나가지 않은 신청 */
 async function pendingSubscriptions(db: Db, now: number): Promise<Subscription[]> {
