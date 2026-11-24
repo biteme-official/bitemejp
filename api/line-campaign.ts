@@ -1090,7 +1090,7 @@ async function campaignStats(members: Member[], days = 30): Promise<CampaignStat
  * 발송·주문/배송 알림·연결 유도 narrowcast 등)는 「LINE 이 센 사용량 − 우리 기록」으로만 안다.
  * 친구가 아니어서 안 닿은 발송(`delivery: 'not-friend'`)은 한도를 쓰지 않으니 뺀다.
  */
-async function quotaUsage(used: number | null) {
+async function quotaUsage(used: number | null, limit: number | null) {
   const db = supabase();
   if (!db) return null;
   const month = new Date(Date.now() + 9 * 3600_000).toISOString().slice(0, 7);
@@ -1110,7 +1110,7 @@ async function quotaUsage(used: number | null) {
   }
   const items = [...counts.values()].sort((a, b) => b.count - a.count);
   const ours = items.reduce((n, i) => n + i.count, 0);
-  return { month, used, ours, other: used === null ? null : Math.max(0, used - ours), items };
+  return { month, limit, used, ours, other: used === null ? null : Math.max(0, used - ours), items };
 }
 
 /**
@@ -1256,7 +1256,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         campaigns,
         attributionHours: ATTRIBUTION_HOURS,
         days,
-        quotaUsage: await quotaUsage(quota.used).catch((err) => {
+        quotaUsage: await quotaUsage(quota.used, quota.limit).catch((err) => {
           console.error('[LINE Campaign] 한도 사용 내역 실패:', err);
           return null;
         }),
