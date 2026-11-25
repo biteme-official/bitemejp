@@ -14,8 +14,8 @@
  *  - 그 고객만 쓸 수 있다(context.customers) + 1회(usageLimit 1). 코드가 밖으로 새도 다른 사람은 못 쓴다.
  *  - 상품 할인(자동 할인)·배송 할인과는 합산, 다른 주문 할인(WELCOME10 등)과는 합산하지 않는다.
  *
- * 기간을 바꾸면 여기 두 줄과 src/lib/thanksCoupon.ts 의 같은 값을 같이 바꾼다. 이미 만든 코드는 스크립트를 다시 돌려도
- * 바뀌지 않는다(있으면 건너뜀) — 기간 변경은 Shopify 할인 화면에서 하거나 스크립트에 수정 경로를 추가할 것.
+ * 기간을 바꾸면 여기 두 줄과 src/lib/thanksCoupon.ts 의 같은 값을 같이 바꾸고, 이미 만든 코드는
+ * `npx tsx scripts/issue-thanks-coupon.ts --update-dates` 로 맞춘다(발급만 다시 돌리면 있는 코드는 건너뛴다).
  */
 import { createHmac } from 'crypto';
 import { adminGraphQL } from './line-campaign.js';
@@ -24,8 +24,8 @@ export const THANKS_TITLE_PREFIX = '[THANKS2026]';
 export const THANKS_TAG = 'thanks500';
 export const THANKS_AMOUNT = 500;
 export const THANKS_MIN_SUBTOTAL = 3000;
-/** 쓰이기 시작하는 때 — 발송 주(12월 첫째 주) 시작 */
-export const THANKS_STARTS_AT = '2026-12-01T00:00:00+09:00';
+/** 쓰이기 시작하는 때 = 발송일. 11/25 결정으로 12/1 → 11/29(일) 로 당김 */
+export const THANKS_STARTS_AT = '2026-11-29T00:00:00+09:00';
 export const THANKS_ENDS_AT = '2026-12-21T23:59:59+09:00';
 
 /** 대상: 블프 기간 안에 첫 주문을 한 고객 (japan-mall-retro 블프 회고 「첫 구매자」 와 같은 정의) */
