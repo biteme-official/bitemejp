@@ -34,6 +34,36 @@ export const GEO_DETAIL_IDS = new Set([
   "10150723551545", // ゾウのくつ下おもちゃ
   "10150721880377", // 野菜畑ボールおもちゃ(2個セット)
   "10319794503993", // 靴下 おもちゃセット(3枚セット)
+  "10257263067449", // オールデイ クーリングマット（3サイズ）
+  "10257261134137", // オールデイ クーリングピロー
+  "10150720733497", // アクアベアライフベスト
+  "10319683486009", // バナナ ノーズワークおもちゃ
+  "10239663112505", // くまキャンディーボールおもちゃ (3個セット)
+  "10294531686713", // ビションプーバックポーチ
+  "10215547666745", // ぶんぶんリス浮き輪
+  "10150722404665", // バディフォーク
+  "10150724075833", // ブリトーノーズワークおもちゃ
+  "10278691176761", // キャベツくんくんボールおもちゃ
+  "10150719521081", // キャッチミー タグ 釣り竿おもちゃ（かわいい鳥のお友だち）
+  "10150720667961", // キャッチミー タグ 釣り竿おもちゃ
+  "10150722699577", // カラーポッププーバック　マナー袋120枚（15枚×8ロール）
+  "15409709351225", // ダブルヒートダウン v4
+  "10278489162041", // ジェリーベアウープスクリップ
+  "10150719127865", // ぴょんぴょんボールおもちゃ
+  "10239670583609", // ミニスポーツボールおもちゃセット（３個入り）
+  "10213360501049", // フレッシュ ベビーキャベツ ノーズワークトイ
+  "10150723715385", // ミニテニスボールおもちゃ（3個入り）
+  "15384010424633", // ノンスリップ排便マット グレー大型
+  "15384010228025", // ノンスリップ排便マット グレー標準型
+  "10319749513529", // オーマイプー マナー袋 120枚入
+  "10318369456441", // ポケットポップフォルダブルメッシュバッグ（Mサイズ）
+  "10270117986617", // ロールアップノーズワークトイ
+  "10150722502969", // ランラン ラトルトイ
+  "10150722470201", // 海のお友だちおもちゃ
+  "10319683354937", // スリッパロープおもちゃ
+  "10150723387705", // 小さなお友だち おもちゃ
+  "10288985178425", // ヨーグルトトリオラテックスおもちゃ
+  "10318369653049", // ポケットポップフォルダブルメッシュバッグ（Lサイズ）
 ]);
 
 type JsonLdProduct = Record<string, unknown>;
@@ -59,12 +89,20 @@ export function GeoDetail({ productId, onJsonLd, fallback }: GeoDetailProps) {
         const res = await fetch(`/geo/ja/${productId}.html`);
         if (!res.ok) throw new Error(String(res.status));
         const doc = new DOMParser().parseFromString(await res.text(), "text/html");
-        const src = doc.getElementById("bm-detail");
-        if (!src) throw new Error("bad geo html");
+        // 업체 형식 3가지: #bm-detail / .xdetail 로 감싼 본문 / body 바로 아래 본문(스타일이 body·html 기준)
+        let src = doc.getElementById("bm-detail") ?? doc.querySelector<HTMLElement>(".xdetail");
+        const bodyOnly = !src;
+        if (bodyOnly) {
+          if (!doc.body.querySelector("main")) throw new Error("bad geo html");
+          src = doc.createElement("div");
+          src.className = "geo-body";
+          src.append(...doc.body.childNodes);
+        }
         if (cancelled) return;
 
         // 글꼴: 이 상품 전용 이름으로 바꿔 문서에 등록(Shadow DOM 안의 @font-face 는 적용 안 됨)
         let css = [...doc.querySelectorAll("style")].map(s => s.textContent || "").join("\n");
+        if (bodyOnly) css = css.replace(/(^|[}\s])(html|body)\s*\{/g, "$1.geo-body{");
         const families = [...new Set([...css.matchAll(/@font-face\s*\{[^}]*font-family:\s*'([^']+)'/g)].map(m => m[1]))];
         for (const f of families) css = css.split(`'${f}'`).join(`'${f}-${productId}'`);
         const fontFaces = css.match(/@font-face\s*\{[^}]*\}/g) || [];
