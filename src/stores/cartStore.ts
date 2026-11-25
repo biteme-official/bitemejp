@@ -8,6 +8,7 @@ import {
 import { LINE_WELCOME_DISCOUNT_KEY, LINE_WELCOME_DISCOUNT_PERCENT } from '@/lib/lineWelcomeDiscount';
 import { getAffiliateOffer, orderOfferAndWelcome } from '@/lib/affiliate-offer';
 import { resolveBfCode, BF_PERCENT } from '@/lib/bfCoupon';
+import { resolveThanksCode, THANKS_AMOUNT, THANKS_MIN_SUBTOTAL } from '@/lib/thanksCoupon';
 import { getWelcomeCouponUsage } from '@/lib/welcomeCouponStatus';
 import { useAuthStore } from '@/stores/authStore';
 import { syncCartSnapshot } from '@/lib/cartSync';
@@ -247,6 +248,8 @@ export const useCartStore = create<CartStore>()(
           // 하나만 적용해 파트너 성과가 유실될 수 있다.
           let welcomeCode = affiliateCode ? null : localStorage.getItem(LINE_WELCOME_DISCOUNT_KEY);
           let welcomePercent = LINE_WELCOME_DISCOUNT_PERCENT;
+          /** 정액 쿠폰일 때의 할인액. 없으면 welcomePercent 로 계산한다 */
+          let welcomeAmount: number | undefined;
           // 블프 LINE 친구 5% (#274) — 웰컴과는 둘 중 큰 쪽 하나. 웰컴을 아직 안 썼을 때만 웰컴(10%),
           // 썼거나 확인이 안 되면 블프 5%. 주문 할인끼리는 합산되지 않으니 하나만 넣는다.
           const token = useAuthStore.getState().user?.lineSessionToken;
@@ -258,11 +261,25 @@ export const useCartStore = create<CartStore>()(
               welcomePercent = BF_PERCENT;
             }
           }
+          // 블프 첫 구매자 두 번째 구매 ¥500 (#320) — ¥3,000 이상일 때만. 웰컴이 아직 남아 있으면 할인액 큰 쪽 하나.
+          // 조건 미달 코드를 넣으면 Shopify 가 그 코드만 못 쓰는 게 아니라 다른 주문 할인 자리까지 차지한다.
+          const subtotal = items.filter(i => !i.isGift).reduce((s, i) => s + parseFloat(i.price.amount) * i.quantity, 0);
+          const thanksCode = affiliateCode || subtotal < THANKS_MIN_SUBTOTAL ? null : await resolveThanksCode(token);
+          if (thanksCode) {
+            const currentAmt = Math.floor((subtotal * welcomePercent) / 100);
+            const keepCurrent = welcomeCode && token && currentAmt > THANKS_AMOUNT
+              ? (await getWelcomeCouponUsage(welcomeCode, token)) === 'unused'
+              : false;
+            if (!keepCurrent) {
+              welcomeCode = thanksCode;
+              welcomeAmount = THANKS_AMOUNT;
+            }
+          }
           // 파트너 링크 자동 할인 (LINE 회원만) — 웰컴과 할인액 큰 쪽을 앞에 둔다. /discount/ 특별 코드가 있으면 그쪽이 우선
           const linkOffer = affiliateCode ? null : orderOfferAndWelcome(
             getAffiliateOffer(),
             useAuthStore.getState().isLoggedIn,
-            welcomeCode ? { code: welcomeCode, percent: welcomePercent } : null,
+            welcomeCode ? { code: welcomeCode, percent: welcomePercent, amount: welcomeAmount } : null,
             items.filter(i => !i.isGift).map(i => ({ productId: i.product.node.id, unitPrice: parseFloat(i.price.amount), quantity: i.quantity })),
           );
           // ⚠️ isGift 플래그만 보고 판단하면 안 된다 — 플래그가 유실된 카트에서

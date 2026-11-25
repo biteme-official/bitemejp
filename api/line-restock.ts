@@ -32,11 +32,22 @@ import {
   getAdminToken,
   inQuietHours,
   lineToken,
+  readAll,
   recordSends,
   supabase,
+  type Db,
 } from './line-campaign.js';
 
 export const RESTOCK_SUB_EVENT = 'line_restock_sub';
+/**
+ * 발송 이력 (#322) — 「보내기」를 한 번 누를 때마다 시작·끝 두 행. 사람별 기록(`line_send`)과 따로 둔다.
+ *   phase=start  누른 순간 · 몇 명에게 무엇을
+ *   phase=done   끝난 뒤 · 보냄/친구 아님/실패
+ * start 만 있고 done 이 없으면 함수가 도중에 끊긴 것 — 화면에 「중단됨」으로 보이고, 실제 나간 건 사람별 기록이 맞다.
+ */
+const BATCH_EVENT = 'line_restock_batch';
+/** start 뒤 이 시간 안에 done 이 없으면 아직 보내는 중으로 보고 새 발송을 막는다(두 번 눌림·두 창) */
+const BATCH_LOCK_MS = 3 * 60_000;
 const JOURNEY = 'restock';
 const UTM = 'line_restock';
 
@@ -199,16 +210,48 @@ export async function isFriend(userId: string): Promise<boolean | null> {
 }
 
 export async function pushLine(userId: string, text: string): Promise<'sent' | 'not-friend' | 'failed'> {
-  const res = await fetch('https://api.line.me/v2/bot/message/push', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${lineToken()}` },
-    body: JSON.stringify({ to: userId, messages: [{ type: 'text', text }] }),
-  });
-  if (res.ok) return 'sent';
+  return (await pushLineDetailed(userId, text)).result;
+}
+
+/** LINE 오류를 운영자가 읽을 수 있는 말로 (#324) */
+function lineFailReason(status: number, body: string): string {
+  let msg = '';
+  try {
+    msg = String((JSON.parse(body) as { message?: string }).message ?? '');
+  } catch {
+    msg = body.slice(0, 120);
+  }
+  if (status === 429 && /monthly limit/i.test(msg)) return 'LINE 월 발송 한도 초과';
+  if (status === 429) return 'LINE 요청이 너무 많음(잠시 뒤 다시)';
+  if (status === 401) return 'LINE 토큰 오류(채널 토큰 만료·잘못됨)';
+  if (status === 400) return `LINE 이 메시지를 거부함${msg ? ` — ${msg}` : ''}`;
+  if (status >= 500) return `LINE 서버 오류 ${status}`;
+  return `LINE 오류 ${status}${msg ? ` — ${msg}` : ''}`;
+}
+
+/** push 한 통 + 실패면 이유. 네트워크 오류도 실패로 돌려준다(던지면 그 뒤 사람들이 통째로 안 나간다) */
+export async function pushLineDetailed(
+  userId: string,
+  text: string,
+): Promise<{ result: 'sent' | 'not-friend' | 'failed'; reason?: string }> {
+  let res: Response;
+  try {
+    res = await fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${lineToken()}` },
+      body: JSON.stringify({ to: userId, messages: [{ type: 'text', text }] }),
+    });
+  } catch (e) {
+    const reason = `LINE 연결 실패 — ${e instanceof Error ? e.message : '네트워크 오류'}`;
+    console.error(`[LINE Restock] 🔴 push 실패: ${reason}`);
+    return { result: 'failed', reason };
+  }
+  if (res.ok) return { result: 'sent' };
   // 403 = 친구가 아니거나 차단. 우리가 고칠 수 있는 게 아니다.
-  if (res.status === 403) return 'not-friend';
-  console.error(`[LINE Restock] 🔴 push 실패 ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  return 'failed';
+  if (res.status === 403) return { result: 'not-friend' };
+  const body = await res.text();
+  console.error(`[LINE Restock] 🔴 push 실패 ${res.status}: ${body.slice(0, 200)}`);
+  return { result: 'failed', reason: lineFailReason(res.status, body) };
 }
 
 // ─── 신청 기록 ────────────────────────────────────────────────────────────────
@@ -226,24 +269,39 @@ function subRef(variantId: string, createdAt: string): string {
   return `${variantId.split('/').pop()}@${createdAt}`;
 }
 
-export type Db = NonNullable<ReturnType<typeof supabase>>;
+// readAll·Db 는 line-campaign.ts 로 옮겼다(그쪽 성과·빈도 제한 조회도 같은 함수를 쓴다).
+// line-launch 등 기존 import 경로를 깨지 않으려고 여기서 다시 내보낸다.
+export { readAll };
+export type { Db };
+
+interface RestockSendRow {
+  session_id: string;
+  created_at: string;
+  properties: { journey?: string; ref?: string; delivery?: string } | null;
+}
 
 /**
- * PostgREST 는 한 번에 1,000행까지만 준다 — 조용히 잘리지 않게 끝까지 읽는다.
- * 정렬은 created_at 으로 고정한다(페이지 사이에 행이 밀리지 않도록).
+ * 재입고 알림 발송 기록만 읽는다 (#322).
+ *
+ * 🔴 예전엔 `line_send` 전체(캠페인·저니 전부, 180일)를 다 읽고 여기서 journey 로 걸렀다.
+ *    캠페인 한 번에 수천 행이라 수십 번 나눠 읽느라 발송·목록 요청이 느려지고, readAll 상한(10만 행)을
+ *    넘으면 오래된 것부터 읽으니 **최근 재입고 발송 기록이 잘려 「안 보냄」으로 보였다** — 다시 보낼 수 있게 됐다.
+ *    DB 에서 journey 로 거르면 재입고 몇 건만 온다.
  */
-export async function readAll<T>(db: Db, eventType: string, columns: string, since: string): Promise<T[]> {
-  const out: T[] = [];
+async function readRestockSends(db: Db, since: string): Promise<RestockSendRow[]> {
+  const out: RestockSendRow[] = [];
   for (let from = 0; from < 100_000; from += 1000) {
     const { data, error } = await db
       .from('events')
-      .select(columns)
-      .eq('event_type', eventType)
+      .select('session_id, created_at, properties')
+      .eq('event_type', SEND_EVENT)
+      .eq('properties->>journey', JOURNEY)
       .gte('created_at', since)
       .order('created_at', { ascending: true })
       .range(from, from + 999);
-    if (error) throw new Error(`${eventType} 조회 실패: ${error.message}`);
-    out.push(...((data ?? []) as T[]));
+    // 🔴 발송 기록을 못 읽었는데 빈 목록으로 넘기면 전부 「안 보냄」이 돼 다시 나간다. 실패는 실패로 던진다.
+    if (error) throw new Error(`재입고 발송 기록 조회 실패: ${error.message}`);
+    out.push(...((data ?? []) as RestockSendRow[]));
     if (!data || data.length < 1000) break;
   }
   return out;
@@ -256,12 +314,13 @@ async function pendingSubscriptions(db: Db, now: number): Promise<Subscription[]
     readAll<{ session_id: string; created_at: string; properties: { productId?: string; variantId?: string } | null }>(
       db, RESTOCK_SUB_EVENT, 'session_id, created_at, properties', since,
     ),
-    readAll<{ properties: { journey?: string; ref?: string } | null }>(db, SEND_EVENT, 'properties', since),
+    readRestockSends(db, since),
   ]);
 
+  // 같은 신청(ref)이라도 사람이 다르면 다른 신청이다 — 키에 사람을 넣는다
   const done = new Set<string>();
   for (const s of sends) {
-    if (s.properties?.journey === JOURNEY && s.properties.ref) done.add(s.properties.ref);
+    if (s.properties?.ref) done.add(`${s.session_id}|${s.properties.ref}`);
   }
 
   // 같은 사람이 같은 옵션을 여러 번 눌렀으면 한 건으로 친다 — 가장 최근 신청만 남긴다
@@ -278,7 +337,7 @@ async function pendingSubscriptions(db: Db, now: number): Promise<Subscription[]
       ref: subRef(variantId, row.created_at),
     });
   }
-  return [...latest.values()].filter((s) => !done.has(s.ref));
+  return [...latest.values()].filter((s) => !done.has(`line:${s.lineUserId}|${s.ref}`));
 }
 
 // ─── 지금 품절 목록 (#225) ─────────────────────────────────────────────────────
@@ -531,6 +590,64 @@ export async function lineDisplayName(userId: string): Promise<string | null> {
   }
 }
 
+// ─── 속도 (#328) ──────────────────────────────────────────────────────────────
+// 함수가 따뜻한 동안(같은 인스턴스가 다음 요청을 받는 동안)만 쓰는 기억. 식으면 다시 받는다.
+
+/** Shopify Admin 토큰 — 매번 새로 받으면 요청마다 OAuth 왕복이 붙는다. client_credentials 토큰은 하루 가므로 30분만 쓴다 */
+let tokenMemo: { token: string; at: number } | null = null;
+const TOKEN_TTL_MS = 30 * 60_000;
+
+async function cachedAdminToken(): Promise<string> {
+  if (tokenMemo && Date.now() - tokenMemo.at < TOKEN_TTL_MS) return tokenMemo.token;
+  const token = await getAdminToken();
+  tokenMemo = { token, at: Date.now() };
+  return token;
+}
+
+/** LINE 표시 이름 — 사람마다 LINE 에 한 번씩 물어야 해서 신청이 많으면 오래 걸린다. 6시간 기억 */
+const nameMemo = new Map<string, { name: string | null; at: number }>();
+const NAME_TTL_MS = 6 * 3600_000;
+const NAME_CONCURRENCY = 25;
+
+async function displayNames(userIds: string[]): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  const now = Date.now();
+  const todo: string[] = [];
+  for (const u of userIds) {
+    const m = nameMemo.get(u);
+    if (m && now - m.at < NAME_TTL_MS) out.set(u, m.name);
+    else todo.push(u);
+  }
+  // 한 줄로 세워 NAME_CONCURRENCY 개씩 동시에 — 묶음 단위로 기다리지 않고 하나 끝나면 다음
+  let next = 0;
+  const worker = async () => {
+    while (next < todo.length) {
+      const u = todo[next++];
+      const name = await lineDisplayName(u);
+      out.set(u, name);
+      nameMemo.set(u, { name, at: Date.now() });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(NAME_CONCURRENCY, todo.length) }, worker));
+  return out;
+}
+
+/** GET ?view=soldout — 「지금 품절 목록」. 쇼핑몰 옵션 전부를 훑어서 오래 걸리므로 탭 목록과 따로 받는다 (#328) */
+async function soldOutList(req: VercelRequest, res: VercelResponse) {
+  if (!adminOnly(req)) return res.status(401).json({ error: 'Unauthorized' });
+  const db = supabase();
+  if (!db) return res.status(500).json({ error: 'SUPABASE 미설정' });
+  const t = Date.now();
+  try {
+    const soldOut = await fetchSoldOutProducts(await cachedAdminToken());
+    await attachKoreanTitles(db, soldOut);
+    console.log(`[LINE Restock] 품절 목록 ${Date.now() - t}ms · 상품 ${soldOut.length}`);
+    return res.status(200).json({ soldOut, soldOutError: null });
+  } catch (e) {
+    return res.status(200).json({ soldOut: [], soldOutError: e instanceof Error ? e.message : '품절 목록 조회 실패' });
+  }
+}
+
 async function adminList(req: VercelRequest, res: VercelResponse) {
   if (!adminOnly(req)) return res.status(401).json({ error: 'Unauthorized' });
   const db = supabase();
@@ -544,17 +661,18 @@ async function adminList(req: VercelRequest, res: VercelResponse) {
       created_at: string;
       properties: { productId?: string; variantId?: string; productTitle?: string; variantTitle?: string } | null;
     }>(db, RESTOCK_SUB_EVENT, 'session_id, created_at, properties', since),
-    readAll<{ created_at: string; properties: { journey?: string; ref?: string; delivery?: string } | null }>(
-      db, SEND_EVENT, 'created_at, properties', since,
-    ),
+    readRestockSends(db, since),
   ]);
 
+  // 키 = 사람|신청 — pendingSubscriptions 와 같은 규칙
   const sentByRef = new Map<string, { at: string; delivery: string }>();
   for (const s of sends) {
-    if (s.properties?.journey === JOURNEY && s.properties.ref) {
-      sentByRef.set(s.properties.ref, { at: s.created_at, delivery: s.properties.delivery ?? 'sent' });
+    if (s.properties?.ref) {
+      sentByRef.set(`${s.session_id}|${s.properties.ref}`, { at: s.created_at, delivery: s.properties.delivery ?? 'sent' });
     }
   }
+  const sentOf = (r: { session_id: string; created_at: string; properties: { variantId?: string } | null }) =>
+    sentByRef.get(`${r.session_id}|${subRef(r.properties!.variantId!, r.created_at)}`);
 
   // 같은 사람·옵션을 여러 번 누른 건 한 줄 — 발송 쪽과 같은 규칙(가장 최근 신청)
   const latest = new Map<string, (typeof subs)[number]>();
@@ -565,26 +683,65 @@ async function adminList(req: VercelRequest, res: VercelResponse) {
   }
   const rows = [...latest.values()];
 
-  // 아직 안 보낸 신청만 지금 재고를 본다
-  const unsent = rows.filter((r) => !sentByRef.has(subRef(r.properties!.variantId!, r.created_at)));
-  const states = unsent.length
-    ? await fetchVariantStates(await getAdminToken(), [...new Set(unsent.map((r) => r.properties!.variantId!))])
-    : new Map<string, VariantState>();
+  const tRead = Date.now() - now;
 
-  // 이름은 사람마다 한 번만 묻는다(친구가 아니면 null)
+  // 🔴 속도 (#328): 아래 셋은 서로를 기다릴 필요가 없다 — 예전엔 재고 → 고객 이름 → 품절 목록 → 상품명을
+  //    차례로 하느라 탭이 뜨는 데 오래 걸렸다. 동시에 돌리고, 「지금 품절 목록」은 ?view=soldout 으로 따로 받는다.
+  const unsent = rows.filter((r) => !sentOf(r));
+  const productIds = [...new Set(rows.map((r) => r.properties!.productId!))].slice(0, 250);
   const userIds = [...new Set(rows.map((r) => r.session_id.slice(5)))].slice(0, 300);
-  const names = new Map<string, string | null>();
-  for (let i = 0; i < userIds.length; i += 10) {
-    const chunk = userIds.slice(i, i + 10);
-    const got = await Promise.all(chunk.map(lineDisplayName));
-    chunk.forEach((u, k) => names.set(u, got[k]));
-  }
+  const timing: Record<string, number> = {};
+  const timed = async <T,>(label: string, p: Promise<T>): Promise<T> => {
+    const t = Date.now();
+    try {
+      return await p;
+    } finally {
+      timing[label] = Date.now() - t;
+    }
+  };
+
+  const [states, names, namesKo, batches] = await Promise.all([
+    // 아직 안 보낸 신청만 지금 재고를 본다
+    timed(
+      'stock',
+      unsent.length
+        ? cachedAdminToken().then((t) => fetchVariantStates(t, [...new Set(unsent.map((r) => r.properties!.variantId!))]))
+        : Promise.resolve(new Map<string, VariantState>()),
+    ),
+    // 이름은 사람마다 한 번만 묻는다(친구가 아니면 null) — 한동안 기억해 둔다
+    timed('names', displayNames(userIds)),
+    // 신청 상품의 한글명 (#258). 실패해도 목록은 일본어만으로 보여 준다
+    timed(
+      'namesKo',
+      (async () => {
+        const out: Record<string, { ko: string; source: 'shopify' | 'ai' }> = {};
+        try {
+          if (productIds.length) {
+            const named = await fetchProductNames(await cachedAdminToken(), productIds);
+            await attachKoreanTitles(db, named);
+            for (const p of named) if (p.titleKo && p.titleKoSource) out[p.productId] = { ko: p.titleKo, source: p.titleKoSource };
+          }
+        } catch (e) {
+          console.error('[LINE Restock] 신청 상품 한글명 실패:', e instanceof Error ? e.message : e);
+        }
+        return out;
+      })(),
+    ),
+    // 발송 이력 — 실패해도 나머지 목록은 보여 준다
+    timed(
+      'batches',
+      readBatches(db, since, now).catch((e) => {
+        console.error('[LINE Restock] 발송 이력 조회 실패:', e instanceof Error ? e.message : e);
+        return [] as RestockBatch[];
+      }),
+    ),
+  ]);
 
   const out: RestockAdminRow[] = rows
     .map((r) => {
       const p = r.properties!;
       const userId = r.session_id.slice(5);
-      const sent = sentByRef.get(subRef(p.variantId!, r.created_at));
+      const sent = sentOf(r);
       const state = states.get(p.variantId!);
       const status: RestockStatus = sent
         ? sent.delivery === 'not-friend' ? 'not_friend' : 'sent'
@@ -604,36 +761,17 @@ async function adminList(req: VercelRequest, res: VercelResponse) {
     })
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  // 지금 품절 목록 — 실패해도 신청·발송 목록은 보여 준다
-  let soldOut: SoldOutProduct[] = [];
-  let soldOutError: string | null = null;
-  try {
-    soldOut = await fetchSoldOutProducts(await getAdminToken());
-    await attachKoreanTitles(db, soldOut);
-  } catch (e) {
-    soldOutError = e instanceof Error ? e.message : '품절 목록 조회 실패';
-  }
-
-  // 신청 상품의 한글명 (#258) — 품절 목록에서 이미 붙인 건 그대로 쓰고, 나머지만 조회·번역한다.
-  // 실패해도 목록은 일본어만으로 보여 준다
-  const namesKo: Record<string, { ko: string; source: 'shopify' | 'ai' }> = {};
-  for (const p of soldOut) if (p.titleKo && p.titleKoSource) namesKo[p.productId] = { ko: p.titleKo, source: p.titleKoSource };
-  try {
-    const missing = [...new Set(out.map((r) => r.productId))].filter((id) => !namesKo[id]).slice(0, 250);
-    if (missing.length) {
-      const named = await fetchProductNames(await getAdminToken(), missing);
-      await attachKoreanTitles(db, named);
-      for (const p of named) if (p.titleKo && p.titleKoSource) namesKo[p.productId] = { ko: p.titleKo, source: p.titleKoSource };
-    }
-  } catch (e) {
-    console.error('[LINE Restock] 신청 상품 한글명 실패:', e instanceof Error ? e.message : e);
-  }
+  // 실행 기록에 어디서 오래 걸렸는지 남긴다
+  console.log(
+    `[LINE Restock] 목록 ${Date.now() - now}ms · 신청·발송 읽기 ${tRead} · ` +
+      Object.entries(timing).map(([k, v]) => `${k} ${v}`).join(' · ') +
+      ` · 신청 ${rows.length} · 사람 ${userIds.length}`,
+  );
 
   return res.status(200).json({
     rows: out,
+    batches,
     namesKo,
-    soldOut,
-    soldOutError,
     enabled: process.env.LINE_RESTOCK_ENABLED === '1',
     quietHours: inQuietHours(new Date(now)),
     maxPerSend: MAX_PER_RUN,
@@ -703,7 +841,7 @@ async function subscribe(req: VercelRequest, res: VercelResponse) {
   if (!db) return res.status(500).json({ error: 'SUPABASE 미설정' });
 
   // 옵션이 진짜 그 상품의 것이고 지금 품절인지 확인한다. 지어낸 id 로 신청 행이 쌓이지 않게.
-  const states = await fetchVariantStates(await getAdminToken(), [variantId]);
+  const states = await fetchVariantStates(await cachedAdminToken(), [variantId]);
   const state = states.get(variantId);
   if (!state || state.productId !== productId) return res.status(404).json({ error: 'not_found' });
   if (state.available) return res.status(409).json({ error: 'in_stock' });
@@ -748,6 +886,8 @@ interface SendPlan {
   notAvailable: number;
   ready: number;
   targets: { userId: string; subs: Subscription[]; text: string }[];
+  /** variantId → 지금 상품명 — 발송 이력에 남긴다 */
+  titles: Map<string, string>;
 }
 
 /**
@@ -758,7 +898,7 @@ async function planSend(db: Db, now: number, refs: Set<string> | null): Promise<
   const all = await pendingSubscriptions(db, now);
   const pending = refs ? all.filter((s) => refs.has(s.ref)) : all;
   const states = pending.length
-    ? await fetchVariantStates(await getAdminToken(), [...new Set(pending.map((s) => s.variantId))])
+    ? await fetchVariantStates(await cachedAdminToken(), [...new Set(pending.map((s) => s.variantId))])
     : new Map<string, VariantState>();
 
   const ready = pending.filter((s) => states.get(s.variantId)?.available);
@@ -779,7 +919,96 @@ async function planSend(db: Db, now: number, refs: Set<string> | null): Promise<
     notAvailable: pending.filter((s) => states.has(s.variantId) && !states.get(s.variantId)!.available).length,
     ready: ready.length,
     targets,
+    titles: new Map([...states].map(([id, s]) => [id, s.productTitle])),
   };
+}
+
+// ─── 발송 이력 (#322) ─────────────────────────────────────────────────────────
+
+export interface RestockBatch {
+  batchId: string;
+  startedAt: string;
+  finishedAt: string | null;
+  /** done = 끝까지 감 · sending = 아직 보내는 중 · aborted = 끝 기록 없이 끊김 */
+  state: 'done' | 'sending' | 'aborted';
+  /** 보내려던 사람 수 */
+  willSend: number;
+  /** 상품별 신청 수 — 「어떤 상품 알림이었나」 */
+  products: { productId: string; title: string; n: number }[];
+  sent: number | null;
+  notFriend: number | null;
+  failed: number | null;
+  /** 고른 것 중 제외된 것 — 다시 품절·이미 보냄·옵션 삭제 */
+  skipped: { notAvailable: number; notPending: number; missing: number };
+  /** 실패 이유별 인원 (#324) */
+  failReasons: Record<string, number>;
+}
+
+interface BatchRow {
+  created_at: string;
+  properties: {
+    batchId?: string;
+    phase?: 'start' | 'done';
+    willSend?: number;
+    products?: RestockBatch['products'];
+    sent?: number;
+    notFriend?: number;
+    failed?: number;
+    skipped?: RestockBatch['skipped'];
+    failReasons?: Record<string, number>;
+  } | null;
+}
+
+async function readBatches(db: Db, since: string, now: number): Promise<RestockBatch[]> {
+  const rows = await readAll<BatchRow>(db, BATCH_EVENT, 'created_at, properties', since);
+  const byId = new Map<string, RestockBatch>();
+  for (const r of rows) {
+    const p = r.properties;
+    if (!p?.batchId) continue;
+    const cur: RestockBatch = byId.get(p.batchId) ?? {
+      batchId: p.batchId,
+      startedAt: r.created_at,
+      finishedAt: null,
+      state: 'sending',
+      willSend: 0,
+      products: [],
+      sent: null,
+      notFriend: null,
+      failed: null,
+      skipped: { notAvailable: 0, notPending: 0, missing: 0 },
+      failReasons: {},
+    };
+    if (p.phase === 'start') {
+      cur.startedAt = r.created_at;
+      cur.willSend = p.willSend ?? 0;
+      cur.products = p.products ?? [];
+      if (p.skipped) cur.skipped = p.skipped;
+    } else if (p.phase === 'done') {
+      cur.finishedAt = r.created_at;
+      cur.state = 'done';
+      cur.sent = p.sent ?? 0;
+      cur.notFriend = p.notFriend ?? 0;
+      cur.failed = p.failed ?? 0;
+      cur.failReasons = p.failReasons ?? {};
+    }
+    byId.set(p.batchId, cur);
+  }
+  for (const b of byId.values()) {
+    if (b.state === 'sending' && now - Date.parse(b.startedAt) > BATCH_LOCK_MS) b.state = 'aborted';
+  }
+  return [...byId.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+async function writeBatch(db: Db, batchId: string, props: Record<string, unknown>): Promise<boolean> {
+  const { error } = await db.from('events').insert({
+    event_type: BATCH_EVENT,
+    session_id: 'system',
+    properties: { batchId, ...props },
+    page_path: '/admin',
+    referrer: null,
+  });
+  if (error) console.error('[LINE Restock] 🔴 발송 이력 저장 실패:', error.message);
+  return !error;
 }
 
 /** GET — 미리보기만. 지금 재고가 풀린 신청 전부에게 무엇이 나갈지 (예전 크론 dryRun 과 같은 모양) */
@@ -813,6 +1042,7 @@ async function preview(req: VercelRequest, res: VercelResponse) {
  */
 async function sendSelected(req: VercelRequest, res: VercelResponse) {
   if (!adminOnly(req)) return res.status(401).json({ error: 'Unauthorized' });
+  const t0 = Date.now();
 
   let payload: unknown = req.body ?? {};
   if (typeof payload === 'string') {
@@ -856,7 +1086,13 @@ async function sendSelected(req: VercelRequest, res: VercelResponse) {
     if (plan.targets.length > MAX_PER_RUN) {
       return res.status(400).json({ ...result, ok: false, error: `한 번에 ${MAX_PER_RUN}명까지 보낼 수 있습니다 — 나눠서 골라 주세요` });
     }
-    if (isDry || plan.targets.length === 0) return res.status(200).json(result);
+    if (isDry || plan.targets.length === 0) {
+      // 미리보기도 남긴다 (#326) — 「눌렀는데 안 나갔다」일 때 어디서 멈췄는지 실행 기록으로 보이게
+      console.log(
+        `[LINE Restock] ${isDry ? '미리보기' : '발송(대상 없음)'} ${Date.now() - t0}ms · 고른 ${selected.size} · 보낼 ${plan.targets.length}명 · 다시 품절 ${plan.notAvailable} · 이미 발송·없음 ${plan.notPending} · 옵션 삭제 ${plan.missing}`,
+      );
+      return res.status(200).json(result);
+    }
 
     // LINE 월 발송 한도. 모자라면 아예 보내지 않는다 — 일부만 보내면
     // 한도가 바닥난 뒤의 주문·배송 알림까지 같이 막힌다(2026-09-24 한도 소진 때 실제로 그랬다).
@@ -866,13 +1102,50 @@ async function sendSelected(req: VercelRequest, res: VercelResponse) {
       return res.status(409).json({ ...result, ok: false, error: `LINE 월 발송 한도 부족 — 남은 ${quota.remaining}통` });
     }
 
+    // 다른 발송이 아직 끝나지 않았으면 막는다 — 두 번 누르거나 창 두 개에서 누르면 같은 사람에게 두 통 나갈 수 있다
+    const now = Date.now();
+    const recent = await readBatches(db, new Date(now - BATCH_LOCK_MS).toISOString(), now);
+    if (recent.some((b) => b.state === 'sending')) {
+      return res.status(409).json({ ...result, ok: false, error: '다른 재입고 알림을 보내는 중입니다 — 잠시 뒤 새로고침해 결과를 확인해 주세요' });
+    }
+
+    const batchId = `${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const productCount = new Map<string, { productId: string; title: string; n: number }>();
+    for (const t of plan.targets) {
+      for (const s of t.subs) {
+        const title = plan.titles.get(s.variantId) ?? '';
+        const cur = productCount.get(s.productId) ?? { productId: s.productId, title, n: 0 };
+        cur.n++;
+        productCount.set(s.productId, cur);
+      }
+    }
+    // 🔴 이력을 못 남기면 보내지 않는다 — 결과를 확인할 길이 없어진다
+    const started = await writeBatch(db, batchId, {
+      phase: 'start',
+      willSend: plan.targets.length,
+      products: [...productCount.values()],
+      skipped: { notAvailable: plan.notAvailable, notPending: plan.notPending, missing: plan.missing },
+    });
+    if (!started) return res.status(500).json({ ...result, ok: false, error: '발송 이력을 저장하지 못해 보내지 않았습니다' });
+
+    // 실패한 사람과 이유 (#324) — 화면 알림창에 그대로 보여 준다
+    const failures: { userTail: string; products: string; reason: string }[] = [];
+    // 실제로 처리(보냄·친구 아님)된 신청 — 화면은 이것만 「발송 완료」로 바꾼다
+    const doneRefs: string[] = [];
+
     for (const t of plan.targets) {
       // 직렬로 보낸다. 병렬은 레이트리밋에 걸리고 어디까지 나갔는지도 흐려진다.
-      const r = await pushLine(t.userId, t.text);
+      const { result: r, reason } = await pushLineDetailed(t.userId, t.text);
       if (r === 'failed') {
         result.failed++;
+        failures.push({
+          userTail: t.userId.slice(-6),
+          products: [...new Set(t.subs.map((s) => plan.titles.get(s.variantId) ?? ''))].filter(Boolean).join(', '),
+          reason: reason ?? '알 수 없는 오류',
+        });
         continue;
       }
+      doneRefs.push(...t.subs.map((s) => s.ref));
       if (r === 'sent') result.sent++;
       else result.notFriend++;
       // 친구가 아니어도 기록한다 — 다시 보내도 같은 결과라 「발송 대기」에 계속 남지 않도록
@@ -889,8 +1162,19 @@ async function sendSelected(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // 실패 이유는 종류별로 모아 이력에 남긴다(사람 id 는 남기지 않는다)
+    const reasons: Record<string, number> = {};
+    for (const f of failures) reasons[f.reason] = (reasons[f.reason] ?? 0) + 1;
+    await writeBatch(db, batchId, {
+      phase: 'done',
+      sent: result.sent,
+      notFriend: result.notFriend,
+      failed: result.failed,
+      failReasons: reasons,
+    });
+
     console.log(`[LINE Restock] 수동 발송 ${result.sent}건 · 친구아님 ${result.notFriend} · 실패 ${result.failed}`);
-    return res.status(200).json(result);
+    return res.status(200).json({ ...result, batchId, doneRefs, failures: failures.slice(0, 50) });
   } catch (error) {
     console.error('[LINE Restock] 발송 오류:', error);
     return res.status(500).json({ error: error instanceof Error ? error.message : '재입고 알림 발송 중 오류' });
@@ -912,6 +1196,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'failed' });
     }
   }
+  if (req.method === 'GET' && req.query.view === 'soldout') return soldOutList(req, res);
   if (req.method === 'GET' && req.query.view === 'admin') {
     try {
       return await adminList(req, res);

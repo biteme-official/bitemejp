@@ -108,14 +108,15 @@ export function offerDiscountAmount(offer: AffiliateOffer, lines: LineLike[]): n
 export function orderOfferAndWelcome(
   offer: AffiliateOffer | null,
   isLoggedIn: boolean,
-  welcome: { code: string; percent: number } | null,
+  /** amount 가 있으면 정액 쿠폰(두 번째 구매 ¥500 등) — 그 값을 할인액으로 비교한다 */
+  welcome: { code: string; percent: number; amount?: number } | null,
   lines: LineLike[],
 ): { codes: string[]; chosen: 'offer' | 'welcome' } | null {
   if (!offer || !isLoggedIn) return null;
   const offerAmt = offerDiscountAmount(offer, lines);
   if (offerAmt <= 0) return null; // 대상 상품이 카트에 없다
   if (!welcome) return { codes: [offer.code], chosen: 'offer' };
-  const welcomeAmt = Math.floor((lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0) * welcome.percent) / 100);
+  const welcomeAmt = welcome.amount ?? Math.floor((lines.reduce((s, l) => s + l.unitPrice * l.quantity, 0) * welcome.percent) / 100);
   return offerAmt >= welcomeAmt
     ? { codes: [offer.code, welcome.code], chosen: 'offer' }
     : { codes: [welcome.code, offer.code], chosen: 'welcome' };

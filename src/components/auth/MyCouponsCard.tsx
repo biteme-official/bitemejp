@@ -1,5 +1,5 @@
 /**
- * 마이페이지 「保有クーポン」 카드 — 웰컴(WELCOME10·LINKUP10)과 블프 LINE 5%.
+ * 마이페이지 「保有クーポン」 카드 — 웰컴(WELCOME10·LINKUP10)·블프 LINE 5%·두 번째 구매 ¥500(#320).
  *
  * 쿠폰은 결제 때 자동으로 붙어(cartStore.createCheckout) 고객이 코드를 넣지 않는다. 그래서 코드는 안 보여주고
  * 받았는지·썼는지만 보여준다. 판정이 안 되는 쿠폰은 「사용 가능」으로 보이지 않게 줄을 숨긴다.
@@ -12,6 +12,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { BF_APPLY_END, BF_PERCENT, getBfCouponStatus, type BfCouponStatus } from '@/lib/bfCoupon';
 import { LINE_WELCOME_DISCOUNT_KEY, LINE_WELCOME_DISCOUNT_LABEL } from '@/lib/lineWelcomeDiscount';
 import { useWelcomeCouponStatus } from '@/lib/welcomeCouponStatus';
+import { THANKS_AMOUNT, THANKS_MIN_SUBTOTAL, getThanksCouponStatus, type ThanksCouponStatus } from '@/lib/thanksCoupon';
 
 function readWelcomeCode(): string | null {
   try {
@@ -52,6 +53,7 @@ export function MyCouponsCard() {
   const [welcomeCode] = useState(readWelcomeCode);
   const welcome = useWelcomeCouponStatus(welcomeCode, token);
   const [bf, setBf] = useState<BfCouponStatus>('unknown');
+  const [thanks, setThanks] = useState<ThanksCouponStatus>('unknown');
 
   useEffect(() => {
     if (!token || Date.now() > BF_APPLY_END) return;
@@ -60,7 +62,15 @@ export function MyCouponsCard() {
     return () => { alive = false; };
   }, [token]);
 
-  if (welcome === 'unknown' && bf === 'unknown') return null;
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    void getThanksCouponStatus(token).then((v) => { if (alive) setThanks(v); });
+    return () => { alive = false; };
+  }, [token]);
+
+  const hasThanks = thanks === 'available' || thanks === 'used';
+  if (welcome === 'unknown' && bf === 'unknown' && !hasThanks) return null;
 
   const bfTitle = `ブラックフライデー LINE友だち ${BF_PERCENT}%OFF`;
   const bfPeriod = '有効期間 11/9(月)10:00〜11/22(日)';
@@ -84,6 +94,13 @@ export function MyCouponsCard() {
         )}
         {(bf === 'available' || bf === 'used') && (
           <CouponRow title={bfTitle} note={bfPeriod} used={bf === 'used'} />
+        )}
+        {hasThanks && (
+          <CouponRow
+            title={`2回目のお買い物クーポン ¥${THANKS_AMOUNT}OFF`}
+            note={`¥${THANKS_MIN_SUBTOTAL.toLocaleString()}以上のご注文 · 有効期間 12/1(火)〜12/21(月)`}
+            used={thanks === 'used'}
+          />
         )}
       </div>
       <div className="mt-2 space-y-1 text-[10px] text-muted-foreground">
