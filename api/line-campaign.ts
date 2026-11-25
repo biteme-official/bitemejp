@@ -66,6 +66,11 @@ interface Segment {
   source?: string | null;
   /** 누적 구매액 하한 (엔) */
   minSpent?: number | null;
+  /**
+   * 이 Shopify 고객 태그를 가진 사람만. 스크립트가 미리 골라 태그를 붙여 둔 묶음에 쓴다
+   * (예: `thanks500` = 블프 첫 구매자, scripts/issue-thanks-coupon.ts)
+   */
+  tag?: string | null;
 }
 
 export interface Member {
@@ -76,6 +81,7 @@ export interface Member {
   spent: number;
   hasRealEmail: boolean;
   source: string | null;
+  tags: string[];
 }
 
 function matchesSegment(m: Member, s: Segment, now: number): boolean {
@@ -88,6 +94,8 @@ function matchesSegment(m: Member, s: Segment, now: number): boolean {
   if (email === 'placeholder' && m.hasRealEmail) return false;
 
   if (typeof s.minSpent === 'number' && m.spent < s.minSpent) return false;
+
+  if (s.tag && !m.tags.includes(s.tag)) return false;
 
   const ageDays = (now - new Date(m.createdAt).getTime()) / 86_400_000;
   if (typeof s.signupWithinDays === 'number' && ageDays > s.signupWithinDays) return false;
@@ -222,6 +230,7 @@ export async function fetchAudience(): Promise<Member[]> {
         spent: Number(n.amountSpent?.amount ?? 0),
         hasRealEmail: !!n.email && !String(n.email).endsWith(PLACEHOLDER_EMAIL_DOMAIN),
         source: src ? src.slice(SOURCE_TAG_PREFIX.length) : null,
+        tags,
       });
     }
 

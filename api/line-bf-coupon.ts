@@ -47,7 +47,7 @@ export function bfCodeFor(lineUserId: string, secret: string): string {
   return `BF5-${h}`;
 }
 
-async function findCustomerGid(token: string, lineUserId: string): Promise<string | null> {
+export async function findCustomerGid(token: string, lineUserId: string): Promise<string | null> {
   // api/customer-orders.ts 와 같은 순서 — LINE 합성 이메일 → line_id 태그
   const queries = [`email:"line_${lineUserId}@line-user.biteme.co.jp"`, `tag:"line_id:${lineUserId}"`];
   for (const query of queries) {
