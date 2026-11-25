@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 // GEO 상세페이지(업체 변환본: 이미지 + 글자 겹침, 글자 크기는 CSS cqw 로 고정). 원본 HTML은 public/geo/ja/{상품 숫자 ID}.html 에 둔다.
 // 업체 파일의 한국 자사몰 링크는 넣을 때 사이트 상대 주소(/product/...)로 바꾼다.
@@ -21,7 +22,7 @@ export const GEO_DETAIL_IDS = new Set([
   "10202476052793", // ノーズワークプレイブック マイバースデー
   "10150719029561", // ブレイニングトイ スピンアンドスナック バニー
   "10276698849593", // ミニスナックボトル（4カラー）
-  "10276704944441", // 携帯用折りたたみボウル　パステル（4カラー）
+  "10276704944441", // 携帯用折りたたみボウル パステル（4カラー）
   "10150722961721", // ピーナッツ ラテックストイ(4個入り)
   "10150724239673", // ジェリーベアー ラウンド フェイスコーム
   "10150723649849", // ミニシリコンポット
@@ -46,7 +47,7 @@ export const GEO_DETAIL_IDS = new Set([
   "10278691176761", // キャベツくんくんボールおもちゃ
   "10150719521081", // キャッチミー タグ 釣り竿おもちゃ（かわいい鳥のお友だち）
   "10150720667961", // キャッチミー タグ 釣り竿おもちゃ
-  "10150722699577", // カラーポッププーバック　マナー袋120枚（15枚×8ロール）
+  "10150722699577", // カラーポッププーバック マナー袋120枚（15枚×8ロール）
   "15409709351225", // ダブルヒートダウン v4
   "10278489162041", // ジェリーベアウープスクリップ
   "10150719127865", // ぴょんぴょんボールおもちゃ
@@ -77,6 +78,28 @@ export interface GeoDetailProps {
 export function GeoDetail({ productId, onJsonLd, fallback }: GeoDetailProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
+  const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
+
+  // Shadow DOM 안 사이트 상품 링크(/product/...)는 새로고침 없이 앱 안에서 이동
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const a = (e.composedPath()[0] as Element | undefined)?.closest?.("a");
+      const href = a?.getAttribute("href");
+      if (!a || !href || (a.target && a.target !== "_self")) return;
+      if (href.startsWith("/") && !href.startsWith("//")) {
+        e.preventDefault();
+        navigateRef.current(href);
+        window.scrollTo(0, 0);
+      }
+    };
+    host.addEventListener("click", onClick);
+    return () => host.removeEventListener("click", onClick);
+  }, [failed]);
 
   useEffect(() => {
     const host = hostRef.current;
