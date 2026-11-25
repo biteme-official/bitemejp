@@ -210,16 +210,48 @@ export async function isFriend(userId: string): Promise<boolean | null> {
 }
 
 export async function pushLine(userId: string, text: string): Promise<'sent' | 'not-friend' | 'failed'> {
-  const res = await fetch('https://api.line.me/v2/bot/message/push', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${lineToken()}` },
-    body: JSON.stringify({ to: userId, messages: [{ type: 'text', text }] }),
-  });
-  if (res.ok) return 'sent';
+  return (await pushLineDetailed(userId, text)).result;
+}
+
+/** LINE 오류를 운영자가 읽을 수 있는 말로 (#324) */
+function lineFailReason(status: number, body: string): string {
+  let msg = '';
+  try {
+    msg = String((JSON.parse(body) as { message?: string }).message ?? '');
+  } catch {
+    msg = body.slice(0, 120);
+  }
+  if (status === 429 && /monthly limit/i.test(msg)) return 'LINE 월 발송 한도 초과';
+  if (status === 429) return 'LINE 요청이 너무 많음(잠시 뒤 다시)';
+  if (status === 401) return 'LINE 토큰 오류(채널 토큰 만료·잘못됨)';
+  if (status === 400) return `LINE 이 메시지를 거부함${msg ? ` — ${msg}` : ''}`;
+  if (status >= 500) return `LINE 서버 오류 ${status}`;
+  return `LINE 오류 ${status}${msg ? ` — ${msg}` : ''}`;
+}
+
+/** push 한 통 + 실패면 이유. 네트워크 오류도 실패로 돌려준다(던지면 그 뒤 사람들이 통째로 안 나간다) */
+export async function pushLineDetailed(
+  userId: string,
+  text: string,
+): Promise<{ result: 'sent' | 'not-friend' | 'failed'; reason?: string }> {
+  let res: Response;
+  try {
+    res = await fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${lineToken()}` },
+      body: JSON.stringify({ to: userId, messages: [{ type: 'text', text }] }),
+    });
+  } catch (e) {
+    const reason = `LINE 연결 실패 — ${e instanceof Error ? e.message : '네트워크 오류'}`;
+    console.error(`[LINE Restock] 🔴 push 실패: ${reason}`);
+    return { result: 'failed', reason };
+  }
+  if (res.ok) return { result: 'sent' };
   // 403 = 친구가 아니거나 차단. 우리가 고칠 수 있는 게 아니다.
-  if (res.status === 403) return 'not-friend';
-  console.error(`[LINE Restock] 🔴 push 실패 ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  return 'failed';
+  if (res.status === 403) return { result: 'not-friend' };
+  const body = await res.text();
+  console.error(`[LINE Restock] 🔴 push 실패 ${res.status}: ${body.slice(0, 200)}`);
+  return { result: 'failed', reason: lineFailReason(res.status, body) };
 }
 
 // ─── 신청 기록 ────────────────────────────────────────────────────────────────
@@ -839,6 +871,8 @@ export interface RestockBatch {
   failed: number | null;
   /** 고른 것 중 제외된 것 — 다시 품절·이미 보냄·옵션 삭제 */
   skipped: { notAvailable: number; notPending: number; missing: number };
+  /** 실패 이유별 인원 (#324) */
+  failReasons: Record<string, number>;
 }
 
 interface BatchRow {
@@ -852,6 +886,7 @@ interface BatchRow {
     notFriend?: number;
     failed?: number;
     skipped?: RestockBatch['skipped'];
+    failReasons?: Record<string, number>;
   } | null;
 }
 
@@ -872,6 +907,7 @@ async function readBatches(db: Db, since: string, now: number): Promise<RestockB
       notFriend: null,
       failed: null,
       skipped: { notAvailable: 0, notPending: 0, missing: 0 },
+      failReasons: {},
     };
     if (p.phase === 'start') {
       cur.startedAt = r.created_at;
@@ -884,6 +920,7 @@ async function readBatches(db: Db, since: string, now: number): Promise<RestockB
       cur.sent = p.sent ?? 0;
       cur.notFriend = p.notFriend ?? 0;
       cur.failed = p.failed ?? 0;
+      cur.failReasons = p.failReasons ?? {};
     }
     byId.set(p.batchId, cur);
   }
@@ -1015,13 +1052,24 @@ async function sendSelected(req: VercelRequest, res: VercelResponse) {
     });
     if (!started) return res.status(500).json({ ...result, ok: false, error: '발송 이력을 저장하지 못해 보내지 않았습니다' });
 
+    // 실패한 사람과 이유 (#324) — 화면 알림창에 그대로 보여 준다
+    const failures: { userTail: string; products: string; reason: string }[] = [];
+    // 실제로 처리(보냄·친구 아님)된 신청 — 화면은 이것만 「발송 완료」로 바꾼다
+    const doneRefs: string[] = [];
+
     for (const t of plan.targets) {
       // 직렬로 보낸다. 병렬은 레이트리밋에 걸리고 어디까지 나갔는지도 흐려진다.
-      const r = await pushLine(t.userId, t.text);
+      const { result: r, reason } = await pushLineDetailed(t.userId, t.text);
       if (r === 'failed') {
         result.failed++;
+        failures.push({
+          userTail: t.userId.slice(-6),
+          products: [...new Set(t.subs.map((s) => plan.titles.get(s.variantId) ?? ''))].filter(Boolean).join(', '),
+          reason: reason ?? '알 수 없는 오류',
+        });
         continue;
       }
+      doneRefs.push(...t.subs.map((s) => s.ref));
       if (r === 'sent') result.sent++;
       else result.notFriend++;
       // 친구가 아니어도 기록한다 — 다시 보내도 같은 결과라 「발송 대기」에 계속 남지 않도록
@@ -1038,10 +1086,19 @@ async function sendSelected(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    await writeBatch(db, batchId, { phase: 'done', sent: result.sent, notFriend: result.notFriend, failed: result.failed });
+    // 실패 이유는 종류별로 모아 이력에 남긴다(사람 id 는 남기지 않는다)
+    const reasons: Record<string, number> = {};
+    for (const f of failures) reasons[f.reason] = (reasons[f.reason] ?? 0) + 1;
+    await writeBatch(db, batchId, {
+      phase: 'done',
+      sent: result.sent,
+      notFriend: result.notFriend,
+      failed: result.failed,
+      failReasons: reasons,
+    });
 
     console.log(`[LINE Restock] 수동 발송 ${result.sent}건 · 친구아님 ${result.notFriend} · 실패 ${result.failed}`);
-    return res.status(200).json({ ...result, batchId });
+    return res.status(200).json({ ...result, batchId, doneRefs, failures: failures.slice(0, 50) });
   } catch (error) {
     console.error('[LINE Restock] 발송 오류:', error);
     return res.status(500).json({ error: error instanceof Error ? error.message : '재입고 알림 발송 중 오류' });
