@@ -1016,7 +1016,13 @@ async function sendSelected(req: VercelRequest, res: VercelResponse) {
     if (plan.targets.length > MAX_PER_RUN) {
       return res.status(400).json({ ...result, ok: false, error: `한 번에 ${MAX_PER_RUN}명까지 보낼 수 있습니다 — 나눠서 골라 주세요` });
     }
-    if (isDry || plan.targets.length === 0) return res.status(200).json(result);
+    if (isDry || plan.targets.length === 0) {
+      // 미리보기도 남긴다 (#326) — 「눌렀는데 안 나갔다」일 때 어디서 멈췄는지 실행 기록으로 보이게
+      console.log(
+        `[LINE Restock] ${isDry ? '미리보기' : '발송(대상 없음)'} 고른 ${selected.size} · 보낼 ${plan.targets.length}명 · 다시 품절 ${plan.notAvailable} · 이미 발송·없음 ${plan.notPending} · 옵션 삭제 ${plan.missing}`,
+      );
+      return res.status(200).json(result);
+    }
 
     // LINE 월 발송 한도. 모자라면 아예 보내지 않는다 — 일부만 보내면
     // 한도가 바닥난 뒤의 주문·배송 알림까지 같이 막힌다(2026-09-24 한도 소진 때 실제로 그랬다).
