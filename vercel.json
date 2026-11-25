@@ -71,6 +71,9 @@
     },
     "api/line-campaign.ts": {
       "maxDuration": 120
+    },
+    "api/line-restock.ts": {
+      "maxDuration": 60
     }
   },
   "rewrites": [

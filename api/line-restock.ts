@@ -39,6 +39,15 @@ import {
 } from './line-campaign.js';
 
 export const RESTOCK_SUB_EVENT = 'line_restock_sub';
+/**
+ * 발송 이력 (#322) — 「보내기」를 한 번 누를 때마다 시작·끝 두 행. 사람별 기록(`line_send`)과 따로 둔다.
+ *   phase=start  누른 순간 · 몇 명에게 무엇을
+ *   phase=done   끝난 뒤 · 보냄/친구 아님/실패
+ * start 만 있고 done 이 없으면 함수가 도중에 끊긴 것 — 화면에 「중단됨」으로 보이고, 실제 나간 건 사람별 기록이 맞다.
+ */
+const BATCH_EVENT = 'line_restock_batch';
+/** start 뒤 이 시간 안에 done 이 없으면 아직 보내는 중으로 보고 새 발송을 막는다(두 번 눌림·두 창) */
+const BATCH_LOCK_MS = 3 * 60_000;
 const JOURNEY = 'restock';
 const UTM = 'line_restock';
 
@@ -233,6 +242,39 @@ function subRef(variantId: string, createdAt: string): string {
 export { readAll };
 export type { Db };
 
+interface RestockSendRow {
+  session_id: string;
+  created_at: string;
+  properties: { journey?: string; ref?: string; delivery?: string } | null;
+}
+
+/**
+ * 재입고 알림 발송 기록만 읽는다 (#322).
+ *
+ * 🔴 예전엔 `line_send` 전체(캠페인·저니 전부, 180일)를 다 읽고 여기서 journey 로 걸렀다.
+ *    캠페인 한 번에 수천 행이라 수십 번 나눠 읽느라 발송·목록 요청이 느려지고, readAll 상한(10만 행)을
+ *    넘으면 오래된 것부터 읽으니 **최근 재입고 발송 기록이 잘려 「안 보냄」으로 보였다** — 다시 보낼 수 있게 됐다.
+ *    DB 에서 journey 로 거르면 재입고 몇 건만 온다.
+ */
+async function readRestockSends(db: Db, since: string): Promise<RestockSendRow[]> {
+  const out: RestockSendRow[] = [];
+  for (let from = 0; from < 100_000; from += 1000) {
+    const { data, error } = await db
+      .from('events')
+      .select('session_id, created_at, properties')
+      .eq('event_type', SEND_EVENT)
+      .eq('properties->>journey', JOURNEY)
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .range(from, from + 999);
+    // 🔴 발송 기록을 못 읽었는데 빈 목록으로 넘기면 전부 「안 보냄」이 돼 다시 나간다. 실패는 실패로 던진다.
+    if (error) throw new Error(`재입고 발송 기록 조회 실패: ${error.message}`);
+    out.push(...((data ?? []) as RestockSendRow[]));
+    if (!data || data.length < 1000) break;
+  }
+  return out;
+}
+
 /** 아직 알림이 나가지 않은 신청 */
 async function pendingSubscriptions(db: Db, now: number): Promise<Subscription[]> {
   const since = new Date(now - SUB_TTL_DAYS * 86_400_000).toISOString();
@@ -240,12 +282,13 @@ async function pendingSubscriptions(db: Db, now: number): Promise<Subscription[]
     readAll<{ session_id: string; created_at: string; properties: { productId?: string; variantId?: string } | null }>(
       db, RESTOCK_SUB_EVENT, 'session_id, created_at, properties', since,
     ),
-    readAll<{ properties: { journey?: string; ref?: string } | null }>(db, SEND_EVENT, 'properties', since),
+    readRestockSends(db, since),
   ]);
 
+  // 같은 신청(ref)이라도 사람이 다르면 다른 신청이다 — 키에 사람을 넣는다
   const done = new Set<string>();
   for (const s of sends) {
-    if (s.properties?.journey === JOURNEY && s.properties.ref) done.add(s.properties.ref);
+    if (s.properties?.ref) done.add(`${s.session_id}|${s.properties.ref}`);
   }
 
   // 같은 사람이 같은 옵션을 여러 번 눌렀으면 한 건으로 친다 — 가장 최근 신청만 남긴다
@@ -262,7 +305,7 @@ async function pendingSubscriptions(db: Db, now: number): Promise<Subscription[]
       ref: subRef(variantId, row.created_at),
     });
   }
-  return [...latest.values()].filter((s) => !done.has(s.ref));
+  return [...latest.values()].filter((s) => !done.has(`line:${s.lineUserId}|${s.ref}`));
 }
 
 // ─── 지금 품절 목록 (#225) ─────────────────────────────────────────────────────
@@ -528,17 +571,18 @@ async function adminList(req: VercelRequest, res: VercelResponse) {
       created_at: string;
       properties: { productId?: string; variantId?: string; productTitle?: string; variantTitle?: string } | null;
     }>(db, RESTOCK_SUB_EVENT, 'session_id, created_at, properties', since),
-    readAll<{ created_at: string; properties: { journey?: string; ref?: string; delivery?: string } | null }>(
-      db, SEND_EVENT, 'created_at, properties', since,
-    ),
+    readRestockSends(db, since),
   ]);
 
+  // 키 = 사람|신청 — pendingSubscriptions 와 같은 규칙
   const sentByRef = new Map<string, { at: string; delivery: string }>();
   for (const s of sends) {
-    if (s.properties?.journey === JOURNEY && s.properties.ref) {
-      sentByRef.set(s.properties.ref, { at: s.created_at, delivery: s.properties.delivery ?? 'sent' });
+    if (s.properties?.ref) {
+      sentByRef.set(`${s.session_id}|${s.properties.ref}`, { at: s.created_at, delivery: s.properties.delivery ?? 'sent' });
     }
   }
+  const sentOf = (r: { session_id: string; created_at: string; properties: { variantId?: string } | null }) =>
+    sentByRef.get(`${r.session_id}|${subRef(r.properties!.variantId!, r.created_at)}`);
 
   // 같은 사람·옵션을 여러 번 누른 건 한 줄 — 발송 쪽과 같은 규칙(가장 최근 신청)
   const latest = new Map<string, (typeof subs)[number]>();
@@ -550,7 +594,7 @@ async function adminList(req: VercelRequest, res: VercelResponse) {
   const rows = [...latest.values()];
 
   // 아직 안 보낸 신청만 지금 재고를 본다
-  const unsent = rows.filter((r) => !sentByRef.has(subRef(r.properties!.variantId!, r.created_at)));
+  const unsent = rows.filter((r) => !sentOf(r));
   const states = unsent.length
     ? await fetchVariantStates(await getAdminToken(), [...new Set(unsent.map((r) => r.properties!.variantId!))])
     : new Map<string, VariantState>();
@@ -568,7 +612,7 @@ async function adminList(req: VercelRequest, res: VercelResponse) {
     .map((r) => {
       const p = r.properties!;
       const userId = r.session_id.slice(5);
-      const sent = sentByRef.get(subRef(p.variantId!, r.created_at));
+      const sent = sentOf(r);
       const state = states.get(p.variantId!);
       const status: RestockStatus = sent
         ? sent.delivery === 'not-friend' ? 'not_friend' : 'sent'
@@ -613,8 +657,17 @@ async function adminList(req: VercelRequest, res: VercelResponse) {
     console.error('[LINE Restock] 신청 상품 한글명 실패:', e instanceof Error ? e.message : e);
   }
 
+  // 발송 이력 — 실패해도 나머지 목록은 보여 준다
+  let batches: RestockBatch[] = [];
+  try {
+    batches = await readBatches(db, since, now);
+  } catch (e) {
+    console.error('[LINE Restock] 발송 이력 조회 실패:', e instanceof Error ? e.message : e);
+  }
+
   return res.status(200).json({
     rows: out,
+    batches,
     namesKo,
     soldOut,
     soldOutError,
@@ -732,6 +785,8 @@ interface SendPlan {
   notAvailable: number;
   ready: number;
   targets: { userId: string; subs: Subscription[]; text: string }[];
+  /** variantId → 지금 상품명 — 발송 이력에 남긴다 */
+  titles: Map<string, string>;
 }
 
 /**
@@ -763,7 +818,91 @@ async function planSend(db: Db, now: number, refs: Set<string> | null): Promise<
     notAvailable: pending.filter((s) => states.has(s.variantId) && !states.get(s.variantId)!.available).length,
     ready: ready.length,
     targets,
+    titles: new Map([...states].map(([id, s]) => [id, s.productTitle])),
   };
+}
+
+// ─── 발송 이력 (#322) ─────────────────────────────────────────────────────────
+
+export interface RestockBatch {
+  batchId: string;
+  startedAt: string;
+  finishedAt: string | null;
+  /** done = 끝까지 감 · sending = 아직 보내는 중 · aborted = 끝 기록 없이 끊김 */
+  state: 'done' | 'sending' | 'aborted';
+  /** 보내려던 사람 수 */
+  willSend: number;
+  /** 상품별 신청 수 — 「어떤 상품 알림이었나」 */
+  products: { productId: string; title: string; n: number }[];
+  sent: number | null;
+  notFriend: number | null;
+  failed: number | null;
+  /** 고른 것 중 제외된 것 — 다시 품절·이미 보냄·옵션 삭제 */
+  skipped: { notAvailable: number; notPending: number; missing: number };
+}
+
+interface BatchRow {
+  created_at: string;
+  properties: {
+    batchId?: string;
+    phase?: 'start' | 'done';
+    willSend?: number;
+    products?: RestockBatch['products'];
+    sent?: number;
+    notFriend?: number;
+    failed?: number;
+    skipped?: RestockBatch['skipped'];
+  } | null;
+}
+
+async function readBatches(db: Db, since: string, now: number): Promise<RestockBatch[]> {
+  const rows = await readAll<BatchRow>(db, BATCH_EVENT, 'created_at, properties', since);
+  const byId = new Map<string, RestockBatch>();
+  for (const r of rows) {
+    const p = r.properties;
+    if (!p?.batchId) continue;
+    const cur: RestockBatch = byId.get(p.batchId) ?? {
+      batchId: p.batchId,
+      startedAt: r.created_at,
+      finishedAt: null,
+      state: 'sending',
+      willSend: 0,
+      products: [],
+      sent: null,
+      notFriend: null,
+      failed: null,
+      skipped: { notAvailable: 0, notPending: 0, missing: 0 },
+    };
+    if (p.phase === 'start') {
+      cur.startedAt = r.created_at;
+      cur.willSend = p.willSend ?? 0;
+      cur.products = p.products ?? [];
+      if (p.skipped) cur.skipped = p.skipped;
+    } else if (p.phase === 'done') {
+      cur.finishedAt = r.created_at;
+      cur.state = 'done';
+      cur.sent = p.sent ?? 0;
+      cur.notFriend = p.notFriend ?? 0;
+      cur.failed = p.failed ?? 0;
+    }
+    byId.set(p.batchId, cur);
+  }
+  for (const b of byId.values()) {
+    if (b.state === 'sending' && now - Date.parse(b.startedAt) > BATCH_LOCK_MS) b.state = 'aborted';
+  }
+  return [...byId.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+async function writeBatch(db: Db, batchId: string, props: Record<string, unknown>): Promise<boolean> {
+  const { error } = await db.from('events').insert({
+    event_type: BATCH_EVENT,
+    session_id: 'system',
+    properties: { batchId, ...props },
+    page_path: '/admin',
+    referrer: null,
+  });
+  if (error) console.error('[LINE Restock] 🔴 발송 이력 저장 실패:', error.message);
+  return !error;
 }
 
 /** GET — 미리보기만. 지금 재고가 풀린 신청 전부에게 무엇이 나갈지 (예전 크론 dryRun 과 같은 모양) */
@@ -850,6 +989,32 @@ async function sendSelected(req: VercelRequest, res: VercelResponse) {
       return res.status(409).json({ ...result, ok: false, error: `LINE 월 발송 한도 부족 — 남은 ${quota.remaining}통` });
     }
 
+    // 다른 발송이 아직 끝나지 않았으면 막는다 — 두 번 누르거나 창 두 개에서 누르면 같은 사람에게 두 통 나갈 수 있다
+    const now = Date.now();
+    const recent = await readBatches(db, new Date(now - BATCH_LOCK_MS).toISOString(), now);
+    if (recent.some((b) => b.state === 'sending')) {
+      return res.status(409).json({ ...result, ok: false, error: '다른 재입고 알림을 보내는 중입니다 — 잠시 뒤 새로고침해 결과를 확인해 주세요' });
+    }
+
+    const batchId = `${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const productCount = new Map<string, { productId: string; title: string; n: number }>();
+    for (const t of plan.targets) {
+      for (const s of t.subs) {
+        const title = plan.titles.get(s.variantId) ?? '';
+        const cur = productCount.get(s.productId) ?? { productId: s.productId, title, n: 0 };
+        cur.n++;
+        productCount.set(s.productId, cur);
+      }
+    }
+    // 🔴 이력을 못 남기면 보내지 않는다 — 결과를 확인할 길이 없어진다
+    const started = await writeBatch(db, batchId, {
+      phase: 'start',
+      willSend: plan.targets.length,
+      products: [...productCount.values()],
+      skipped: { notAvailable: plan.notAvailable, notPending: plan.notPending, missing: plan.missing },
+    });
+    if (!started) return res.status(500).json({ ...result, ok: false, error: '발송 이력을 저장하지 못해 보내지 않았습니다' });
+
     for (const t of plan.targets) {
       // 직렬로 보낸다. 병렬은 레이트리밋에 걸리고 어디까지 나갔는지도 흐려진다.
       const r = await pushLine(t.userId, t.text);
@@ -873,8 +1038,10 @@ async function sendSelected(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    await writeBatch(db, batchId, { phase: 'done', sent: result.sent, notFriend: result.notFriend, failed: result.failed });
+
     console.log(`[LINE Restock] 수동 발송 ${result.sent}건 · 친구아님 ${result.notFriend} · 실패 ${result.failed}`);
-    return res.status(200).json(result);
+    return res.status(200).json({ ...result, batchId });
   } catch (error) {
     console.error('[LINE Restock] 발송 오류:', error);
     return res.status(500).json({ error: error instanceof Error ? error.message : '재입고 알림 발송 중 오류' });
