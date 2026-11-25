@@ -24,6 +24,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import ListPager from "@/components/admin/ListPager";
 import { usePaged } from "@/hooks/usePaged";
 
@@ -64,6 +73,8 @@ interface Batch {
   notFriend: number | null;
   failed: number | null;
   skipped: { notAvailable: number; notPending: number; missing: number };
+  /** 실패 이유별 인원 (#324) */
+  failReasons?: Record<string, number>;
 }
 
 interface RestockAdminData {
@@ -97,6 +108,18 @@ interface SendResult {
   notFriend: number;
   failed: number;
   samples: string[];
+  /** 실제 처리된(보냄·친구 아님) 신청 — 이것만 화면에서 「발송 완료」로 */
+  doneRefs?: string[];
+  /** 실패한 사람과 이유 (#324) */
+  failures?: { userTail: string; products: string; reason: string }[];
+}
+
+/** 발송 결과 알림창 (#324) */
+interface ResultDialog {
+  ok: boolean;
+  title: string;
+  lines: string[];
+  failures: { userTail: string; products: string; reason: string }[];
 }
 
 const STATUS: Record<Status, { label: string; className: string }> = {
@@ -120,9 +143,23 @@ async function postSend(secret: string, refs: string[], dryRun: boolean): Promis
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
     body: JSON.stringify({ refs, dryRun }),
   });
-  const json = (await res.json().catch(() => ({}))) as Partial<SendResult>;
-  if (!res.ok || json.ok === false) throw new Error(json.error ?? `${res.status}`);
+  const raw = await res.text();
+  let json: Partial<SendResult> = {};
+  try {
+    json = JSON.parse(raw) as Partial<SendResult>;
+  } catch {
+    // JSON 이 아니면 Vercel 이 대신 답한 것 — 시간 초과·서버 오류
+  }
+  if (!res.ok || json.ok === false) throw new Error(json.error ?? httpReason(res.status));
   return json as SendResult;
+}
+
+/** 서버가 이유를 못 준 실패 — 상태 코드로 설명 */
+function httpReason(status: number): string {
+  if (status === 504) return "서버 응답 시간 초과(504) — 보내는 도중 끊겼을 수 있습니다";
+  if (status === 401) return "어드민 인증이 풀렸습니다(401) — 다시 로그인해 주세요";
+  if (status >= 500) return `서버 오류(${status})`;
+  return `요청 실패(${status})`;
 }
 
 /** 고른 것 중 보내지 않는 것들 — 「3건은 그새 다시 품절」 */
@@ -186,6 +223,7 @@ export default function RestockTab({ secret }: { secret: string }) {
    * 또 고를 수 있게 되지 않도록, 화면에서 먼저 「발송 완료」로 바꿔 둔다.
    */
   const [justSent, setJustSent] = useState<Map<string, string>>(new Map());
+  const [dialog, setDialog] = useState<ResultDialog | null>(null);
   const msgRef = useRef<HTMLDivElement>(null);
 
   const rows = useMemo(
@@ -303,7 +341,9 @@ export default function RestockTab({ secret }: { secret: string }) {
     try {
       setPreview(await postSend(secret, refs, true));
     } catch (e) {
-      setSendMsg({ ok: false, text: `미리보기 실패: ${e instanceof Error ? e.message : ""}` });
+      const reason = e instanceof Error ? e.message : "알 수 없는 오류";
+      setSendMsg({ ok: false, text: `미리보기 실패: ${reason}` });
+      setDialog({ ok: false, title: "미리보기 실패", lines: [reason, "아직 아무에게도 보내지 않았습니다."], failures: [] });
     } finally {
       setBusy(null);
     }
@@ -326,25 +366,38 @@ export default function RestockTab({ secret }: { secret: string }) {
     try {
       const r = await postSend(secret, refs, false);
       const note = skippedNote(r);
-      setSendMsg({
-        ok: r.failed === 0,
-        at,
-        text:
-          `${r.sent}명에게 보냈습니다` +
-          (r.notFriend ? ` · 친구 아님 ${r.notFriend}명(미도달)` : "") +
-          (r.failed ? ` · 실패 ${r.failed}명 — 「재입고됨」에 남아 있으니 다시 골라 보내 주세요` : "") +
-          (note ? ` · ${note}` : ""),
-      });
-      // 실패한 사람은 「재입고됨」에 남아야 다시 보낼 수 있다 — 전원 처리됐을 때만 화면에서 먼저 지운다
-      if (r.failed === 0) setJustSent((prev) => new Map([...prev, ...refs.map((ref) => [ref, at] as const)]));
+      const text =
+        `${r.sent}명에게 보냈습니다` +
+        (r.notFriend ? ` · 친구 아님 ${r.notFriend}명(미도달)` : "") +
+        (r.failed ? ` · 실패 ${r.failed}명 — 「재입고됨」에 남아 있으니 다시 골라 보내 주세요` : "") +
+        (note ? ` · ${note}` : "");
+      setSendMsg({ ok: r.failed === 0, at, text });
+      // 서버가 처리했다고 돌려준 신청만 먼저 「발송 완료」로 — 실패한 사람은 다시 고를 수 있게 남긴다
+      const done = r.doneRefs ?? (r.failed === 0 ? refs : []);
+      setJustSent((prev) => new Map([...prev, ...done.map((ref) => [ref, at] as const)]));
+      if (r.willSend === 0) {
+        setDialog({ ok: false, title: "보낸 사람이 없습니다", lines: [note || "보낼 수 있는 신청이 없었습니다."], failures: [] });
+      } else if (r.failed > 0) {
+        setDialog({
+          ok: false,
+          title: r.sent > 0 ? `일부 실패 — ${r.failed}명에게 못 보냈습니다` : `발송 실패 — ${r.failed}명`,
+          lines: [text],
+          failures: r.failures ?? [],
+        });
+      } else {
+        setDialog({ ok: true, title: "발송 완료", lines: [text], failures: [] });
+      }
       setSelected(new Set());
       setPreview(null);
     } catch (e) {
       // 응답을 못 받았다고 안 나간 게 아니다(도중에 끊겼을 수 있다). 다시 누르기 전에 목록·이력을 보게 한다
-      setSendMsg({
+      const reason = e instanceof Error ? e.message : "알 수 없는 오류";
+      setSendMsg({ ok: false, at, text: `발송 실패: ${reason}` });
+      setDialog({
         ok: false,
-        at,
-        text: `결과를 받지 못했습니다(${e instanceof Error ? e.message : "오류"}) — 일부는 이미 나갔을 수 있습니다. 바로 다시 누르지 말고 아래 「발송 이력」과 신청 상태를 확인해 주세요`,
+        title: "발송 실패",
+        lines: [reason, "일부는 이미 나갔을 수 있습니다. 바로 다시 누르지 말고 「발송 이력」과 신청 상태를 확인해 주세요."],
+        failures: [],
       });
       setSelected(new Set());
       setPreview(null);
@@ -400,6 +453,45 @@ export default function RestockTab({ secret }: { secret: string }) {
 
   return (
     <div className="space-y-5">
+      <AlertDialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className={dialog?.ok ? "text-emerald-700" : "text-red-700"}>
+              {dialog?.ok ? "✓ " : "⚠ "}
+              {dialog?.title}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-foreground">
+                {dialog?.lines.map((l, i) => <p key={i}>{l}</p>)}
+                {dialog && dialog.failures.length > 0 && (
+                  <div className="max-h-60 overflow-y-auto rounded border">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted text-muted-foreground">
+                        <tr className="[&>th]:px-2 [&>th]:py-1 [&>th]:text-left [&>th]:font-medium">
+                          <th>고객</th><th>상품</th><th>실패 사유</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dialog.failures.map((f, i) => (
+                          <tr key={i} className="border-t [&>td]:px-2 [&>td]:py-1 [&>td]:align-top">
+                            <td className="font-mono whitespace-nowrap">…{f.userTail}</td>
+                            <td>{f.products || "—"}</td>
+                            <td className="text-red-700">{f.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction onClick={() => setDialog(null)}>확인</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div
         className={cn(
           "rounded-lg border px-4 py-2.5 text-xs flex flex-wrap items-center gap-x-4 gap-y-1",
@@ -687,7 +779,12 @@ export default function RestockTab({ secret }: { secret: string }) {
                     <td className="text-right tabular-nums">{b.willSend}명</td>
                     <td className="text-right tabular-nums font-semibold">{b.sent ?? "—"}</td>
                     <td className="text-right tabular-nums">{b.notFriend ?? "—"}</td>
-                    <td className={cn("text-right tabular-nums", (b.failed ?? 0) > 0 && "font-semibold text-red-700")}>{b.failed ?? "—"}</td>
+                    <td className={cn("text-right tabular-nums", (b.failed ?? 0) > 0 && "font-semibold text-red-700")}>
+                      {b.failed ?? "—"}
+                      {Object.entries(b.failReasons ?? {}).map(([reason, n]) => (
+                        <p key={reason} className="whitespace-nowrap text-[10px] font-normal">{reason} {n}</p>
+                      ))}
+                    </td>
                     <td className="text-muted-foreground">{skipped || "—"}</td>
                     <td>
                       <span
