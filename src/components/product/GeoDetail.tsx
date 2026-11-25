@@ -82,8 +82,7 @@ export function GeoDetail({ productId, onJsonLd, fallback }: GeoDetailProps) {
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
 
-  // Shadow DOM 안 링크: 같은 상세 안 이동(#id)은 Shadow DOM 안에서 찾아 스크롤(문서 기준 id 검색은 Shadow DOM 을 못 봄),
-  // 사이트 상품 링크(/product/...)는 새로고침 없이 앱 안에서 이동
+  // Shadow DOM 안 사이트 상품 링크(/product/...)는 새로고침 없이 앱 안에서 이동
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -92,12 +91,7 @@ export function GeoDetail({ productId, onJsonLd, fallback }: GeoDetailProps) {
       const a = (e.composedPath()[0] as Element | undefined)?.closest?.("a");
       const href = a?.getAttribute("href");
       if (!a || !href || (a.target && a.target !== "_self")) return;
-      if (href.startsWith("#")) {
-        const target = host.shadowRoot?.getElementById(decodeURIComponent(href.slice(1)));
-        if (!target) return;
-        e.preventDefault();
-        target.scrollIntoView({ behavior: "smooth", block: "start" });
-      } else if (href.startsWith("/") && !href.startsWith("//")) {
+      if (href.startsWith("/") && !href.startsWith("//")) {
         e.preventDefault();
         navigateRef.current(href);
         window.scrollTo(0, 0);
