@@ -131,6 +131,12 @@ const STATUS: Record<Status, { label: string; className: string }> = {
   discontinued: { label: "판매 종료", className: "bg-muted text-muted-foreground line-through" },
 };
 
+async function fetchSoldOut(secret: string): Promise<{ soldOut: SoldOutProduct[]; soldOutError: string | null }> {
+  const res = await fetch("/api/line-restock?view=soldout", { headers: { Authorization: `Bearer ${secret}` } });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json();
+}
+
 async function fetchRestock(secret: string): Promise<RestockAdminData> {
   const res = await fetch("/api/line-restock?view=admin", { headers: { Authorization: `Bearer ${secret}` } });
   if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 120)}`);
@@ -206,6 +212,16 @@ export default function RestockTab({ secret }: { secret: string }) {
     queryFn: () => fetchRestock(secret),
     enabled: !!secret,
     staleTime: 60_000,
+    // 창을 오갈 때마다 다시 받지 않는다 — 목록 한 번이 무겁다 (#328). 새로고침 버튼·발송 뒤에만
+    refetchOnWindowFocus: false,
+  });
+  // 「지금 품절 목록」은 쇼핑몰 옵션 전부를 훑어 오래 걸린다 — 따로 받아 탭이 먼저 뜨게 (#328)
+  const soldOutQuery = useQuery({
+    queryKey: ["restock-soldout", secret],
+    queryFn: () => fetchSoldOut(secret),
+    enabled: !!secret,
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
   });
   const [filter, setFilter] = useState<Status | "all">("all");
   const [productFilter, setProductFilter] = useState<string>("all");
@@ -413,7 +429,7 @@ export default function RestockTab({ secret }: { secret: string }) {
     const waitingBy = new Map<string, number>();
     for (const r of rows) if (r.status === "waiting") waitingBy.set(r.variantId, (waitingBy.get(r.variantId) ?? 0) + 1);
     const pick = (ended: boolean) =>
-      (data?.soldOut ?? [])
+      (soldOutQuery.data?.soldOut ?? [])
         .map((p) => {
           const variants = p.soldOut.filter((v) => v.discontinued === ended);
           const waiting = variants.reduce((n, v) => n + (waitingBy.get(v.id) ?? 0), 0);
@@ -422,7 +438,7 @@ export default function RestockTab({ secret }: { secret: string }) {
         .filter((p) => p.variants.length > 0)
         .sort((a, b) => b.waiting - a.waiting || Number(b.all) - Number(a.all) || a.title.localeCompare(b.title));
     return { temp: pick(false), ended: pick(true) };
-  }, [data, rows]);
+  }, [soldOutQuery.data, rows]);
   const soldShown = useMemo(() => {
     const q = soldQuery.trim().toLowerCase();
     const list = soldOut[soldKind];
@@ -883,7 +899,12 @@ export default function RestockTab({ secret }: { secret: string }) {
               ? "목록에 SOLD OUT 으로 보이고 재입고 알림을 받는 옵션 · 재고를 넣은 뒤 신청 목록에서 골라 보내면 대기 인원에게 알림"
               : "Shopify 태그 「販売終了」가 붙은 품절 옵션 · 목록에서 숨고 알림을 받지 않음"}
           </p>
-          {data.soldOutError && <p className="mb-2 text-xs text-red-600">품절 목록을 불러오지 못했습니다: {data.soldOutError}</p>}
+          {soldOutQuery.isLoading && <p className="mb-2 text-xs text-muted-foreground">품절 목록 불러오는 중… (쇼핑몰 옵션 전체를 확인해 조금 걸립니다)</p>}
+          {(soldOutQuery.data?.soldOutError || soldOutQuery.error) && (
+            <p className="mb-2 text-xs text-red-600">
+              품절 목록을 불러오지 못했습니다: {soldOutQuery.data?.soldOutError ?? (soldOutQuery.error instanceof Error ? soldOutQuery.error.message : "")}
+            </p>
+          )}
           <table className="w-full text-xs">
             <thead className="border-b text-muted-foreground">
               <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th:not(.text-right)]:text-left">
