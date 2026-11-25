@@ -453,6 +453,60 @@ export default function RestockTab({ secret }: { secret: string }) {
 
   return (
     <div className="space-y-5">
+      {/*
+        보내기 확인 (#326) — 예전엔 표 위 노란 칸에 떴는데 눈에 안 띄어서, 「보내기」를 눌러도
+        「확인 중…」 뒤 아무 일도 없는 것처럼 보였다(실제로는 이 확인을 한 번 더 눌러야 나간다). 가운데 창으로.
+      */}
+      <AlertDialog open={preview !== null} onOpenChange={(o) => !o && busy !== "send" && setPreview(null)}>
+        <AlertDialogContent>
+          {preview && (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle className={preview.willSend === 0 ? "text-red-700" : undefined}>
+                  {preview.willSend === 0 ? "⚠ 보낼 사람이 없습니다" : `${preview.willSend}명에게 재입고 알림을 보낼까요?`}
+                </AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div className="space-y-2 text-sm text-foreground">
+                    {preview.willSend === 0 ? (
+                      <p>{skippedNote(preview) || "고른 신청 중 지금 보낼 수 있는 것이 없습니다."}</p>
+                    ) : (
+                      <>
+                        <p>
+                          신청 {preview.ready}건{preview.ready > preview.willSend && " — 한 사람의 여러 옵션은 한 통으로 묶음"}
+                        </p>
+                        {pickedByProduct.length > 0 && (
+                          <p>
+                            {pickedByProduct.length > 1 && <span className="font-semibold text-red-700">상품 {pickedByProduct.length}개가 섞여 있습니다 — </span>}
+                            {pickedByProduct.map((p) => `${p.title} ${p.n}건`).join(" · ")}
+                          </p>
+                        )}
+                        {skippedNote(preview) && <p className="text-muted-foreground">{skippedNote(preview)}</p>}
+                        {preview.quietHours && <p className="text-red-700 font-semibold">지금은 일본 시간 21~09시입니다 — 고객에게 밤·새벽에 도착합니다.</p>}
+                        {!data.enabled && <p className="text-red-700 font-semibold">LINE_RESTOCK_ENABLED 가 꺼져 있어 보낼 수 없습니다.</p>}
+                        {preview.samples[0] && (
+                          <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded border bg-muted/40 p-2 text-[11px] font-sans">{preview.samples[0]}</pre>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <Button variant="outline" disabled={busy === "send"} onClick={() => setPreview(null)}>
+                  {preview.willSend === 0 ? "닫기" : "취소"}
+                </Button>
+                {preview.willSend > 0 && (
+                  <Button disabled={busy !== null || !data.enabled} onClick={confirmSend}>
+                    <Send className="h-3.5 w-3.5 mr-1" />
+                    {busy === "send" ? "보내는 중…" : `${preview.willSend}명에게 보내기`}
+                  </Button>
+                )}
+              </AlertDialogFooter>
+            </>
+          )}
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -568,7 +622,7 @@ export default function RestockTab({ secret }: { secret: string }) {
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <p className="mb-2 text-[11px] text-muted-foreground">
-            아직 알림을 보내지 않은 신청을 상품별로 묶었습니다 · 「이 상품만 보내기」를 누르면 그 상품의 재입고된 신청만 골라 미리보기를 띄웁니다 — 아래 신청 목록에서 확인 후 한 번 더 눌러야 나갑니다
+            아직 알림을 보내지 않은 신청을 상품별로 묶었습니다 · 「이 상품만 보내기」를 누르면 그 상품의 재입고된 신청만 골라 확인 창을 띄웁니다 — 창에서 「N명에게 보내기」를 한 번 더 눌러야 나갑니다
           </p>
           <table className="w-full text-xs">
             <thead className="border-b text-muted-foreground">
@@ -658,41 +712,6 @@ export default function RestockTab({ secret }: { secret: string }) {
           </Button>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          {preview && (
-            <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 space-y-2">
-              {preview.willSend === 0 ? (
-                <p className="font-semibold">보낼 사람이 없습니다. {skippedNote(preview)}</p>
-              ) : (
-                <>
-                  <p className="font-semibold">
-                    {preview.willSend}명에게 LINE 을 보냅니다 (신청 {preview.ready}건{preview.ready > preview.willSend && " — 한 사람의 여러 옵션은 한 통으로 묶음"})
-                  </p>
-                  {pickedByProduct.length > 0 && (
-                    <p>
-                      {pickedByProduct.length > 1 && <span className="font-semibold text-red-700">상품 {pickedByProduct.length}개가 섞여 있습니다 — </span>}
-                      {pickedByProduct.map((p) => `${p.title} ${p.n}건`).join(" · ")}
-                    </p>
-                  )}
-                  {skippedNote(preview) && <p>{skippedNote(preview)}</p>}
-                  {preview.quietHours && <p className="text-red-700 font-semibold">지금은 일본 시간 21~09시입니다 — 고객에게 밤·새벽에 도착합니다.</p>}
-                  {!data.enabled && <p className="text-red-700 font-semibold">LINE_RESTOCK_ENABLED 가 꺼져 있어 보낼 수 없습니다.</p>}
-                  {preview.samples[0] && (
-                    <pre className="whitespace-pre-wrap rounded border bg-white p-2 text-[11px] text-foreground font-sans">{preview.samples[0]}</pre>
-                  )}
-                </>
-              )}
-              <div className="flex gap-2">
-                {preview.willSend > 0 && (
-                  <Button size="sm" disabled={busy !== null || !data.enabled} onClick={confirmSend}>
-                    {busy === "send" ? "보내는 중…" : `${preview.willSend}명에게 보내기`}
-                  </Button>
-                )}
-                <Button size="sm" variant="outline" disabled={busy === "send"} onClick={() => setPreview(null)}>
-                  취소
-                </Button>
-              </div>
-            </div>
-          )}
           <table className="w-full text-xs">
             <thead className="border-b text-muted-foreground">
               <tr className="[&>th]:py-2 [&>th]:pr-3 [&>th]:font-medium [&>th]:text-left">
