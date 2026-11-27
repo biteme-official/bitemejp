@@ -14,7 +14,7 @@
 export const THANKS_AMOUNT = 500;
 export const THANKS_MIN_SUBTOTAL = 3000;
 export const THANKS_APPLY_START = Date.parse('2026-11-29T00:00:00+09:00');
-export const THANKS_APPLY_END = Date.parse('2026-12-21T23:59:59+09:00');
+export const THANKS_APPLY_END = Date.parse('2026-12-13T23:59:59+09:00');
 
 export function isThanksActive(now = Date.now()): boolean {
   return now >= THANKS_APPLY_START && now <= THANKS_APPLY_END;

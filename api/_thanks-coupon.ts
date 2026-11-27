@@ -26,7 +26,7 @@ export const THANKS_AMOUNT = 500;
 export const THANKS_MIN_SUBTOTAL = 3000;
 /** 쓰이기 시작하는 때 = 발송일. 11/25 결정으로 12/1 → 11/29(일) 로 당김 */
 export const THANKS_STARTS_AT = '2026-11-29T00:00:00+09:00';
-export const THANKS_ENDS_AT = '2026-12-21T23:59:59+09:00';
+export const THANKS_ENDS_AT = '2026-12-13T23:59:59+09:00';
 
 /** 대상: 블프 기간 안에 첫 주문을 한 고객 (japan-mall-retro 블프 회고 「첫 구매자」 와 같은 정의) */
 export const BF_START = '2026-11-09T10:00:00+09:00';

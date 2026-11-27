@@ -98,7 +98,7 @@ export function MyCouponsCard() {
         {hasThanks && (
           <CouponRow
             title={`2回目のお買い物クーポン ¥${THANKS_AMOUNT}OFF`}
-            note={`¥${THANKS_MIN_SUBTOTAL.toLocaleString()}以上のご注文 · 有効期間 11/29(日)〜12/21(月)`}
+            note={`¥${THANKS_MIN_SUBTOTAL.toLocaleString()}以上のご注文 · 有効期間 11/29(日)〜12/13(日)`}
             used={thanks === 'used'}
           />
         )}
